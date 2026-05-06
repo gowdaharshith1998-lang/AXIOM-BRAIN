@@ -1,7 +1,24 @@
 name: CI
 on: [push, pull_request]
 jobs:
-  noop:
+  python:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Phase 1 wires real CI"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e .[dev]
+      - run: ruff check src tests
+      - run: mypy src/axiom
+      - run: pytest -xvs
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: cd frontend && npm install
+      - run: cd frontend && npm run test
+      - run: cd frontend && npm run build
