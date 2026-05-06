@@ -169,3 +169,19 @@ def test_no_calibra_imports_in_phase_1():
 
     assert hits == [], f"Found calibra references in src/: {hits}"
 
+
+def test_no_calibra_imports_in_phase_2():
+    """Calibra is Phase 7. Phase 2 must not import or reference calibra."""
+    src_root = Path(__file__).parent.parent / "src"
+    hits: list[str] = []
+    for path in src_root.rglob("*"):
+        if not path.is_file():
+            continue
+        if path.suffix not in {".py", ".toml", ".txt", ".md"}:
+            continue
+        content = path.read_text(encoding="utf-8", errors="ignore").lower()
+        if "calibra" in content:
+            hits.append(str(path))
+
+    assert hits == [], f"Found calibra references in src/: {hits}"
+
