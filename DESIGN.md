@@ -1090,3 +1090,79 @@ These must be ruled before Phase 1 proceeds.
 
 10. **Skills storage + discovery:** Are skills stored in DB only, filesystem only, or both? The design includes both (`skills` table + markdown bytes). Confirm desired canonical store.
 
+---
+
+### Founder rulings (APPENDIX A) — binding for Phases 1+
+
+### Ruling on Q1: Default policy stance (default-allow vs default-deny)
+
+**Decision:** **DEFAULT-ALLOW** with CORRECT steering as the primary differentiator.
+
+**Rationale:** The whole product thesis is that CORRECT mode (return guidance, agent retries) is the closed-loop differentiator no governance vendor ships. Default-deny reverts to the incumbent allow/deny binary and surrenders the differentiation. Risky modifications get explicit `deny` clauses; everything else flows through `allow` or `correct`.
+
+**Phase that implements:** Phase 9.
+
+### Ruling on Q2: WebSocket replay/backfill semantics
+
+**Decision:** **Sequence-numbered events.** Server keeps last 1000 events in-memory. On client reconnect, client passes `?since=<seq>` and server replays from that sequence number forward. Full backfill: client fetches current state via HTTP, then subscribes from current seq. No persistent event log in v1.
+
+**Rationale:** Bounded memory, simple to reason about, sufficient for single-tenant launch.
+
+**Phase that implements:** Phase 4 (initial broadcast) and Phase 11 (production reconnect handling).
+
+### Ruling on Q3: Merkle anchoring details beyond leaf index
+
+**Decision:** **RFC 6962 Certificate Transparency log structure.** Checkpoints emitted every 1000 leaves OR every hour, whichever first. Each checkpoint produces a Signed Tree Head (STH). Inclusion proofs computed on demand via `axiom_verify_receipt(receipt_id)`. No external append-only anchor in v1; Phase 11 hosted production may add one post-launch.
+
+**Rationale:** RFC 6962 is the standard, mature, audited. Self-hosted is sufficient for launch; external anchoring is a post-launch hardening step.
+
+**Phase that implements:** Phase 10.
+
+### Ruling on Q4: ML-DSA-65 library surface
+
+**Decision:** **`pqcrypto` package** (NIST FIPS 204 reference implementation, audited). No alternatives.
+
+**Rationale:** Audited reference implementation is the only correct choice for crypto. Roll-your-own is non-negotiable malpractice. Already in roadmap deps.
+
+**Phase that implements:** Phase 10.
+
+### Ruling on Q5: Connector watch strategy (webhooks vs polling)
+
+**Decision:** **Hybrid.** Webhooks where the source supports them (Linear, Slack, GitHub, Drive). Polling fallback for sources without (e.g., Gmail's IMAP IDLE counts as a watch primitive). The `Source.watch()` ABC method abstracts the difference at the connector layer; downstream code does not see it.
+
+**Rationale:** Webhooks are lower-latency and cheaper; polling is universal. No reason to pick one when the abstraction can hide the choice.
+
+**Phase that implements:** Phase 12 (Linear, webhook-first) and onward.
+
+### Ruling on Q6: Calibra adapter mapping
+
+**Decision:** **DEFERRED to Phase 7. Calibra integration is explicitly out of scope for Phase 1 and Phase 2.**
+
+**Rationale:** Calibra is being built in parallel in `~/brain-experiments/`. AXIOM-BRAIN should not couple to Calibra's API surface until Calibra Layer 0 is stable and the integration boundary is clean. Schema reserves `metadata.calibra_state` and `metadata.calibra_confidence` JSON keys as inert placeholders so Phase 7 can populate them without a migration. Phase 1+2 must not import or reference Calibra anywhere.
+
+**Phase that implements:** **DEFERRED — Phase 7 will define the adapter when Calibra Layer 0 is locked. Not in Phase 1 or 2.**
+
+### Ruling on Q7: Receipt storage location (DB canonical vs filesystem canonical)
+
+**Decision:** **DB canonical, filesystem mirror.** The `receipts` table in SQLite is the source of truth. Filesystem mirror at `~/.axiom/receipts/<type>/<id>.json` plus detached `.sig` files for offline verification and portability. Both exist; queries always hit the DB; FS is for `axiom-verify-offline` workflow.
+
+**Rationale:** DB queryability is non-negotiable for the studio UI. FS portability is non-negotiable for offline audit. Mirroring is cheap.
+
+**Phase that implements:** Phase 10 (writing both targets); Phase 2 reserves the table.
+
+### Ruling on Q8: Entity id format (ULID vs UUIDv7)
+
+**Decision:** **UUIDv7** (RFC-9562, time-ordered, sortable as string). 32 hex chars stored as `String(32)`.
+
+**Rationale:** UUIDv7 is the modern standard (RFC ratified 2024). Time-ordered for index locality. Sortable as a string. ULID is fine but UUIDv7 has won the standardization race; SQLite, Postgres, and every modern client support it natively. Library: `uuid_utils` (Python) which provides `uuid7()`.
+
+**Phase that implements:** **Phase 2 (binding).**
+
+### Ruling on Q9: Skills canonical store
+
+**Decision:** **DB canonical, filesystem mirror.** Same pattern as receipts. The `skills` table in SQLite holds full content; FS mirror at `~/.axiom/skills/<id>.md` plus `.sig` for portability.
+
+**Rationale:** Same logic as Q7. DB for queryability; FS for portability and `mcp.load_skill` external usage.
+
+**Phase that implements:** Phase 8 (writing both targets); Phase 2 reserves the table.
+
