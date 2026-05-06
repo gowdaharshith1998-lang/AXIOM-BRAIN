@@ -45,12 +45,11 @@ ruflo_walk() {
     echo "ruflo_walk: directory not found: $target_dir" >&2
     return 1
   fi
-  # xargs spawns a new shell which does not inherit functions.
-  # Inline ruflo_lite's definition so the walker works everywhere (CI included).
-  local ruflo_lite_def
-  ruflo_lite_def="$(declare -f ruflo_lite)"
-  find "$target_dir" -name "$pattern" -type f -print0 | \
-    xargs -0 -I {} bash -lc "$ruflo_lite_def; ruflo_lite analyze \"$subcmd\" \"{}\""
+  # Intentionally avoid xargs: it cannot execute shell functions portably.
+  # This walker is safe in CI and any POSIX-ish environment with bash + find.
+  while IFS= read -r -d '' f; do
+    ruflo_lite analyze "$subcmd" "$f"
+  done < <(find "$target_dir" -name "$pattern" -type f -print0)
 }
 
 # ruflo_walk_summary — short summary across many files.
