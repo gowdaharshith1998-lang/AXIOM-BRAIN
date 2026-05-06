@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI, Query, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,23 +12,62 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from axiom.ingest.broadcaster import EventBroadcaster
+from axiom.ingest.pipeline import IngestPipeline
 from axiom.schema.dto import EdgeDTO, EntityDTO
 from axiom.schema.models import Edge, Entity
+from axiom.sources.base import IngestEvent
+from axiom.sources.live_synthetic import LiveSyntheticSource
 
 
-def create_app(*, db_url: str = "sqlite:///./axiom.db") -> FastAPI:
+def create_app(
+    *,
+    db_url: str = "sqlite:///./axiom.db",
+    live: bool = False,
+    live_rate: float = 0.125,
+    live_pause_after: int | None = None,
+) -> FastAPI:
     engine = create_engine(db_url, future=True)
     session_local = sessionmaker(bind=engine, future=True)
     broadcaster = EventBroadcaster()
+    live_source = (
+        LiveSyntheticSource(rate_per_second=live_rate, max_events=live_pause_after)
+        if live
+        else None
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.broadcaster = broadcaster
         app.state.SessionLocal = session_local
-        try:
-            yield
-        finally:
-            engine.dispose()
+        app.state.live_source = live_source
+        app.state.live_task = None
+
+        if live_source is None:
+            try:
+                yield
+            finally:
+                engine.dispose()
+            return
+
+        with session_local() as session:
+            pipeline = IngestPipeline(
+                source=live_source,
+                session=session,
+                broadcaster=broadcaster,
+            )
+            await pipeline.run(since=None)
+
+            async def on_live_event(event: Any) -> None:
+                await pipeline._handle(event)  # noqa: SLF001
+
+            callback = cast(Callable[[IngestEvent], None], on_live_event)
+            async with live_source.watch(callback):
+                app.state.live_task = live_source.task or asyncio.current_task()
+                try:
+                    yield
+                finally:
+                    live_source.cancel()
+                    engine.dispose()
 
     app = FastAPI(title="AXIOM Studio API", lifespan=lifespan)
     app.add_middleware(
@@ -39,7 +79,12 @@ def create_app(*, db_url: str = "sqlite:///./axiom.db") -> FastAPI:
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
-        return {"status": "ok", "current_seq": broadcaster.current_seq}
+        return {
+            "status": "ok",
+            "current_seq": broadcaster.current_seq,
+            "live": live_source is not None,
+            "events_emitted": live_source.events_emitted if live_source is not None else 0,
+        }
 
     @app.get("/api/entities")
     def get_entities() -> list[dict[str, Any]]:

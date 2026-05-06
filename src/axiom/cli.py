@@ -37,7 +37,12 @@ def cmd_serve(args: argparse.Namespace) -> None:
 
     from axiom.studio.server import create_app
 
-    app = create_app(db_url=args.db_url)
+    app = create_app(
+        db_url=args.db_url,
+        live=args.live,
+        live_rate=args.rate,
+        live_pause_after=args.pause_after,
+    )
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 
@@ -55,6 +60,9 @@ def main() -> None:
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8000)
     p_serve.add_argument("--db-url", default="sqlite:///./axiom.db")
+    p_serve.add_argument("--live", action="store_true")
+    p_serve.add_argument("--rate", type=float, default=0.125)
+    p_serve.add_argument("--pause-after", type=int, default=None)
     p_serve.set_defaults(func=cmd_serve)
 
     args = parser.parse_args()
