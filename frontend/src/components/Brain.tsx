@@ -18,6 +18,7 @@
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
@@ -30,10 +31,16 @@ import { AutoOrbitController } from "@/lib/auto-orbit";
 import { envelopePosition } from "@/lib/brain-envelope";
 import { colorForRelationship } from "@/lib/edge-tint";
 import { RollingFpsCounter } from "@/lib/fps";
-import { FpsGuard } from "@/lib/fps-guard";
+import { FpsGuard, type FpsGuardState } from "@/lib/fps-guard";
+import {
+  displayLabelFor,
+  LABEL_FPS_HIDE_THRESHOLD,
+  LABEL_FPS_RECOVER_THRESHOLD,
+  shouldShowLabel,
+} from "@/lib/labels";
 import { colorForType } from "@/lib/palette";
 import { ParticleEffectSystem } from "@/lib/particles/agent-effects";
-import { EdgeShimmer, createEdgeShimmerMaterial } from "@/lib/particles/edge-shimmer";
+import { createEdgeShimmerMaterial, phaseOffsetFromEdgeKey, updateEdgeShimmer } from "@/lib/particles/edge-shimmer";
 import { IdlePulseRunner } from "@/lib/particles/idle-pulse-runner";
 import { createNebulaBackground } from "@/lib/particles/nebula-bg";
 import { OrbitalHalo } from "@/lib/particles/orbital-halo";
@@ -203,6 +210,22 @@ export function Brain() {
     composer.addPass(new RenderPass(scene, camera));
     composer.addPass(new UnrealBloomPass(new THREE.Vector2(width, height), 0.65, 0.6, 0.2));
 
+    // ----- DOM label overlay (non-interactive; OrbitControls keep pointer ownership) -----
+    const labelRenderer = new CSS2DRenderer();
+    labelRenderer.setSize(width, height);
+    labelRenderer.domElement.classList.add("axiom-labels");
+    labelRenderer.domElement.style.position = "absolute";
+    labelRenderer.domElement.style.top = "0";
+    labelRenderer.domElement.style.left = "0";
+    labelRenderer.domElement.style.pointerEvents = "none";
+    labelRenderer.domElement.style.color = "rgba(255, 255, 255, 0.7)";
+    labelRenderer.domElement.style.fontSize = "11px";
+    labelRenderer.domElement.style.fontFamily = "ui-sans-serif, system-ui, sans-serif";
+    labelRenderer.domElement.style.fontWeight = "500";
+    labelRenderer.domElement.style.textShadow = "0 0 2px rgba(0,0,0,0.9), 0 1px 2px rgba(0,0,0,0.7)";
+    labelRenderer.domElement.style.userSelect = "none";
+    el.appendChild(labelRenderer.domElement);
+
     // ----- Build node meshes -----
     const nodeGroup = new THREE.Group();
     scene.add(nodeGroup);
@@ -211,6 +234,7 @@ export function Brain() {
     const ringGeom = new THREE.TorusGeometry(NODE_RADIUS * 2.0, 0.035, 6, 40);
     const meshById = new Map<string, THREE.Mesh>();
     const ringById = new Map<string, THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>>();
+    const labelByNodeId = new Map<string, HTMLDivElement>();
     const neighborIds = new Map<string, Set<string>>();
 
     for (const n of simData.nodes) {
@@ -227,6 +251,29 @@ export function Brain() {
       mesh.userData = { id: n.id, type: n.type };
       nodeGroup.add(mesh);
       meshById.set(n.id, mesh);
+
+      const entity = entities.get(n.id);
+      if (entity) {
+        const labelDiv = document.createElement("div");
+        labelDiv.className = "axiom-label";
+        labelDiv.textContent = displayLabelFor(entity);
+        labelDiv.style.display = "none";
+        labelDiv.style.opacity = "0";
+        labelDiv.style.transition = "opacity 200ms ease-out";
+        labelDiv.style.transform = "translate(-50%, -130%)";
+        labelDiv.style.whiteSpace = "nowrap";
+        labelDiv.style.maxWidth = "200px";
+        labelDiv.style.overflow = "hidden";
+        labelDiv.style.textOverflow = "ellipsis";
+        labelDiv.style.pointerEvents = "none";
+        labelDiv.style.userSelect = "none";
+        labelDiv.style.fontVariantNumeric = "tabular-nums";
+        labelDiv.style.letterSpacing = "0.02em";
+        const labelObj = new CSS2DObject(labelDiv);
+        labelObj.position.set(0, NODE_RADIUS * 1.45, 0);
+        mesh.add(labelObj);
+        labelByNodeId.set(n.id, labelDiv);
+      }
 
       const ringMat = new THREE.MeshBasicMaterial({
         color,
@@ -252,17 +299,22 @@ export function Brain() {
     // ----- Build edge geometry (one LineSegments for all edges) -----
     const edgeCount = simData.links.length;
     const edgePositions = new Float32Array(edgeCount * 2 * 3);
-    const edgeColors = new Float32Array(edgeCount * 2 * 3);
+    const edgeColors = new Float32Array(edgeCount * 2 * 4);
     const edgeGeom = new THREE.BufferGeometry();
     edgeGeom.setAttribute("position", new THREE.BufferAttribute(edgePositions, 3));
-    edgeGeom.setAttribute("color", new THREE.BufferAttribute(edgeColors, 3));
+    edgeGeom.setAttribute("color", new THREE.BufferAttribute(edgeColors, 4));
     const edgeMat = createEdgeShimmerMaterial();
     const edgeLines = new THREE.LineSegments(edgeGeom, edgeMat);
     scene.add(edgeLines);
-    const edgeShimmer = new EdgeShimmer(
-      simData.links.map((link) => link.id),
-      edgeGeom,
-    );
+    const edgeKeys = simData.links.map((link) => link.id);
+    const edgeRelationships = simData.links.map((link) => link.relationship);
+    const edgePhases = new Map(edgeKeys.map((key) => [key, phaseOffsetFromEdgeKey(key)]));
+    const edgeShimmerSpec = {
+      geom: edgeGeom,
+      edgeKeys,
+      edgeRelationships,
+      phases: edgePhases,
+    };
 
     const particleSystem = new ParticleEffectSystem();
     scene.add(particleSystem.points);
@@ -304,16 +356,12 @@ export function Brain() {
 
       const posAttr = edgeGeom.attributes.position as THREE.BufferAttribute;
       const arr = posAttr.array as Float32Array;
-      const colorAttr = edgeGeom.attributes.color as THREE.BufferAttribute;
-      const colorArr = colorAttr.array as Float32Array;
       let idx = 0;
-      let colorIdx = 0;
       for (const link of simData.links) {
         const src = typeof link.source === "object" ? link.source : undefined;
         const tgt = typeof link.target === "object" ? link.target : undefined;
         if (!src || !tgt) {
           idx += 6;
-          colorIdx += 6;
           continue;
         }
         arr[idx++] = src.x ?? 0;
@@ -322,16 +370,8 @@ export function Brain() {
         arr[idx++] = tgt.x ?? 0;
         arr[idx++] = tgt.y ?? 0;
         arr[idx++] = tgt.z ?? 0;
-
-        const edgeColor = new THREE.Color(colorForRelationship(link.relationship));
-        for (let i = 0; i < 2; i++) {
-          colorArr[colorIdx++] = edgeColor.r;
-          colorArr[colorIdx++] = edgeColor.g;
-          colorArr[colorIdx++] = edgeColor.b;
-        }
       }
       posAttr.needsUpdate = true;
-      colorAttr.needsUpdate = true;
     };
 
     // ----- Interaction: hover rings, click focus, auto-orbit wake -----
@@ -395,6 +435,9 @@ export function Brain() {
     const pulseRunner = new IdlePulseRunner();
     let raf = 0;
     let lastFrameMs = 0;
+    let labelFpsState: FpsGuardState = "full";
+    let labelBelowThresholdSince: number | null = null;
+    let labelRecoverSince: number | null = null;
 
     const processLiveEvents = (nowMs: number) => {
       const deferred: BrainEvent[] = [];
@@ -443,6 +486,60 @@ export function Brain() {
       liveEventsRef.current = deferred.slice(-20);
     };
 
+    const updateLabelFpsState = (currentFps: number, nowMs: number) => {
+      if (currentFps < LABEL_FPS_HIDE_THRESHOLD) {
+        labelBelowThresholdSince ??= nowMs;
+        labelRecoverSince = null;
+        if (nowMs - labelBelowThresholdSince >= 5000) {
+          labelFpsState = "emergency";
+        }
+        return;
+      }
+
+      labelBelowThresholdSince = null;
+      if (labelFpsState === "emergency") {
+        if (currentFps > LABEL_FPS_RECOVER_THRESHOLD) {
+          labelRecoverSince ??= nowMs;
+          if (nowMs - labelRecoverSince >= 3000) {
+            labelFpsState = "full";
+          }
+        } else {
+          labelRecoverSince = null;
+        }
+        return;
+      }
+
+      labelFpsState = fpsGuard.state();
+    };
+
+    const updateLabelVisibility = () => {
+      const selectedId = useBrainStore.getState().selectedId;
+      const selectedNeighborIds = selectedId ? (neighborIds.get(selectedId) ?? new Set<string>()) : new Set<string>();
+
+      for (const [nodeId, labelDiv] of labelByNodeId) {
+        const mesh = meshById.get(nodeId);
+        if (!mesh) continue;
+        const visible = shouldShowLabel({
+          nodeId,
+          cameraDistance: camera.position.distanceTo(mesh.position),
+          selectedId,
+          selectedNeighborIds,
+          fpsGuardState: labelFpsState,
+        });
+
+        if (visible) {
+          if (labelDiv.style.display === "none") {
+            labelDiv.style.display = "block";
+            labelDiv.style.opacity = "0";
+          }
+          labelDiv.style.opacity = "1";
+        } else {
+          labelDiv.style.opacity = "0";
+          labelDiv.style.display = "none";
+        }
+      }
+    };
+
     const updateHoverAndRings = () => {
       const hoveredId = hoveredIdRef.current;
       const activeNeighbors = hoveredId ? neighborIds.get(hoveredId) : null;
@@ -474,9 +571,9 @@ export function Brain() {
         }
       }
 
-      const alphaAttr = edgeGeom.getAttribute("edgeAlpha");
-      if (!(alphaAttr instanceof THREE.BufferAttribute)) return;
-      const alphaArr = alphaAttr.array as Float32Array;
+      const colorAttr = edgeGeom.getAttribute("color");
+      if (!(colorAttr instanceof THREE.BufferAttribute)) return;
+      const colorArr = colorAttr.array as Float32Array;
       simData.links.forEach((link, i) => {
         const until = flashByEdge.get(link.id);
         if (until === undefined) return;
@@ -485,10 +582,10 @@ export function Brain() {
           return;
         }
         const alpha = 0.45 * ((until - nowMs) / 600);
-        alphaArr[i * 2] = Math.max(alphaArr[i * 2], alpha);
-        alphaArr[i * 2 + 1] = Math.max(alphaArr[i * 2 + 1], alpha);
+        colorArr[i * 8 + 3] = Math.max(colorArr[i * 8 + 3], alpha);
+        colorArr[i * 8 + 7] = Math.max(colorArr[i * 8 + 7], alpha);
       });
-      alphaAttr.needsUpdate = true;
+      colorAttr.needsUpdate = true;
     };
 
     const tick = (t: number) => {
@@ -499,7 +596,12 @@ export function Brain() {
       processLiveEvents(t);
       nebula.update(t);
       pulseRunner.update(meshById, t);
-      edgeShimmer.update(t);
+      try {
+        updateEdgeShimmer(edgeShimmerSpec, t);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[Brain] edge shimmer update failed:", err);
+      }
       updateHoverAndRings();
       updateFlashes(t);
       particleSystem.setParticleMultiplier(fpsGuard.particleMultiplier());
@@ -510,6 +612,7 @@ export function Brain() {
       if (v) {
         setFps(v);
         fpsGuard.sample(v, t);
+        updateLabelFpsState(v, t);
       }
 
       if (focusTargetRef.current) {
@@ -523,8 +626,20 @@ export function Brain() {
       }
 
       autoOrbit.applyToCamera(camera, t, dtMs);
+      try {
+        updateLabelVisibility();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[Brain] label visibility update failed:", err);
+      }
       controls.update();
       composer.render();
+      try {
+        labelRenderer.render(scene, camera);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[Brain] label render failed:", err);
+      }
       raf = window.requestAnimationFrame(tick);
     };
     raf = window.requestAnimationFrame(tick);
@@ -537,6 +652,7 @@ export function Brain() {
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
       composer.setSize(w, h);
+      labelRenderer.setSize(w, h);
     };
     window.addEventListener("resize", onResize);
 
@@ -559,6 +675,7 @@ export function Brain() {
       ringGeom.dispose();
       edgeGeom.dispose();
       edgeMat.dispose();
+      labelByNodeId.clear();
       meshById.forEach((m) => {
         (m.material as THREE.Material).dispose();
       });
@@ -568,8 +685,11 @@ export function Brain() {
       if (renderer.domElement.parentNode === el) {
         el.removeChild(renderer.domElement);
       }
+      if (labelRenderer.domElement.parentNode === el) {
+        el.removeChild(labelRenderer.domElement);
+      }
     };
-  }, [simData, select, setFps]);
+  }, [entities, simData, select, setFps]);
 
   return <div ref={containerRef} className="absolute inset-0" aria-hidden="true" />;
 }

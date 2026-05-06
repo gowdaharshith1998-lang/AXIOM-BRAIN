@@ -1,10 +1,13 @@
 import * as THREE from "three";
 
+import { colorForRelationship } from "@/lib/edge-tint";
+
 const MIN_OPACITY = 0.1;
 const MAX_OPACITY = 0.22;
+const TWO_PI = Math.PI * 2;
 
-function hashToUnit(id: string, salt: number): number {
-  let hash = 2166136261 ^ salt;
+function hashToUnit(id: string): number {
+  let hash = 2166136261;
   for (let i = 0; i < id.length; i++) {
     hash ^= id.charCodeAt(i);
     hash = Math.imul(hash, 16777619);
@@ -12,41 +15,24 @@ function hashToUnit(id: string, salt: number): number {
   return (hash >>> 0) / 4294967296;
 }
 
-export function shimmerOpacity(edgeId: string, timeMs: number): number {
-  const t = timeMs / 1000;
-  const p1 = hashToUnit(edgeId, 11) * Math.PI * 2;
-  const p2 = hashToUnit(edgeId, 17) * Math.PI * 2;
-  const p3 = hashToUnit(edgeId, 23) * Math.PI * 2;
-  const fbm =
-    Math.sin(t * 0.7 + p1) * 0.5 +
-    Math.sin(t * 1.3 + p2) * 0.3 +
-    Math.sin(t * 2.1 + p3) * 0.2;
-  const normalized = (fbm + 1) / 2;
-  return MIN_OPACITY + normalized * (MAX_OPACITY - MIN_OPACITY);
+export function phaseOffsetFromEdgeKey(edgeKey: string): number {
+  return hashToUnit(edgeKey) * TWO_PI;
 }
 
-export function createEdgeShimmerMaterial(): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
-    uniforms: {},
-    vertexShader: `
-      attribute float edgeAlpha;
-      varying float vAlpha;
-      varying vec3 vColor;
+export function computeEdgeOpacity(timeMs: number, phaseOffset: number): number {
+  const t = timeMs / 2000 + phaseOffset;
+  const octave1 = (Math.sin(t) + 1) / 2;
+  const octave2 = (Math.sin(t * 2.07 + phaseOffset * 0.37) + 1) / 2;
+  const fbm = octave1 * 0.68 + octave2 * 0.32;
+  return MIN_OPACITY + fbm * (MAX_OPACITY - MIN_OPACITY);
+}
 
-      void main() {
-        vAlpha = edgeAlpha;
-        vColor = color;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      varying float vAlpha;
-      varying vec3 vColor;
+export function shimmerOpacity(edgeId: string, timeMs: number): number {
+  return computeEdgeOpacity(timeMs, phaseOffsetFromEdgeKey(edgeId));
+}
 
-      void main() {
-        gl_FragColor = vec4(vColor, vAlpha);
-      }
-    `,
+export function createEdgeShimmerMaterial(): THREE.LineBasicMaterial {
+  return new THREE.LineBasicMaterial({
     transparent: true,
     depthWrite: false,
     vertexColors: true,
@@ -54,25 +40,58 @@ export function createEdgeShimmerMaterial(): THREE.ShaderMaterial {
   });
 }
 
+export interface EdgeShimmerSpec {
+  geom: THREE.BufferGeometry;
+  edgeKeys: ReadonlyArray<string>;
+  edgeRelationships: ReadonlyArray<string>;
+  phases: ReadonlyMap<string, number>;
+}
+
+export function updateEdgeShimmer(spec: EdgeShimmerSpec, timeMs: number): void {
+  const colorAttr = spec.geom.getAttribute("color");
+  if (!(colorAttr instanceof THREE.BufferAttribute)) return;
+
+  const arr = colorAttr.array as Float32Array;
+  const color = new THREE.Color();
+  let i = 0;
+
+  for (let edgeIndex = 0; edgeIndex < spec.edgeKeys.length; edgeIndex++) {
+    const key = spec.edgeKeys[edgeIndex];
+    color.set(colorForRelationship(spec.edgeRelationships[edgeIndex] ?? ""));
+    const opacity = computeEdgeOpacity(timeMs, spec.phases.get(key) ?? 0);
+
+    arr[i++] = color.r;
+    arr[i++] = color.g;
+    arr[i++] = color.b;
+    arr[i++] = opacity;
+    arr[i++] = color.r;
+    arr[i++] = color.g;
+    arr[i++] = color.b;
+    arr[i++] = opacity;
+  }
+
+  colorAttr.needsUpdate = true;
+}
+
 export class EdgeShimmer {
-  private readonly alphaAttr: THREE.BufferAttribute;
+  private readonly phases: ReadonlyMap<string, number>;
 
   constructor(
     private readonly edgeIds: readonly string[],
-    geometry: THREE.BufferGeometry,
+    private readonly geometry: THREE.BufferGeometry,
   ) {
-    const alphas = new Float32Array(edgeIds.length * 2);
-    this.alphaAttr = new THREE.BufferAttribute(alphas, 1);
-    geometry.setAttribute("edgeAlpha", this.alphaAttr);
+    this.phases = new Map(edgeIds.map((id) => [id, phaseOffsetFromEdgeKey(id)]));
   }
 
   update(timeMs: number): void {
-    const arr = this.alphaAttr.array as Float32Array;
-    for (let i = 0; i < this.edgeIds.length; i++) {
-      const alpha = shimmerOpacity(this.edgeIds[i], timeMs);
-      arr[i * 2] = alpha;
-      arr[i * 2 + 1] = alpha;
-    }
-    this.alphaAttr.needsUpdate = true;
+    updateEdgeShimmer(
+      {
+        geom: this.geometry,
+        edgeKeys: this.edgeIds,
+        edgeRelationships: [],
+        phases: this.phases,
+      },
+      timeMs,
+    );
   }
 }
