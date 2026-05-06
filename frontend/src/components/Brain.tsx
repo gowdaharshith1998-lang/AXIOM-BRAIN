@@ -25,7 +25,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 // d3-force-3d currently publishes no TypeScript declarations.
 // @ts-expect-error missing declaration file for d3-force-3d
 import { forceSimulation, forceManyBody, forceLink, forceCenter } from "d3-force-3d";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AutoOrbitController } from "@/lib/auto-orbit";
 import { envelopePosition } from "@/lib/brain-envelope";
@@ -45,6 +45,12 @@ import { IdlePulseRunner } from "@/lib/particles/idle-pulse-runner";
 import { createNebulaBackground } from "@/lib/particles/nebula-bg";
 import { OrbitalHalo } from "@/lib/particles/orbital-halo";
 import { spawnEdgeTrace, spawnEntityArrival } from "@/lib/particles/reactive-spawn";
+import {
+  createSynapticFlow,
+  disposeSynapticFlow,
+  updateSynapticFlow,
+  type SynapticFlowEdge,
+} from "@/lib/particles/synaptic-flow";
 import { hasWebGPU, preferredRendererKind } from "@/lib/webgpu-detect";
 import { BrainSocket } from "@/lib/websocket";
 import type { BrainEvent } from "@/lib/websocket";
@@ -85,12 +91,12 @@ export function Brain() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const focusTargetRef = useRef<THREE.Vector3 | null>(null);
   const liveEventsRef = useRef<BrainEvent[]>([]);
+  const [sceneReady, setSceneReady] = useState(false);
 
   const setFps = useBrainStore((s) => s.setFps);
   const applyEvent = useBrainStore((s) => s.applyEvent);
   const bootstrap = useBrainStore((s) => s.bootstrap);
   const select = useBrainStore((s) => s.select);
-  const hasBootstrapped = useBrainStore((s) => s.entities.size > 0);
 
   // -- Bootstrap data from REST --
   useEffect(() => {
@@ -103,6 +109,7 @@ export function Brain() {
         ]);
         if (cancelled) return;
         bootstrap(ents as Entity[], eds as Edge[]);
+        setSceneReady(true);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error("[Brain] bootstrap failed:", err);
@@ -132,7 +139,7 @@ export function Brain() {
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    if (!hasBootstrapped) return; // wait for bootstrap
+    if (!sceneReady) return; // wait for REST bootstrap so initial edges are present
 
     const { entities, edges } = useBrainStore.getState();
     const simData = (() => {
@@ -301,12 +308,18 @@ export function Brain() {
     const edgeGeom = new THREE.BufferGeometry();
     edgeGeom.setAttribute("position", new THREE.BufferAttribute(edgePositions, 3));
     edgeGeom.setAttribute("color", new THREE.BufferAttribute(edgeColors, 4));
+    edgeGeom.setDrawRange(0, edgeCount * 2);
     const edgeMat = createEdgeShimmerMaterial();
     const edgeLines = new THREE.LineSegments(edgeGeom, edgeMat);
     scene.add(edgeLines);
     const edgeKeys = simData.links.map((link) => link.id);
     const edgeRelationships = simData.links.map((link) => link.relationship);
     const edgePhases = new Map(edgeKeys.map((key) => [key, phaseOffsetFromEdgeKey(key)]));
+    const synapticEdges: SynapticFlowEdge[] = simData.links.map((link) => {
+      const sourceId = typeof link.source === "string" ? link.source : link.source.id;
+      const targetId = typeof link.target === "string" ? link.target : link.target.id;
+      return { id: link.id, sourceId, targetId, relationship: link.relationship };
+    });
     const edgeShimmerSpec = {
       geom: edgeGeom,
       edgeKeys,
@@ -331,6 +344,12 @@ export function Brain() {
 
     const particleSystem = new ParticleEffectSystem();
     scene.add(particleSystem.points);
+    const synapticFlow = createSynapticFlow(scene, synapticEdges, edgePhases, (edge) => {
+      const source = meshById.get(edge.sourceId);
+      const target = meshById.get(edge.targetId);
+      if (!source || !target) return null;
+      return { source: source.position, target: target.position };
+    });
 
     let orbitalHalo: OrbitalHalo | null = null;
 
@@ -481,7 +500,14 @@ export function Brain() {
       edgeKeys.push(edge.id);
       edgeRelationships.push(edge.relationship);
       edgePhases.set(edge.id, phaseOffsetFromEdgeKey(edge.id));
+      synapticEdges.push({
+        id: edge.id,
+        sourceId: edge.source_id,
+        targetId: edge.target_id,
+        relationship: edge.relationship,
+      });
       resizeEdgeBuffers();
+      synapticFlow.setEdges(synapticEdges);
       linkForce.links(simData.links);
       warmSimulation(0.05);
     };
@@ -644,9 +670,10 @@ export function Brain() {
       pulseRunner.update(meshById, t);
       try {
         updateEdgeShimmer(edgeShimmerSpec, t);
+        updateSynapticFlow(t, dtMs, fpsGuard.state());
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.error("[Brain] edge shimmer update failed:", err);
+        console.error("[Brain] edge activity update failed:", err);
       }
       updateHoverAndRings();
       updateFlashes(t);
@@ -715,6 +742,7 @@ export function Brain() {
       composer.dispose();
       nebula.dispose();
       particleSystem.dispose();
+      disposeSynapticFlow();
       orbitalHalo?.dispose();
       renderer.dispose();
       sphereGeom.dispose();
@@ -735,7 +763,7 @@ export function Brain() {
         el.removeChild(labelRenderer.domElement);
       }
     };
-  }, [hasBootstrapped, select, setFps]);
+  }, [sceneReady, select, setFps]);
 
   return <div ref={containerRef} className="absolute inset-0" aria-hidden="true" />;
 }
