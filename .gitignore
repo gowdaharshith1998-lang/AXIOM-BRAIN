@@ -23,3 +23,8 @@ axiom.db-wal
 *.log
 .vscode/
 .idea/
+
+# Ruflo / claude-flow init artifacts (added 2026-05-06 via Phase 5 pre-flight)
+.claude/
+.mcp.json
+CLAUDE.md
