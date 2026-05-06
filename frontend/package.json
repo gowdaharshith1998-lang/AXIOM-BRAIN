@@ -10,12 +10,12 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "d3-force-3d": "^3.0.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "zustand": "^5.0.0",
     "three": "^0.171.0",
     "three-nebula": "^10.0.3",
-    "3d-force-graph": "^1.73.0"
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.0",
