@@ -19,3 +19,9 @@ build/
 *.log
 .vscode/
 .idea/
+.claude/
+.claude-flow/
+.swarm/
+.mcp.json
+axiom.db
+ruvector.db
