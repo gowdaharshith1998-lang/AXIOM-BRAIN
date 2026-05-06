@@ -1,3 +1,2335 @@
 {
-  "note": "Phase 0 placeholder fixture. Phase 3 defines canonical synthetic company fixture schema."
+  "edges": [
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_THREAD",
+      "source_nick": "decision-00",
+      "target_nick": "thread-00"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-00",
+      "target_nick": "doc-00"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-asha-patel",
+      "target_nick": "thread-00"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-00",
+      "target_nick": "person-asha-patel"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-00",
+      "target_nick": "process-00"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-00",
+      "target_nick": "doc-00"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_THREAD",
+      "source_nick": "decision-01",
+      "target_nick": "thread-01"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-01",
+      "target_nick": "doc-01"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-diego-santos",
+      "target_nick": "thread-01"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-01",
+      "target_nick": "person-diego-santos"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-01",
+      "target_nick": "process-01"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-01",
+      "target_nick": "doc-01"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_THREAD",
+      "source_nick": "decision-02",
+      "target_nick": "thread-02"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-02",
+      "target_nick": "doc-02"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-kwame-mensah",
+      "target_nick": "thread-02"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-02",
+      "target_nick": "person-kwame-mensah"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-02",
+      "target_nick": "process-02"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-02",
+      "target_nick": "doc-02"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_THREAD",
+      "source_nick": "decision-03",
+      "target_nick": "thread-03"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-03",
+      "target_nick": "doc-03"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-mina-hassan",
+      "target_nick": "thread-03"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-03",
+      "target_nick": "person-mina-hassan"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-03",
+      "target_nick": "process-03"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-03",
+      "target_nick": "doc-03"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_THREAD",
+      "source_nick": "decision-04",
+      "target_nick": "thread-04"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-04",
+      "target_nick": "doc-04"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-oksana-kovalenko",
+      "target_nick": "thread-04"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-04",
+      "target_nick": "person-oksana-kovalenko"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-04",
+      "target_nick": "process-04"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-04",
+      "target_nick": "doc-04"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-asha-patel",
+      "target_nick": "thread-10"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-asha-patel",
+      "target_nick": "thread-23"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-diego-santos",
+      "target_nick": "thread-22"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-diego-santos",
+      "target_nick": "thread-13"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-kwame-mensah",
+      "target_nick": "thread-17"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-kwame-mensah",
+      "target_nick": "thread-04"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-mina-hassan",
+      "target_nick": "thread-10"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-mina-hassan",
+      "target_nick": "thread-34"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-oksana-kovalenko",
+      "target_nick": "thread-15"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-oksana-kovalenko",
+      "target_nick": "thread-10"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-pratiksha-iyer",
+      "target_nick": "thread-29"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-pratiksha-iyer",
+      "target_nick": "thread-24"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-samir-khan",
+      "target_nick": "thread-17"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-samir-khan",
+      "target_nick": "thread-35"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-yuki-tanaka",
+      "target_nick": "thread-14"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_PARTICIPATES_IN_THREAD",
+      "source_nick": "person-yuki-tanaka",
+      "target_nick": "thread-20"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-00",
+      "target_nick": "person-asha-patel"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-00",
+      "target_nick": "process-03"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-01",
+      "target_nick": "person-asha-patel"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-01",
+      "target_nick": "process-05"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-02",
+      "target_nick": "person-samir-khan"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-02",
+      "target_nick": "process-04"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-03",
+      "target_nick": "person-diego-santos"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-03",
+      "target_nick": "process-03"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-04",
+      "target_nick": "person-pratiksha-iyer"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-04",
+      "target_nick": "process-03"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-05",
+      "target_nick": "person-yuki-tanaka"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-05",
+      "target_nick": "process-06"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-06",
+      "target_nick": "person-yuki-tanaka"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-06",
+      "target_nick": "process-02"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-07",
+      "target_nick": "person-oksana-kovalenko"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-07",
+      "target_nick": "process-02"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-08",
+      "target_nick": "person-mina-hassan"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-08",
+      "target_nick": "process-04"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-09",
+      "target_nick": "person-samir-khan"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-09",
+      "target_nick": "process-06"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-10",
+      "target_nick": "person-pratiksha-iyer"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-10",
+      "target_nick": "process-03"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-11",
+      "target_nick": "person-kwame-mensah"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-11",
+      "target_nick": "process-07"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-12",
+      "target_nick": "person-diego-santos"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-12",
+      "target_nick": "process-00"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-13",
+      "target_nick": "person-diego-santos"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-13",
+      "target_nick": "process-02"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-14",
+      "target_nick": "person-kwame-mensah"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-14",
+      "target_nick": "process-06"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-15",
+      "target_nick": "person-diego-santos"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-15",
+      "target_nick": "process-06"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-16",
+      "target_nick": "person-samir-khan"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-16",
+      "target_nick": "process-07"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_ASSIGNED_TO_PERSON",
+      "source_nick": "ticket-17",
+      "target_nick": "person-oksana-kovalenko"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_BELONGS_TO_PROCESS",
+      "source_nick": "ticket-17",
+      "target_nick": "process-00"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_THREAD",
+      "source_nick": "decision-00",
+      "target_nick": "thread-07"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-00",
+      "target_nick": "doc-10"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_THREAD",
+      "source_nick": "decision-01",
+      "target_nick": "thread-34"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-01",
+      "target_nick": "doc-12"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_THREAD",
+      "source_nick": "decision-02",
+      "target_nick": "thread-17"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-02",
+      "target_nick": "doc-12"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_THREAD",
+      "source_nick": "decision-03",
+      "target_nick": "thread-21"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-03",
+      "target_nick": "doc-01"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_THREAD",
+      "source_nick": "decision-04",
+      "target_nick": "thread-18"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-04",
+      "target_nick": "doc-06"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_THREAD",
+      "source_nick": "decision-05",
+      "target_nick": "thread-10"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-05",
+      "target_nick": "doc-07"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_THREAD",
+      "source_nick": "decision-06",
+      "target_nick": "thread-00"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-06",
+      "target_nick": "doc-11"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_THREAD",
+      "source_nick": "decision-07",
+      "target_nick": "thread-16"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-07",
+      "target_nick": "doc-08"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_THREAD",
+      "source_nick": "decision-08",
+      "target_nick": "thread-11"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-08",
+      "target_nick": "doc-08"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_THREAD",
+      "source_nick": "decision-09",
+      "target_nick": "thread-06"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-09",
+      "target_nick": "doc-13"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-00",
+      "target_nick": "doc-10"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-00",
+      "target_nick": "doc-04"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-01",
+      "target_nick": "doc-13"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-01",
+      "target_nick": "doc-10"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-02",
+      "target_nick": "doc-08"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-02",
+      "target_nick": "doc-09"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-03",
+      "target_nick": "doc-03"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-03",
+      "target_nick": "doc-02"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-04",
+      "target_nick": "doc-05"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-04",
+      "target_nick": "doc-12"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-05",
+      "target_nick": "doc-02"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-05",
+      "target_nick": "doc-08"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-06",
+      "target_nick": "doc-12"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-06",
+      "target_nick": "doc-08"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-07",
+      "target_nick": "doc-00"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_DESCRIBED_BY_DOCUMENT",
+      "source_nick": "process-07",
+      "target_nick": "doc-09"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-05",
+      "target_nick": "doc-00"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-07",
+      "target_nick": "doc-01"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-00",
+      "target_nick": "doc-02"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-01",
+      "target_nick": "doc-03"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-05",
+      "target_nick": "doc-04"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-04",
+      "target_nick": "doc-05"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-03",
+      "target_nick": "doc-06"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-00",
+      "target_nick": "doc-07"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-03",
+      "target_nick": "doc-08"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-09",
+      "target_nick": "doc-09"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-01",
+      "target_nick": "doc-10"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-01",
+      "target_nick": "doc-11"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-07",
+      "target_nick": "doc-12"
+    },
+    {
+      "data": {},
+      "relationship": "DECISION_REFERENCES_DOCUMENT",
+      "source_nick": "decision-01",
+      "target_nick": "doc-13"
+    },
+    {
+      "data": {},
+      "relationship": "CODE_IMPLEMENTS_PROCESS",
+      "source_nick": "code-00",
+      "target_nick": "process-02"
+    },
+    {
+      "data": {},
+      "relationship": "CODE_RESOLVES_TICKET",
+      "source_nick": "code-00",
+      "target_nick": "ticket-04"
+    },
+    {
+      "data": {},
+      "relationship": "CODE_IMPLEMENTS_PROCESS",
+      "source_nick": "code-01",
+      "target_nick": "process-07"
+    },
+    {
+      "data": {},
+      "relationship": "CODE_RESOLVES_TICKET",
+      "source_nick": "code-01",
+      "target_nick": "ticket-17"
+    },
+    {
+      "data": {},
+      "relationship": "CODE_IMPLEMENTS_PROCESS",
+      "source_nick": "code-02",
+      "target_nick": "process-02"
+    },
+    {
+      "data": {},
+      "relationship": "CODE_RESOLVES_TICKET",
+      "source_nick": "code-02",
+      "target_nick": "ticket-08"
+    },
+    {
+      "data": {},
+      "relationship": "CODE_IMPLEMENTS_PROCESS",
+      "source_nick": "code-03",
+      "target_nick": "process-06"
+    },
+    {
+      "data": {},
+      "relationship": "CODE_RESOLVES_TICKET",
+      "source_nick": "code-03",
+      "target_nick": "ticket-06"
+    },
+    {
+      "data": {},
+      "relationship": "CODE_IMPLEMENTS_PROCESS",
+      "source_nick": "code-04",
+      "target_nick": "process-03"
+    },
+    {
+      "data": {},
+      "relationship": "CODE_RESOLVES_TICKET",
+      "source_nick": "code-04",
+      "target_nick": "ticket-09"
+    },
+    {
+      "data": {},
+      "relationship": "CODE_IMPLEMENTS_PROCESS",
+      "source_nick": "code-05",
+      "target_nick": "process-06"
+    },
+    {
+      "data": {},
+      "relationship": "CODE_RESOLVES_TICKET",
+      "source_nick": "code-05",
+      "target_nick": "ticket-11"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_IMPACTS_DECISION",
+      "source_nick": "ticket-16",
+      "target_nick": "decision-07"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_AUTHORED_DOCUMENT",
+      "source_nick": "person-mina-hassan",
+      "target_nick": "doc-03"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_AUTHORED_DOCUMENT",
+      "source_nick": "person-pratiksha-iyer",
+      "target_nick": "doc-00"
+    },
+    {
+      "data": {},
+      "relationship": "DOCUMENT_REFERENCED_BY_DECISION",
+      "source_nick": "doc-09",
+      "target_nick": "decision-03"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_WATCHES_TICKET",
+      "source_nick": "person-diego-santos",
+      "target_nick": "ticket-01"
+    },
+    {
+      "data": {},
+      "relationship": "DOCUMENT_REFERENCED_BY_DECISION",
+      "source_nick": "doc-01",
+      "target_nick": "decision-00"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_REFERENCES_DOCUMENT",
+      "source_nick": "ticket-02",
+      "target_nick": "doc-08"
+    },
+    {
+      "data": {},
+      "relationship": "DOCUMENT_REFERENCED_BY_DECISION",
+      "source_nick": "doc-04",
+      "target_nick": "decision-07"
+    },
+    {
+      "data": {},
+      "relationship": "DOCUMENT_REFERENCED_BY_DECISION",
+      "source_nick": "doc-08",
+      "target_nick": "decision-02"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_IMPACTS_DECISION",
+      "source_nick": "ticket-07",
+      "target_nick": "decision-07"
+    },
+    {
+      "data": {},
+      "relationship": "THREAD_REFERENCES_DOCUMENT",
+      "source_nick": "thread-12",
+      "target_nick": "doc-01"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_AUTHORED_DOCUMENT",
+      "source_nick": "person-samir-khan",
+      "target_nick": "doc-05"
+    },
+    {
+      "data": {},
+      "relationship": "THREAD_REFERENCES_DOCUMENT",
+      "source_nick": "thread-26",
+      "target_nick": "doc-07"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_WATCHES_TICKET",
+      "source_nick": "person-diego-santos",
+      "target_nick": "ticket-01"
+    },
+    {
+      "data": {},
+      "relationship": "THREAD_REFERENCES_DOCUMENT",
+      "source_nick": "thread-21",
+      "target_nick": "doc-12"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_AUTHORED_DOCUMENT",
+      "source_nick": "person-mina-hassan",
+      "target_nick": "doc-03"
+    },
+    {
+      "data": {},
+      "relationship": "DOCUMENT_REFERENCED_BY_DECISION",
+      "source_nick": "doc-08",
+      "target_nick": "decision-07"
+    },
+    {
+      "data": {},
+      "relationship": "THREAD_DISCUSSES_TICKET",
+      "source_nick": "thread-27",
+      "target_nick": "ticket-05"
+    },
+    {
+      "data": {},
+      "relationship": "PROCESS_REFERENCES_THREAD",
+      "source_nick": "process-07",
+      "target_nick": "thread-15"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_AUTHORED_DOCUMENT",
+      "source_nick": "person-yuki-tanaka",
+      "target_nick": "doc-12"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_AUTHORED_DOCUMENT",
+      "source_nick": "person-asha-patel",
+      "target_nick": "doc-10"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_WATCHES_TICKET",
+      "source_nick": "person-diego-santos",
+      "target_nick": "ticket-07"
+    },
+    {
+      "data": {},
+      "relationship": "THREAD_DISCUSSES_TICKET",
+      "source_nick": "thread-26",
+      "target_nick": "ticket-15"
+    },
+    {
+      "data": {},
+      "relationship": "TICKET_IMPACTS_DECISION",
+      "source_nick": "ticket-06",
+      "target_nick": "decision-06"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_WATCHES_TICKET",
+      "source_nick": "person-kwame-mensah",
+      "target_nick": "ticket-12"
+    },
+    {
+      "data": {},
+      "relationship": "PERSON_WATCHES_TICKET",
+      "source_nick": "person-samir-khan",
+      "target_nick": "ticket-08"
+    }
+  ],
+  "entities": [
+    {
+      "data": {
+        "file_path": "src/axiom/ingest/pipeline.py",
+        "kind": "file",
+        "language": "python"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "code-00",
+      "type": "code"
+    },
+    {
+      "data": {
+        "file_path": "src/axiom/studio/server.py",
+        "kind": "module",
+        "language": "typescript"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "code-01",
+      "type": "code"
+    },
+    {
+      "data": {
+        "file_path": "src/axiom/storage/crud.py",
+        "kind": "file",
+        "language": "python"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "code-02",
+      "type": "code"
+    },
+    {
+      "data": {
+        "file_path": "frontend/src/components/Brain.tsx",
+        "kind": "module",
+        "language": "typescript"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "code-03",
+      "type": "code"
+    },
+    {
+      "data": {
+        "file_path": "scripts/generate_fixture.py",
+        "kind": "file",
+        "language": "python"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "code-04",
+      "type": "code"
+    },
+    {
+      "data": {
+        "file_path": "src/axiom/sources/synthetic.py",
+        "kind": "module",
+        "language": "typescript"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "code-05",
+      "type": "code"
+    },
+    {
+      "data": {
+        "status": "accepted",
+        "summary": "A concrete call made with a clear rationale and follow-ups.",
+        "title": "Standardize on Postgres for billing (1)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "decision-00",
+      "type": "decision"
+    },
+    {
+      "data": {
+        "status": "rejected",
+        "summary": "A concrete call made with a clear rationale and follow-ups.",
+        "title": "Default policy stance is permissive with CORRECT steering (2)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "decision-01",
+      "type": "decision"
+    },
+    {
+      "data": {
+        "status": "proposed",
+        "summary": "A concrete call made with a clear rationale and follow-ups.",
+        "title": "Adopt UUIDv7 for all primary keys (3)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "decision-02",
+      "type": "decision"
+    },
+    {
+      "data": {
+        "status": "accepted",
+        "summary": "A concrete call made with a clear rationale and follow-ups.",
+        "title": "Ship Studio WebGPU-first with WebGL fallback (4)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "decision-03",
+      "type": "decision"
+    },
+    {
+      "data": {
+        "status": "rejected",
+        "summary": "A concrete call made with a clear rationale and follow-ups.",
+        "title": "Define universal entity types as free-text strings (5)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "decision-04",
+      "type": "decision"
+    },
+    {
+      "data": {
+        "status": "proposed",
+        "summary": "A concrete call made with a clear rationale and follow-ups.",
+        "title": "Standardize on Postgres for billing (6)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "decision-05",
+      "type": "decision"
+    },
+    {
+      "data": {
+        "status": "accepted",
+        "summary": "A concrete call made with a clear rationale and follow-ups.",
+        "title": "Default policy stance is permissive with CORRECT steering (7)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "decision-06",
+      "type": "decision"
+    },
+    {
+      "data": {
+        "status": "rejected",
+        "summary": "A concrete call made with a clear rationale and follow-ups.",
+        "title": "Adopt UUIDv7 for all primary keys (8)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "decision-07",
+      "type": "decision"
+    },
+    {
+      "data": {
+        "status": "proposed",
+        "summary": "A concrete call made with a clear rationale and follow-ups.",
+        "title": "Ship Studio WebGPU-first with WebGL fallback (9)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "decision-08",
+      "type": "decision"
+    },
+    {
+      "data": {
+        "status": "accepted",
+        "summary": "A concrete call made with a clear rationale and follow-ups.",
+        "title": "Define universal entity types as free-text strings (10)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "decision-09",
+      "type": "decision"
+    },
+    {
+      "data": {
+        "doc_type": "policy",
+        "excerpt": "\u2026",
+        "title": "Refund Policy 2026 (v1)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "doc-00",
+      "type": "document"
+    },
+    {
+      "data": {
+        "doc_type": "spec",
+        "excerpt": "\u2026",
+        "title": "Engineering Onboarding v3 (v2)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "doc-01",
+      "type": "document"
+    },
+    {
+      "data": {
+        "doc_type": "memo",
+        "excerpt": "\u2026",
+        "title": "Incident Response Runbook (v3)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "doc-02",
+      "type": "document"
+    },
+    {
+      "data": {
+        "doc_type": "runbook",
+        "excerpt": "\u2026",
+        "title": "Studio Protocol: WebSocket Replay (v1)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "doc-03",
+      "type": "document"
+    },
+    {
+      "data": {
+        "doc_type": "onboarding",
+        "excerpt": "\u2026",
+        "title": "Support Escalation Guidelines (v2)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "doc-04",
+      "type": "document"
+    },
+    {
+      "data": {
+        "doc_type": "policy",
+        "excerpt": "\u2026",
+        "title": "Billing Reconciliation Notes (v3)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "doc-05",
+      "type": "document"
+    },
+    {
+      "data": {
+        "doc_type": "spec",
+        "excerpt": "\u2026",
+        "title": "Data Model Conventions (v1)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "doc-06",
+      "type": "document"
+    },
+    {
+      "data": {
+        "doc_type": "memo",
+        "excerpt": "\u2026",
+        "title": "Customer Comms Templates (v2)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "doc-07",
+      "type": "document"
+    },
+    {
+      "data": {
+        "doc_type": "runbook",
+        "excerpt": "\u2026",
+        "title": "Refund Policy 2026 (v3)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "doc-08",
+      "type": "document"
+    },
+    {
+      "data": {
+        "doc_type": "onboarding",
+        "excerpt": "\u2026",
+        "title": "Engineering Onboarding v3 (v1)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "doc-09",
+      "type": "document"
+    },
+    {
+      "data": {
+        "doc_type": "policy",
+        "excerpt": "\u2026",
+        "title": "Incident Response Runbook (v2)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "doc-10",
+      "type": "document"
+    },
+    {
+      "data": {
+        "doc_type": "spec",
+        "excerpt": "\u2026",
+        "title": "Studio Protocol: WebSocket Replay (v3)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "doc-11",
+      "type": "document"
+    },
+    {
+      "data": {
+        "doc_type": "memo",
+        "excerpt": "\u2026",
+        "title": "Support Escalation Guidelines (v1)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "doc-12",
+      "type": "document"
+    },
+    {
+      "data": {
+        "doc_type": "runbook",
+        "excerpt": "\u2026",
+        "title": "Billing Reconciliation Notes (v2)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "doc-13",
+      "type": "document"
+    },
+    {
+      "data": {
+        "department": "founder",
+        "email": "asha@axiom.example",
+        "name": "Asha Patel",
+        "role": "Founder"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "person-asha-patel",
+      "type": "people"
+    },
+    {
+      "data": {
+        "department": "customer",
+        "email": "diego@axiom.example",
+        "name": "Diego Santos",
+        "role": "Customer Support"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "person-diego-santos",
+      "type": "people"
+    },
+    {
+      "data": {
+        "department": "engineering",
+        "email": "kwame@axiom.example",
+        "name": "Kwame Mensah",
+        "role": "Engineering"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "person-kwame-mensah",
+      "type": "people"
+    },
+    {
+      "data": {
+        "department": "sales",
+        "email": "mina@axiom.example",
+        "name": "Mina Hassan",
+        "role": "Sales"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "person-mina-hassan",
+      "type": "people"
+    },
+    {
+      "data": {
+        "department": "marketing",
+        "email": "oksana@axiom.example",
+        "name": "Oksana Kovalenko",
+        "role": "Marketing"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "person-oksana-kovalenko",
+      "type": "people"
+    },
+    {
+      "data": {
+        "department": "design",
+        "email": "pratiksha@axiom.example",
+        "name": "Pratiksha Iyer",
+        "role": "Design"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "person-pratiksha-iyer",
+      "type": "people"
+    },
+    {
+      "data": {
+        "department": "ops",
+        "email": "samir@axiom.example",
+        "name": "Samir Khan",
+        "role": "Ops"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "person-samir-khan",
+      "type": "people"
+    },
+    {
+      "data": {
+        "department": "product",
+        "email": "yuki@axiom.example",
+        "name": "Yuki Tanaka",
+        "role": "Product"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "person-yuki-tanaka",
+      "type": "people"
+    },
+    {
+      "data": {
+        "name": "Customer refund processing",
+        "scope": "ticket",
+        "steps_markdown": "Validate \u2192 decide \u2192 update \u2192 record"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "process-00",
+      "type": "process"
+    },
+    {
+      "data": {
+        "name": "Incident response",
+        "scope": "thread",
+        "steps_markdown": "Validate \u2192 decide \u2192 update \u2192 record"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "process-01",
+      "type": "process"
+    },
+    {
+      "data": {
+        "name": "Support escalation",
+        "scope": "document",
+        "steps_markdown": "Validate \u2192 decide \u2192 update \u2192 record"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "process-02",
+      "type": "process"
+    },
+    {
+      "data": {
+        "name": "Release checklist",
+        "scope": "ticket",
+        "steps_markdown": "Validate \u2192 decide \u2192 update \u2192 record"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "process-03",
+      "type": "process"
+    },
+    {
+      "data": {
+        "name": "Billing reconciliation",
+        "scope": "thread",
+        "steps_markdown": "Validate \u2192 decide \u2192 update \u2192 record"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "process-04",
+      "type": "process"
+    },
+    {
+      "data": {
+        "name": "Onboarding new engineer",
+        "scope": "document",
+        "steps_markdown": "Validate \u2192 decide \u2192 update \u2192 record"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "process-05",
+      "type": "process"
+    },
+    {
+      "data": {
+        "name": "Quarterly planning",
+        "scope": "ticket",
+        "steps_markdown": "Validate \u2192 decide \u2192 update \u2192 record"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "process-06",
+      "type": "process"
+    },
+    {
+      "data": {
+        "name": "Security review",
+        "scope": "thread",
+        "steps_markdown": "Validate \u2192 decide \u2192 update \u2192 record"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "process-07",
+      "type": "process"
+    },
+    {
+      "data": {
+        "channel": "#support-escalations",
+        "message_count": 9,
+        "title": "Support escalation: billing mismatch (1)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-00",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#product",
+        "message_count": 37,
+        "title": "Release plan: onboarding v3 (2)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-01",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#engineering",
+        "message_count": 8,
+        "title": "Incident follow-up: webhook latency (3)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-02",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#ops",
+        "message_count": 40,
+        "title": "Decision review: refunds threshold (4)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-03",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#growth",
+        "message_count": 30,
+        "title": "Spec discussion: studio websocket replay (5)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-04",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#support-escalations",
+        "message_count": 5,
+        "title": "Customer feedback: export format (6)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-05",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#product",
+        "message_count": 4,
+        "title": "Bug triage: OAuth callback (7)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-06",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#engineering",
+        "message_count": 8,
+        "title": "Roadmap: Q2 priorities (8)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-07",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#ops",
+        "message_count": 16,
+        "title": "Support escalation: billing mismatch (9)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-08",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#growth",
+        "message_count": 17,
+        "title": "Release plan: onboarding v3 (10)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-09",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#support-escalations",
+        "message_count": 35,
+        "title": "Incident follow-up: webhook latency (11)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-10",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#product",
+        "message_count": 41,
+        "title": "Decision review: refunds threshold (12)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-11",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#engineering",
+        "message_count": 4,
+        "title": "Spec discussion: studio websocket replay (13)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-12",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#ops",
+        "message_count": 38,
+        "title": "Customer feedback: export format (14)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-13",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#growth",
+        "message_count": 15,
+        "title": "Bug triage: OAuth callback (15)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-14",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#support-escalations",
+        "message_count": 37,
+        "title": "Roadmap: Q2 priorities (16)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-15",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#product",
+        "message_count": 29,
+        "title": "Support escalation: billing mismatch (17)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-16",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#engineering",
+        "message_count": 17,
+        "title": "Release plan: onboarding v3 (18)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-17",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#ops",
+        "message_count": 31,
+        "title": "Incident follow-up: webhook latency (19)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-18",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#growth",
+        "message_count": 40,
+        "title": "Decision review: refunds threshold (20)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-19",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#support-escalations",
+        "message_count": 20,
+        "title": "Spec discussion: studio websocket replay (21)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-20",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#product",
+        "message_count": 3,
+        "title": "Customer feedback: export format (22)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-21",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#engineering",
+        "message_count": 13,
+        "title": "Bug triage: OAuth callback (23)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-22",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#ops",
+        "message_count": 30,
+        "title": "Roadmap: Q2 priorities (24)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-23",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#growth",
+        "message_count": 24,
+        "title": "Support escalation: billing mismatch (25)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-24",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#support-escalations",
+        "message_count": 20,
+        "title": "Release plan: onboarding v3 (26)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-25",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#product",
+        "message_count": 12,
+        "title": "Incident follow-up: webhook latency (27)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-26",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#engineering",
+        "message_count": 16,
+        "title": "Decision review: refunds threshold (28)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-27",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#ops",
+        "message_count": 24,
+        "title": "Spec discussion: studio websocket replay (29)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-28",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#growth",
+        "message_count": 9,
+        "title": "Customer feedback: export format (30)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-29",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#support-escalations",
+        "message_count": 8,
+        "title": "Bug triage: OAuth callback (31)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-30",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#product",
+        "message_count": 27,
+        "title": "Roadmap: Q2 priorities (32)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-31",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#engineering",
+        "message_count": 9,
+        "title": "Support escalation: billing mismatch (33)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-32",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#ops",
+        "message_count": 25,
+        "title": "Release plan: onboarding v3 (34)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-33",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#growth",
+        "message_count": 25,
+        "title": "Incident follow-up: webhook latency (35)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-34",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "channel": "#support-escalations",
+        "message_count": 41,
+        "title": "Decision review: refunds threshold (36)"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "thread-35",
+      "type": "thread"
+    },
+    {
+      "data": {
+        "priority": "p0",
+        "status": "open",
+        "title": "OAuth callback fails on Safari [1]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-00",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p1",
+        "status": "in_progress",
+        "title": "Stripe webhook timeout > 30s [2]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-01",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p2",
+        "status": "blocked",
+        "title": "Invoice PDF export truncates long names [3]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-02",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p0",
+        "status": "done",
+        "title": "Refund flow missing audit trail [4]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-03",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p1",
+        "status": "triaged",
+        "title": "Emails not threading correctly [5]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-04",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p2",
+        "status": "open",
+        "title": "Edge traversal returns duplicates [6]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-05",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p0",
+        "status": "in_progress",
+        "title": "Studio HUD flickers on reconnect [7]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-06",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p1",
+        "status": "blocked",
+        "title": "DB migration fails on fresh clone [8]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-07",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p2",
+        "status": "done",
+        "title": "OAuth callback fails on Safari [9]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-08",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p0",
+        "status": "triaged",
+        "title": "Stripe webhook timeout > 30s [10]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-09",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p1",
+        "status": "open",
+        "title": "Invoice PDF export truncates long names [11]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-10",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p2",
+        "status": "in_progress",
+        "title": "Refund flow missing audit trail [12]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-11",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p0",
+        "status": "blocked",
+        "title": "Emails not threading correctly [13]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-12",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p1",
+        "status": "done",
+        "title": "Edge traversal returns duplicates [14]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-13",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p2",
+        "status": "triaged",
+        "title": "Studio HUD flickers on reconnect [15]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-14",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p0",
+        "status": "open",
+        "title": "DB migration fails on fresh clone [16]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-15",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p1",
+        "status": "in_progress",
+        "title": "OAuth callback fails on Safari [17]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-16",
+      "type": "ticket"
+    },
+    {
+      "data": {
+        "priority": "p2",
+        "status": "blocked",
+        "title": "Stripe webhook timeout > 30s [18]"
+      },
+      "metadata": {
+        "calibra_confidence": null,
+        "calibra_state": null
+      },
+      "nick": "ticket-17",
+      "type": "ticket"
+    }
+  ],
+  "seed": 42
 }
