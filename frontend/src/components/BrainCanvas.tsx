@@ -1,4 +1,4 @@
 export function BrainCanvas(): never {
-  throw new Error("BrainCanvas is stubbed; lands in Phase 4");
+  throw new Error("BrainCanvas is removed in Phase 4 (use Brain.tsx)");
 }
 
