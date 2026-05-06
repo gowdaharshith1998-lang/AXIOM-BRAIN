@@ -25,7 +25,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 // d3-force-3d currently publishes no TypeScript declarations.
 // @ts-expect-error missing declaration file for d3-force-3d
 import { forceSimulation, forceManyBody, forceLink, forceCenter } from "d3-force-3d";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 import { AutoOrbitController } from "@/lib/auto-orbit";
 import { envelopePosition } from "@/lib/brain-envelope";
@@ -81,11 +81,6 @@ const NODE_RADIUS = 2.0;
 const SIM_TICKS_BEFORE_REST = 120;
 const SIM_REST_ALPHA = 0.001;
 
-function payloadString(payload: Record<string, unknown>, key: string): string | null {
-  const value = payload[key];
-  return typeof value === "string" ? value : null;
-}
-
 export function Brain() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const focusTargetRef = useRef<THREE.Vector3 | null>(null);
@@ -95,8 +90,7 @@ export function Brain() {
   const applyEvent = useBrainStore((s) => s.applyEvent);
   const bootstrap = useBrainStore((s) => s.bootstrap);
   const select = useBrainStore((s) => s.select);
-  const entities = useBrainStore((s) => s.entities);
-  const edges = useBrainStore((s) => s.edges);
+  const hasBootstrapped = useBrainStore((s) => s.entities.size > 0);
 
   // -- Bootstrap data from REST --
   useEffect(() => {
@@ -134,25 +128,25 @@ export function Brain() {
     };
   }, [applyEvent]);
 
-  // -- Memoize sim data (avoid re-running effect on every render) --
-  const simData = useMemo(() => {
-    const nodes: SimNode[] = Array.from(entities.values()).map((e) => {
-      const [x, y, z] = envelopePosition(e.id);
-      return { id: e.id, type: e.type, x, y, z };
-    });
-    // Edges may reference entities not yet in the store; filter to safe links.
-    const nodeIds = new Set(nodes.map((n) => n.id));
-    const links: SimLink[] = Array.from(edges.values())
-      .filter((ed) => nodeIds.has(ed.source_id) && nodeIds.has(ed.target_id))
-      .map((ed) => ({ id: ed.id, source: ed.source_id, target: ed.target_id, relationship: ed.relationship }));
-    return { nodes, links };
-  }, [entities, edges]);
-
   // -- Three.js scene + d3-force-3d simulation lifecycle --
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    if (simData.nodes.length === 0) return; // wait for bootstrap
+    if (!hasBootstrapped) return; // wait for bootstrap
+
+    const { entities, edges } = useBrainStore.getState();
+    const simData = (() => {
+      const nodes: SimNode[] = Array.from(entities.values()).map((e) => {
+        const [x, y, z] = envelopePosition(e.id);
+        return { id: e.id, type: e.type, x, y, z };
+      });
+      // Edges may reference entities not yet in the store; filter to safe links.
+      const nodeIds = new Set(nodes.map((n) => n.id));
+      const links: SimLink[] = Array.from(edges.values())
+        .filter((ed) => nodeIds.has(ed.source_id) && nodeIds.has(ed.target_id))
+        .map((ed) => ({ id: ed.id, source: ed.source_id, target: ed.target_id, relationship: ed.relationship }));
+      return { nodes, links };
+    })();
 
     const width = el.clientWidth;
     const height = el.clientHeight;
@@ -237,7 +231,7 @@ export function Brain() {
     const labelByNodeId = new Map<string, HTMLDivElement>();
     const neighborIds = new Map<string, Set<string>>();
 
-    for (const n of simData.nodes) {
+    const addNodeMesh = (n: SimNode, entity?: Entity): THREE.Mesh => {
       const color = new THREE.Color(colorForType(n.type));
       const mat = new THREE.MeshStandardMaterial({
         color,
@@ -252,7 +246,6 @@ export function Brain() {
       nodeGroup.add(mesh);
       meshById.set(n.id, mesh);
 
-      const entity = entities.get(n.id);
       if (entity) {
         const labelDiv = document.createElement("div");
         labelDiv.className = "axiom-label";
@@ -287,6 +280,11 @@ export function Brain() {
       nodeGroup.add(ring);
       ringById.set(n.id, ring);
       neighborIds.set(n.id, new Set());
+      return mesh;
+    };
+
+    for (const n of simData.nodes) {
+      addNodeMesh(n, entities.get(n.id));
     }
 
     for (const link of simData.links) {
@@ -315,6 +313,21 @@ export function Brain() {
       edgeRelationships,
       phases: edgePhases,
     };
+    const resizeEdgeBuffers = () => {
+      const nextPositions = new Float32Array(simData.links.length * 2 * 3);
+      const nextColors = new Float32Array(simData.links.length * 2 * 4);
+      const currentPosition = edgeGeom.getAttribute("position");
+      const currentColor = edgeGeom.getAttribute("color");
+      if (currentPosition instanceof THREE.BufferAttribute) {
+        nextPositions.set((currentPosition.array as Float32Array).subarray(0, nextPositions.length));
+      }
+      if (currentColor instanceof THREE.BufferAttribute) {
+        nextColors.set((currentColor.array as Float32Array).subarray(0, nextColors.length));
+      }
+      edgeGeom.setAttribute("position", new THREE.BufferAttribute(nextPositions, 3));
+      edgeGeom.setAttribute("color", new THREE.BufferAttribute(nextColors, 4));
+      edgeGeom.setDrawRange(0, simData.links.length * 2);
+    };
 
     const particleSystem = new ParticleEffectSystem();
     scene.add(particleSystem.points);
@@ -336,6 +349,11 @@ export function Brain() {
       .stop();
 
     let simTicks = 0;
+    const linkForce = sim.force("link") as { links: (links: SimLink[]) => void };
+    const warmSimulation = (alpha: number) => {
+      simTicks = 0;
+      sim.alpha(Math.max(sim.alpha(), alpha));
+    };
 
     const stepSim = () => {
       if (simTicks >= SIM_TICKS_BEFORE_REST) return;
@@ -439,15 +457,44 @@ export function Brain() {
     let labelBelowThresholdSince: number | null = null;
     let labelRecoverSince: number | null = null;
 
+    const appendEntity = (entity: Entity): THREE.Mesh => {
+      const [x, y, z] = envelopePosition(entity.id);
+      const node: SimNode = { id: entity.id, type: entity.type, x, y, z };
+      simData.nodes.push(node);
+      const mesh = addNodeMesh(node, entity);
+      sim.nodes(simData.nodes);
+      warmSimulation(0.1);
+      return mesh;
+    };
+
+    const appendEdge = (edge: Edge) => {
+      if (simData.links.some((link) => link.id === edge.id)) return;
+      const link: SimLink = {
+        id: edge.id,
+        source: edge.source_id,
+        target: edge.target_id,
+        relationship: edge.relationship,
+      };
+      simData.links.push(link);
+      neighborIds.get(edge.source_id)?.add(edge.target_id);
+      neighborIds.get(edge.target_id)?.add(edge.source_id);
+      edgeKeys.push(edge.id);
+      edgeRelationships.push(edge.relationship);
+      edgePhases.set(edge.id, phaseOffsetFromEdgeKey(edge.id));
+      resizeEdgeBuffers();
+      linkForce.links(simData.links);
+      warmSimulation(0.05);
+    };
+
     const processLiveEvents = (nowMs: number) => {
       const deferred: BrainEvent[] = [];
       for (const event of liveEventsRef.current) {
         if (event.type === "entity_added" && event.persisted_id) {
-          const mesh = meshById.get(event.persisted_id);
-          if (!mesh) {
-            deferred.push(event);
-            continue;
-          }
+          const payload = event.payload as Omit<Entity, "id"> & { nick?: unknown };
+          const { nick: _nick, ...rest } = payload;
+          void _nick;
+          const entity: Entity = { id: event.persisted_id, ...rest };
+          const mesh = meshById.get(event.persisted_id) ?? appendEntity(entity);
           const material = mesh.material;
           const color =
             material instanceof THREE.MeshStandardMaterial ? material.color.clone() : new THREE.Color("#FFFFFF");
@@ -458,16 +505,15 @@ export function Brain() {
         }
 
         if (event.type === "edge_added" && event.persisted_id) {
-          const sourceId = payloadString(event.payload, "source_id");
-          const targetId = payloadString(event.payload, "target_id");
-          const relationship = payloadString(event.payload, "relationship") ?? "";
-          const src = sourceId ? meshById.get(sourceId) : undefined;
-          const tgt = targetId ? meshById.get(targetId) : undefined;
+          const edge: Edge = { id: event.persisted_id, ...(event.payload as Omit<Edge, "id">) };
+          const src = meshById.get(edge.source_id);
+          const tgt = meshById.get(edge.target_id);
           if (!src || !tgt) {
             deferred.push(event);
             continue;
           }
-          spawnEdgeTrace(particleSystem, src.position, tgt.position, colorForRelationship(relationship));
+          appendEdge(edge);
+          spawnEdgeTrace(particleSystem, src.position, tgt.position, colorForRelationship(edge.relationship));
           flashByEdge.set(event.persisted_id, nowMs + 600);
           continue;
         }
@@ -591,9 +637,9 @@ export function Brain() {
     const tick = (t: number) => {
       const dtMs = lastFrameMs === 0 ? 16.7 : t - lastFrameMs;
       lastFrameMs = t;
+      processLiveEvents(t);
       stepSim();
       syncPositions();
-      processLiveEvents(t);
       nebula.update(t);
       pulseRunner.update(meshById, t);
       try {
@@ -689,7 +735,7 @@ export function Brain() {
         el.removeChild(labelRenderer.domElement);
       }
     };
-  }, [entities, simData, select, setFps]);
+  }, [hasBootstrapped, select, setFps]);
 
   return <div ref={containerRef} className="absolute inset-0" aria-hidden="true" />;
 }
