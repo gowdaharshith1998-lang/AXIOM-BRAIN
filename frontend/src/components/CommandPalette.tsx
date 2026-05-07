@@ -95,6 +95,10 @@ export function CommandPalette() {
   };
 
   useEffect(() => {
+    window.dispatchEvent(new CustomEvent("axiom:palette-state", { detail: { open } }));
+  }, [open]);
+
+  useEffect(() => {
     if (!open) return;
     inputRef.current?.focus();
   }, [open]);

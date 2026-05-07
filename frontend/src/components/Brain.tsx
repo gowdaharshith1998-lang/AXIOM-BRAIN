@@ -31,7 +31,9 @@ import { createClusterAuras, updateClusterAuras } from "@/components/ClusterAura
 import { arrivalColorForCluster } from "@/components/ArrivalEffect";
 import { AutoOrbitController } from "@/lib/auto-orbit";
 import { envelopePosition } from "@/lib/brain-envelope";
+import { easeInOutCubic, RESET_CAMERA_MS, shouldResetCameraFromKey } from "@/lib/camera-reset";
 import { flyToEntity } from "@/lib/camera-flyto";
+import { resolveLabelCollisions, type LabelBox } from "@/lib/cluster-label-collision";
 import {
   CLUSTER_CENTROIDS,
   CLUSTER_COLORS,
@@ -125,7 +127,7 @@ const NODE_RADIUS = 2.0;
 const SIM_TICKS_BEFORE_REST = 120;
 const SIM_REST_ALPHA = 0.001;
 const INITIAL_CAMERA_POSITION = new THREE.Vector3(0, 40, 220);
-const CAMERA_ANIMATION_MS = 800;
+const CAMERA_ANIMATION_MS = RESET_CAMERA_MS;
 const AUTO_FIT_ENTITY_STEP = 500;
 const USER_IDLE_AUTO_FIT_MS = 10_000;
 const FAR_LOD_DISTANCE = 180;
@@ -332,6 +334,7 @@ export function Brain() {
     const clusterLabelGroup = new THREE.Group();
     scene.add(clusterLabelGroup);
     const clusterLabelByCluster = new Map<ClusterId, HTMLDivElement>();
+    const clusterLabelObjectByCluster = new Map<ClusterId, CSS2DObject>();
     const clusterCountByCluster = new Map<ClusterId, number>();
     for (const cluster of CLUSTER_IDS) {
       const centroid = CLUSTER_CENTROIDS[cluster];
@@ -355,6 +358,7 @@ export function Brain() {
       labelObj.position.copy(centroid);
       clusterLabelGroup.add(labelObj);
       clusterLabelByCluster.set(cluster, labelDiv);
+      clusterLabelObjectByCluster.set(cluster, labelObj);
       clusterCountByCluster.set(cluster, 0);
     }
 
@@ -386,6 +390,23 @@ export function Brain() {
         } else if (closeUp) {
           div.style.opacity = "0";
         }
+      }
+      const boxes: LabelBox[] = [];
+      for (const [cluster, div] of clusterLabelByCluster) {
+        const obj = clusterLabelObjectByCluster.get(cluster);
+        if (!obj) continue;
+        const projected = obj.getWorldPosition(new THREE.Vector3()).project(camera);
+        boxes.push({
+          id: cluster,
+          x: ((projected.x + 1) / 2) * width,
+          y: ((-projected.y + 1) / 2) * height,
+          width: div.offsetWidth || 160,
+          height: div.offsetHeight || 22,
+        });
+      }
+      for (const box of resolveLabelCollisions(boxes)) {
+        const div = clusterLabelByCluster.get(box.id as ClusterId);
+        if (div) div.style.transform = `translate(calc(-50% + ${box.dx ?? 0}px), calc(-50% + ${box.dy ?? 0}px))`;
       }
     };
 
@@ -787,6 +808,7 @@ export function Brain() {
           toTarget: THREE.Vector3;
         }
       | null = null;
+    let paletteOpen = false;
 
     const markCameraInteraction = (now = performance.now()) => {
       lastCameraInteractionMs = now;
@@ -896,11 +918,9 @@ export function Brain() {
         if (useBrainStore.getState().selectedId) {
           select(null);
           removeOrbitalHalo();
-        } else {
-          resetCamera();
         }
       }
-      if (key === "r" || key === "0") {
+      if (shouldResetCameraFromKey(key, paletteOpen) || key === "0") {
         ev.preventDefault();
         resetCamera();
       }
@@ -910,6 +930,9 @@ export function Brain() {
       }
     };
     const onHudResetView = () => resetCamera();
+    const onPaletteState = (ev: Event) => {
+      paletteOpen = Boolean((ev as CustomEvent<{ open?: boolean }>).detail?.open);
+    };
     const onFlyToEntity = (ev: Event) => {
       const id = (ev as CustomEvent<{ id?: string }>).detail?.id;
       if (!id) return;
@@ -929,6 +952,7 @@ export function Brain() {
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("axiom:reset-view", onHudResetView);
     window.addEventListener("axiom:fly-to-entity", onFlyToEntity);
+    window.addEventListener("axiom:palette-state", onPaletteState);
 
     // ----- Render loop -----
     const fps = new RollingFpsCounter(60);
@@ -1327,7 +1351,7 @@ export function Brain() {
 
       if (cameraFlight) {
         const progress = Math.min(1, (t - cameraFlight.startedAt) / cameraFlight.durationMs);
-        const eased = 1 - Math.pow(1 - progress, 3);
+        const eased = easeInOutCubic(progress);
         camera.position.lerpVectors(cameraFlight.fromPosition, cameraFlight.toPosition, eased);
         controls.target.lerpVectors(cameraFlight.fromTarget, cameraFlight.toTarget, eased);
         if (progress >= 1) cameraFlight = null;
@@ -1386,6 +1410,7 @@ export function Brain() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("axiom:reset-view", onHudResetView);
       window.removeEventListener("axiom:fly-to-entity", onFlyToEntity);
+      window.removeEventListener("axiom:palette-state", onPaletteState);
       if (forceTuneTimer !== null) window.clearTimeout(forceTuneTimer);
       sim.stop();
       controls.dispose();
@@ -1402,6 +1427,7 @@ export function Brain() {
       labelByNodeId.clear();
       labelVisibleByNodeId.clear();
       clusterLabelByCluster.clear();
+      clusterLabelObjectByCluster.clear();
       clusterCountByCluster.clear();
       meshById.forEach((m) => {
         (m.material as THREE.Material).dispose();
