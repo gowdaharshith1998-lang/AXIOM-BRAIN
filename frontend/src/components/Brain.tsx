@@ -37,6 +37,9 @@ import {
   displayLabelFor,
   LABEL_FPS_HIDE_THRESHOLD,
   LABEL_FPS_RECOVER_THRESHOLD,
+  LABEL_HIDE_RADIUS_MULTIPLIER,
+  LABEL_OVERVIEW_CAP,
+  LABEL_SHOW_RADIUS_MULTIPLIER,
   shouldShowLabel,
 } from "@/lib/labels";
 import { colorForType } from "@/lib/palette";
@@ -135,6 +138,10 @@ function nextEntityThreshold(entityCount: number): number {
 function compositeImportance(entity: Entity | undefined): number {
   const value = entity?.data?.composite_importance;
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function labelImportance(entity: Entity | undefined, connectionCount = 0): number {
+  return compositeImportance(entity) || connectionCount / 1000;
 }
 
 export function Brain() {
@@ -856,12 +863,21 @@ export function Brain() {
     const updateLabelVisibility = () => {
       const selectedId = useBrainStore.getState().selectedId;
       const selectedNeighborIds = selectedId ? (neighborIds.get(selectedId) ?? new Set<string>()) : new Set<string>();
+      const brainRadius = Math.max(100, Math.sqrt(Math.max(simData.nodes.length, 1)) * 8);
+      const showDistance = brainRadius * LABEL_SHOW_RADIUS_MULTIPLIER;
+      const hideDistance = brainRadius * LABEL_HIDE_RADIUS_MULTIPLIER;
+      const alwaysVisibleIds = new Set<string>();
+      if (selectedId) {
+        alwaysVisibleIds.add(selectedId);
+        for (const neighborId of selectedNeighborIds) alwaysVisibleIds.add(neighborId);
+      }
+      const candidates: Array<{ nodeId: string; labelDiv: HTMLDivElement; importance: number; visible: boolean }> = [];
 
       for (const [nodeId, labelDiv] of labelByNodeId) {
         const mesh = meshById.get(nodeId);
         if (!mesh) continue;
-        const visible =
-          (nodeById.get(nodeId)?.lod ?? "near") === "near" &&
+        const isAlwaysVisible = alwaysVisibleIds.has(nodeId);
+        const baseVisible =
           shouldShowLabel({
             nodeId,
             cameraDistance: camera.position.distanceTo(mesh.position),
@@ -869,10 +885,36 @@ export function Brain() {
             selectedNeighborIds,
             fpsGuardState: labelFpsState,
             currentlyVisible: labelVisibleByNodeId.get(nodeId) ?? false,
-          });
+            showDistance,
+            hideDistance,
+          }) && (isAlwaysVisible || (nodeById.get(nodeId)?.lod ?? "near") === "near");
 
-        labelVisibleByNodeId.set(nodeId, visible);
-        labelDiv.style.opacity = visible ? "1" : "0";
+        if (isAlwaysVisible) {
+          labelVisibleByNodeId.set(nodeId, baseVisible);
+          labelDiv.style.opacity = baseVisible ? "1" : "0";
+          continue;
+        }
+
+        candidates.push({
+          nodeId,
+          labelDiv,
+          importance: labelImportance(useBrainStore.getState().entities.get(nodeId), neighborIds.get(nodeId)?.size ?? 0),
+          visible: baseVisible,
+        });
+      }
+
+      const cappedVisible = new Set(
+        candidates
+          .filter((candidate) => candidate.visible)
+          .sort((a, b) => b.importance - a.importance || a.nodeId.localeCompare(b.nodeId))
+          .slice(0, LABEL_OVERVIEW_CAP)
+          .map((candidate) => candidate.nodeId),
+      );
+
+      for (const candidate of candidates) {
+        const visible = cappedVisible.has(candidate.nodeId);
+        labelVisibleByNodeId.set(candidate.nodeId, visible);
+        candidate.labelDiv.style.opacity = visible ? "1" : "0";
       }
     };
 

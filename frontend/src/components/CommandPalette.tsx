@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboa
 
 import { colorForType } from "@/lib/palette";
 import { useBrainStore } from "@/state/brain.store";
+import type { Entity } from "@/state/brain.store";
 
 type EntitySearchResult = {
   id: string;
@@ -10,7 +11,8 @@ type EntitySearchResult = {
   connection_count: number;
 };
 
-const SEARCH_URL = "http://127.0.0.1:8000/api/entities/search";
+const SEARCH_URL = "/api/entities/search";
+const TITLE_KEYS = ["title", "name", "subject", "label", "file_path"] as const;
 
 function isTypingTarget(target: EventTarget | null): boolean {
   return (
@@ -19,6 +21,48 @@ function isTypingTarget(target: EventTarget | null): boolean {
     target instanceof HTMLSelectElement ||
     (target instanceof HTMLElement && target.isContentEditable)
   );
+}
+
+function titleForEntity(entity: Entity): string {
+  for (const key of TITLE_KEYS) {
+    const value = entity.data[key];
+    if (typeof value === "string" && value.trim()) {
+      return key === "file_path" ? (value.split("/").pop() ?? value) : value.trim();
+    }
+  }
+  return entity.id;
+}
+
+function localSearch(query: string, limit: number): EntitySearchResult[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+
+  const { entities, edges } = useBrainStore.getState();
+  const connectionCounts = new Map<string, number>();
+  for (const edge of edges.values()) {
+    connectionCounts.set(edge.source_id, (connectionCounts.get(edge.source_id) ?? 0) + 1);
+    connectionCounts.set(edge.target_id, (connectionCounts.get(edge.target_id) ?? 0) + 1);
+  }
+
+  return Array.from(entities.values())
+    .map((entity) => {
+      const title = titleForEntity(entity);
+      const normalizedTitle = title.toLowerCase();
+      const prefix = normalizedTitle.startsWith(q);
+      const substring = normalizedTitle.includes(q);
+      if (!prefix && !substring) return null;
+      return {
+        id: entity.id,
+        type: entity.type,
+        title,
+        connection_count: connectionCounts.get(entity.id) ?? 0,
+        score: prefix ? 2 : 1,
+      };
+    })
+    .filter((result): result is EntitySearchResult & { score: number } => result !== null)
+    .sort((a, b) => b.score - a.score || b.connection_count - a.connection_count || a.title.localeCompare(b.title))
+    .slice(0, limit)
+    .map(({ score: _score, ...result }) => result);
 }
 
 export function CommandPalette() {
@@ -85,12 +129,12 @@ export function CommandPalette() {
           return response.json() as Promise<EntitySearchResult[]>;
         })
         .then((items) => {
-          setResults(items);
+          setResults(items.length > 0 ? items : localSearch(query, 8));
           setActiveIndex(0);
         })
         .catch((error: unknown) => {
           if (error instanceof DOMException && error.name === "AbortError") return;
-          setResults([]);
+          setResults(localSearch(query, 8));
         });
     }, 150);
 

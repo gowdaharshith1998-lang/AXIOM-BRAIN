@@ -2,8 +2,9 @@ import type { FpsGuardState } from "@/lib/fps-guard";
 import type { Entity } from "@/state/brain.store";
 
 export const MAX_LABEL_LEN = 24;
-export const LABEL_SHOW_DISTANCE = 80;
-export const LABEL_HIDE_DISTANCE = 120;
+export const LABEL_SHOW_RADIUS_MULTIPLIER = 1.2;
+export const LABEL_HIDE_RADIUS_MULTIPLIER = 2.0;
+export const LABEL_OVERVIEW_CAP = 80;
 export const CLUSTER_LABEL_VISIBLE_DISTANCE = 200;
 export const LABEL_FPS_HIDE_THRESHOLD = 50;
 export const LABEL_FPS_RECOVER_THRESHOLD = 55;
@@ -15,6 +16,8 @@ export interface LabelVisibilityInput {
   selectedNeighborIds: ReadonlySet<string>;
   fpsGuardState: FpsGuardState;
   currentlyVisible?: boolean;
+  showDistance: number;
+  hideDistance: number;
 }
 
 export function truncate(text: string, maxLen = MAX_LABEL_LEN): string {
@@ -54,6 +57,6 @@ export function shouldShowLabel(input: LabelVisibilityInput): boolean {
   if (input.nodeId === input.selectedId) return true;
   if (input.selectedId !== null && input.selectedNeighborIds.has(input.nodeId)) return true;
   if (input.fpsGuardState === "emergency") return false;
-  if (input.currentlyVisible) return input.cameraDistance <= LABEL_HIDE_DISTANCE;
-  return input.cameraDistance <= LABEL_SHOW_DISTANCE;
+  if (input.currentlyVisible) return input.cameraDistance <= input.hideDistance;
+  return input.cameraDistance <= input.showDistance;
 }

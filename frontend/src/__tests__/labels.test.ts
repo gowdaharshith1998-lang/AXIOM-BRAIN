@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { displayLabelFor, shouldShowLabel, truncate } from "@/lib/labels";
 import type { Entity } from "@/state/brain.store";
 
+const DISTANCES = { showDistance: 432, hideDistance: 720 };
+
 function entity(id: string, type: string, data: Record<string, unknown>): Entity {
   return {
     id,
@@ -83,6 +85,7 @@ describe("shouldShowLabel", () => {
         selectedId: "n1",
         selectedNeighborIds: new Set(),
         fpsGuardState: "emergency",
+        ...DISTANCES,
       }),
     ).toBe(true);
   });
@@ -95,6 +98,7 @@ describe("shouldShowLabel", () => {
         selectedId: "n1",
         selectedNeighborIds: new Set(["n2", "n3"]),
         fpsGuardState: "full",
+        ...DISTANCES,
       }),
     ).toBe(true);
   });
@@ -107,6 +111,7 @@ describe("shouldShowLabel", () => {
         selectedId: "n1",
         selectedNeighborIds: new Set(["n2"]),
         fpsGuardState: "full",
+        ...DISTANCES,
       }),
     ).toBe(false);
   });
@@ -119,6 +124,7 @@ describe("shouldShowLabel", () => {
         selectedId: null,
         selectedNeighborIds: new Set(),
         fpsGuardState: "full",
+        ...DISTANCES,
       }),
     ).toBe(true);
   });
@@ -127,11 +133,12 @@ describe("shouldShowLabel", () => {
     expect(
       shouldShowLabel({
         nodeId: "n5",
-        cameraDistance: 100,
+        cameraDistance: 500,
         selectedId: null,
         selectedNeighborIds: new Set(),
         fpsGuardState: "full",
         currentlyVisible: true,
+        ...DISTANCES,
       }),
     ).toBe(true);
   });
@@ -140,11 +147,12 @@ describe("shouldShowLabel", () => {
     expect(
       shouldShowLabel({
         nodeId: "n5",
-        cameraDistance: 100,
+        cameraDistance: 500,
         selectedId: null,
         selectedNeighborIds: new Set(),
         fpsGuardState: "full",
         currentlyVisible: false,
+        ...DISTANCES,
       }),
     ).toBe(false);
   });
@@ -157,6 +165,7 @@ describe("shouldShowLabel", () => {
         selectedId: "n1",
         selectedNeighborIds: new Set(),
         fpsGuardState: "emergency",
+        ...DISTANCES,
       }),
     ).toBe(false);
   });

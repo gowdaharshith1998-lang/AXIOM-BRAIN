@@ -9,7 +9,7 @@ describe("CommandPalette", () => {
     cleanup();
     vi.restoreAllMocks();
     vi.useRealTimers();
-    useBrainStore.setState({ selectedId: null });
+    useBrainStore.setState({ entities: new Map(), edges: new Map(), selectedId: null });
   });
 
   it("opens with Ctrl-K and Escape closes it", () => {
@@ -90,10 +90,41 @@ describe("CommandPalette", () => {
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter" });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/api/entities/search?q=refund&limit=8",
+      "/api/entities/search?q=refund&limit=8",
       expect.any(Object),
     );
     expect(useBrainStore.getState().selectedId).toBe("entity-1");
     expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({ type: "axiom:fly-to-entity" }));
+  });
+
+  it("falls back to loaded entities when backend search is unavailable", async () => {
+    vi.spyOn(window, "fetch").mockResolvedValue({
+      ok: false,
+      status: 404,
+    } as Response);
+    useBrainStore.setState({
+      entities: new Map([
+        [
+          "refund-doc",
+          {
+            id: "refund-doc",
+            type: "document",
+            data: { title: "Refund Policy 2026 (v3)" },
+            source_id: null,
+            created_at: "t",
+            updated_at: "t",
+          },
+        ],
+      ]),
+      edges: new Map(),
+    });
+    render(<CommandPalette />);
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(screen.getByPlaceholderText("Ask the brain… (e.g. how do refunds work)"), {
+      target: { value: "refund" },
+    });
+
+    await waitFor(() => expect(screen.getByText("Refund Policy 2026 (v3)")).toBeInTheDocument());
   });
 });
