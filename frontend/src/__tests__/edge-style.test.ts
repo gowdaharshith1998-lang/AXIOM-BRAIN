@@ -1,7 +1,12 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 
-import { createEdgeMaterialForClusters, edgeOpacityForClusters, isCrossClusterEdge } from "@/lib/edge-style";
+import {
+  createEdgeMaterialForClusters,
+  edgeAlphaForLod,
+  edgeOpacityForClusters,
+  isCrossClusterEdge,
+} from "@/lib/edge-style";
 
 describe("edge cluster styling", () => {
   it("uses solid full-opacity material inside a cluster", () => {
@@ -22,5 +27,10 @@ describe("edge cluster styling", () => {
     expect(edgeOpacityForClusters("billing_payments", "incidents_ops")).toBeLessThan(
       edgeOpacityForClusters("billing_payments", "billing_payments"),
     );
+  });
+
+  it("does not cap edge alpha in sphere mode", () => {
+    expect(edgeAlphaForLod(1, "full", false, 0.12)).toBe(1);
+    expect(edgeAlphaForLod(0.4, "full", false, 0.12)).toBe(0.4);
   });
 });

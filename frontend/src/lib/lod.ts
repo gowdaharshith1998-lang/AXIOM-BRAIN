@@ -2,11 +2,11 @@ import * as THREE from "three";
 
 export type NodeLodMode = "sprite" | "sphere";
 
-export const NODE_SPRITE_DISTANCE = 180;
-export const EDGE_SKIP_DISTANCE = 180;
-export const BLOOM_REDUCE_DISTANCE = 220;
-export const BLOOM_FULL_STRENGTH = 0.45;
-export const BLOOM_OVERVIEW_STRENGTH = 0.2;
+export const NODE_SPRITE_DISTANCE = 280;
+export const EDGE_SKIP_DISTANCE = 320;
+export const BLOOM_REDUCE_DISTANCE = 280;
+export const BLOOM_FULL_STRENGTH = 0.3;
+export const BLOOM_OVERVIEW_STRENGTH = 0.12;
 
 export function nodeLodMode(cameraDistance: number): NodeLodMode {
   return cameraDistance > NODE_SPRITE_DISTANCE ? "sprite" : "sphere";
@@ -44,8 +44,8 @@ export function createNodeSpriteMaterial(color: THREE.ColorRepresentation): THRE
     const ctx = canvas.getContext("2d");
     if (ctx) {
       const gradient = ctx.createRadialGradient(32, 32, 1, 32, 32, 32);
-      gradient.addColorStop(0, "rgba(255,255,255,1)");
-      gradient.addColorStop(0.35, "rgba(255,255,255,0.75)");
+      gradient.addColorStop(0, "rgba(255,255,255,0.85)");
+      gradient.addColorStop(0.35, "rgba(255,255,255,0.55)");
       gradient.addColorStop(1, "rgba(255,255,255,0)");
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, 64, 64);
@@ -56,8 +56,8 @@ export function createNodeSpriteMaterial(color: THREE.ColorRepresentation): THRE
     map: sharedSpriteTexture,
     color,
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.6,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.NormalBlending,
   });
 }

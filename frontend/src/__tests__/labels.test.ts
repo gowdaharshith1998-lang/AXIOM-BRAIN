@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { displayLabelFor, shouldShowLabel, truncate } from "@/lib/labels";
+import { LABEL_SHOW_DISTANCE_MAX, displayLabelFor, shouldShowLabel, truncate } from "@/lib/labels";
 import type { Entity } from "@/state/brain.store";
 
 const DISTANCES = { showDistance: 432, hideDistance: 720 };
@@ -70,16 +70,58 @@ describe("importance labels", () => {
     expect(visible).toHaveLength(80);
   });
 
-  it("hides labels at overview zoom", () => {
+  it("shows entity labels at default zoom", () => {
     expect(
       shouldShowLabel({
         nodeId: "n1",
-        cameraDistance: 200,
+        cameraDistance: 220,
         selectedId: null,
         selectedNeighborIds: new Set(),
         fpsGuardState: "full",
-        showDistance: 180,
-        hideDistance: 180,
+        showDistance: LABEL_SHOW_DISTANCE_MAX,
+        hideDistance: LABEL_SHOW_DISTANCE_MAX,
+      }),
+    ).toBe(true);
+  });
+
+  it("shows entity labels at distance 270", () => {
+    expect(
+      shouldShowLabel({
+        nodeId: "n1",
+        cameraDistance: 270,
+        selectedId: null,
+        selectedNeighborIds: new Set(),
+        fpsGuardState: "full",
+        showDistance: LABEL_SHOW_DISTANCE_MAX,
+        hideDistance: LABEL_SHOW_DISTANCE_MAX,
+      }),
+    ).toBe(true);
+  });
+
+  it("hides entity labels at distance 300", () => {
+    expect(
+      shouldShowLabel({
+        nodeId: "n1",
+        cameraDistance: 300,
+        selectedId: null,
+        selectedNeighborIds: new Set(),
+        fpsGuardState: "full",
+        showDistance: LABEL_SHOW_DISTANCE_MAX,
+        hideDistance: LABEL_SHOW_DISTANCE_MAX,
+      }),
+    ).toBe(false);
+  });
+
+  it("hides entity labels below distance 50", () => {
+    expect(
+      shouldShowLabel({
+        nodeId: "n1",
+        cameraDistance: 49,
+        selectedId: null,
+        selectedNeighborIds: new Set(),
+        fpsGuardState: "full",
+        showDistance: LABEL_SHOW_DISTANCE_MAX,
+        hideDistance: LABEL_SHOW_DISTANCE_MAX,
       }),
     ).toBe(false);
   });

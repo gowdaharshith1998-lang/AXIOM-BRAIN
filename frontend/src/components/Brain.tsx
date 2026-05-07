@@ -27,7 +27,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { forceSimulation, forceManyBody, forceLink, forceCenter, forceRadial } from "d3-force-3d";
 import { useEffect, useRef, useState } from "react";
 
-import { createClusterAuras, updateClusterAuras } from "@/components/ClusterAura";
+import { createClusterAuras, setAurasVisible, updateClusterAuras } from "@/components/ClusterAura";
 import { arrivalColorForCluster } from "@/components/ArrivalEffect";
 import { AutoOrbitController } from "@/lib/auto-orbit";
 import { envelopePosition } from "@/lib/brain-envelope";
@@ -52,17 +52,22 @@ import {
 } from "@/lib/cluster-layout";
 import { colorForRelationship } from "@/lib/edge-tint";
 import { edgeDrawEndpoint, isEdgeDrawActive } from "@/lib/edge-animation";
-import { edgeOpacityForClusters } from "@/lib/edge-style";
+import { edgeAlphaForLod, edgeOpacityForClusters } from "@/lib/edge-style";
 import { RollingFpsCounter } from "@/lib/fps";
 import { FpsGuard, type FpsGuardState } from "@/lib/fps-guard";
-import { bloomStrengthForDistance, createNodeSpriteMaterial, nodeLodMode, shouldRenderEdge } from "@/lib/lod";
+import {
+  BLOOM_FULL_STRENGTH,
+  bloomStrengthForDistance,
+  createNodeSpriteMaterial,
+  nodeLodMode,
+  shouldRenderEdge,
+} from "@/lib/lod";
 import {
   displayLabelFor,
+  LABEL_SHOW_DISTANCE_MAX,
   LABEL_FPS_HIDE_THRESHOLD,
   LABEL_FPS_RECOVER_THRESHOLD,
-  LABEL_HIDE_RADIUS_MULTIPLIER,
   LABEL_OVERVIEW_CAP,
-  LABEL_SHOW_RADIUS_MULTIPLIER,
   shouldShowLabel,
 } from "@/lib/labels";
 import { colorForType } from "@/lib/palette";
@@ -311,7 +316,7 @@ export function Brain() {
     // ----- Post-processing: UnrealBloom + ACES via composer -----
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.45, 0.35, 0.92);
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), BLOOM_FULL_STRENGTH, 0.35, 0.92);
     composer.addPass(bloomPass);
 
     // ----- DOM label overlay (non-interactive; OrbitControls keep pointer ownership) -----
@@ -729,14 +734,13 @@ export function Brain() {
       const colorAttr = edgeGeom.getAttribute("color");
       if (!(colorAttr instanceof THREE.BufferAttribute)) return;
       const colorArr = colorAttr.array as Float32Array;
+      const farLodActive = nodeLodMode(camera.position.length()) === "sprite";
       let updated = false;
       for (let edgeIndex = 0; edgeIndex < simData.links.length; edgeIndex++) {
         const link = simData.links[edgeIndex];
         const src = typeof link.source === "object" ? link.source : undefined;
         const tgt = typeof link.target === "object" ? link.target : undefined;
         if (!src || !tgt) continue;
-        const far = src?.lod === "far" || tgt?.lod === "far";
-        if (!far && fpsState !== "emergency") continue;
 
         const offset = edgeIndex * 8;
         const sourceId = src.id;
@@ -745,7 +749,7 @@ export function Brain() {
           nodeById.get(sourceId)?.cluster_id,
           nodeById.get(targetId)?.cluster_id,
         );
-        const alpha = Math.min(baseAlpha, fpsState === "emergency" ? 0.16 : FAR_EDGE_ALPHA);
+        const alpha = edgeAlphaForLod(baseAlpha, fpsState, farLodActive, FAR_EDGE_ALPHA);
         colorArr[offset] = 0.45;
         colorArr[offset + 1] = 0.48;
         colorArr[offset + 2] = 0.55;
@@ -1160,9 +1164,6 @@ export function Brain() {
     const updateLabelVisibility = () => {
       const selectedId = useBrainStore.getState().selectedId;
       const selectedNeighborIds = selectedId ? (neighborIds.get(selectedId) ?? new Set<string>()) : new Set<string>();
-      const brainRadius = Math.max(100, Math.sqrt(Math.max(simData.nodes.length, 1)) * 8);
-      const showDistance = brainRadius * LABEL_SHOW_RADIUS_MULTIPLIER;
-      const hideDistance = brainRadius * LABEL_HIDE_RADIUS_MULTIPLIER;
       const alwaysVisibleIds = new Set<string>();
       if (selectedId) {
         alwaysVisibleIds.add(selectedId);
@@ -1177,13 +1178,13 @@ export function Brain() {
         const baseVisible =
           shouldShowLabel({
             nodeId,
-            cameraDistance: camera.position.distanceTo(mesh.position),
+            cameraDistance: camera.position.length(),
             selectedId,
             selectedNeighborIds,
             fpsGuardState: labelFpsState,
             currentlyVisible: labelVisibleByNodeId.get(nodeId) ?? false,
-            showDistance,
-            hideDistance,
+            showDistance: LABEL_SHOW_DISTANCE_MAX,
+            hideDistance: LABEL_SHOW_DISTANCE_MAX,
           }) && (isAlwaysVisible || (nodeById.get(nodeId)?.lod ?? "near") === "near");
 
         if (isAlwaysVisible) {
@@ -1296,7 +1297,9 @@ export function Brain() {
       syncPositions();
       nebula.update(t);
       updateClusterAuras(clusterAuras, t);
-      bloomPass.strength = bloomStrengthForDistance(camera.position.length());
+      const cameraDistance = camera.position.length();
+      setAurasVisible(clusterAuras, cameraDistance <= 280);
+      bloomPass.strength = bloomStrengthForDistance(cameraDistance);
       const fpsState = fpsGuard.state();
       if (fpsState !== "emergency") {
         pulseRunner.update(

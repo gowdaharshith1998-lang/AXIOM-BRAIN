@@ -14,8 +14,8 @@ export function createClusterAura(cluster: ClusterId): THREE.Mesh<THREE.SphereGe
   const material = new THREE.MeshBasicMaterial({
     color: CLUSTER_COLORS[cluster],
     transparent: true,
-    opacity: 0.06,
-    blending: THREE.AdditiveBlending,
+    opacity: 0.04,
+    blending: THREE.NormalBlending,
     depthWrite: false,
     side: THREE.BackSide,
   });
@@ -28,6 +28,13 @@ export function createClusterAura(cluster: ClusterId): THREE.Mesh<THREE.SphereGe
 
 export function createClusterAuras(): THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>[] {
   return CLUSTER_IDS.map((cluster) => createClusterAura(cluster));
+}
+
+export function setAurasVisible(
+  auras: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>[],
+  visible: boolean,
+): void {
+  for (const aura of auras) aura.visible = visible;
 }
 
 export function updateClusterAuras(

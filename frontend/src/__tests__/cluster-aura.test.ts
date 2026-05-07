@@ -1,6 +1,13 @@
+import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 
-import { CLUSTER_AURA_RADIUS, auraRadiusAt, createClusterAuras, updateClusterAuras } from "@/components/ClusterAura";
+import {
+  CLUSTER_AURA_RADIUS,
+  auraRadiusAt,
+  createClusterAuras,
+  setAurasVisible,
+  updateClusterAuras,
+} from "@/components/ClusterAura";
 import { CLUSTER_CENTROIDS, CLUSTER_COLORS, CLUSTER_IDS } from "@/lib/cluster-layout";
 
 describe("cluster auras", () => {
@@ -34,5 +41,23 @@ describe("cluster auras", () => {
   it("has one aura per canonical cluster", () => {
     const seen = new Set(createClusterAuras().map((aura) => aura.userData.cluster));
     expect(seen).toEqual(new Set(CLUSTER_IDS));
+  });
+
+  it("uses normal blending", () => {
+    const [aura] = createClusterAuras();
+    expect(aura.material.blending).toBe(THREE.NormalBlending);
+  });
+
+  it("keeps aura opacity subtle", () => {
+    const [aura] = createClusterAuras();
+    expect(aura.material.opacity).toBeLessThanOrEqual(0.05);
+  });
+
+  it("toggles visibility for all seven auras", () => {
+    const auras = createClusterAuras();
+    setAurasVisible(auras, false);
+    expect(auras.every((aura) => aura.visible === false)).toBe(true);
+    setAurasVisible(auras, true);
+    expect(auras.every((aura) => aura.visible === true)).toBe(true);
   });
 });

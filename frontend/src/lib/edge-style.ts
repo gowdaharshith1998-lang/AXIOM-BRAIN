@@ -14,6 +14,12 @@ export function edgeOpacityForClusters(sourceCluster?: string | null, targetClus
   return isCrossClusterEdge(sourceCluster, targetCluster) ? CROSS_CLUSTER_EDGE_OPACITY : SAME_CLUSTER_EDGE_OPACITY;
 }
 
+export function edgeAlphaForLod(baseAlpha: number, fpsState: string, farLodActive: boolean, farEdgeAlpha: number): number {
+  const fpsCap = fpsState === "emergency" ? 0.16 : 1.0;
+  const lodCap = farLodActive ? farEdgeAlpha : 1.0;
+  return Math.min(baseAlpha, fpsCap, lodCap);
+}
+
 export function createEdgeMaterialForClusters(
   sourceCluster: string | null | undefined,
   targetCluster: string | null | undefined,

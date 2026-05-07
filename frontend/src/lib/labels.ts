@@ -4,6 +4,9 @@ import type { Entity } from "@/state/brain.store";
 export const MAX_LABEL_LEN = 24;
 export const LABEL_SHOW_RADIUS_MULTIPLIER = 1.2;
 export const LABEL_HIDE_RADIUS_MULTIPLIER = 2.0;
+export const LABEL_SHOW_DISTANCE_MIN = 50;
+export const LABEL_SHOW_DISTANCE_MAX = 280;
+export const LABEL_FADE_BUFFER_PX = 30;
 export const LABEL_OVERVIEW_CAP = 80;
 export const CLUSTER_LABEL_VISIBLE_DISTANCE = 200;
 export const LABEL_FPS_HIDE_THRESHOLD = 50;
@@ -57,6 +60,7 @@ export function shouldShowLabel(input: LabelVisibilityInput): boolean {
   if (input.nodeId === input.selectedId) return true;
   if (input.selectedId !== null && input.selectedNeighborIds.has(input.nodeId)) return true;
   if (input.fpsGuardState === "emergency") return false;
+  if (input.cameraDistance < LABEL_SHOW_DISTANCE_MIN) return false;
   if (input.currentlyVisible) return input.cameraDistance <= input.hideDistance;
   return input.cameraDistance <= input.showDistance;
 }
