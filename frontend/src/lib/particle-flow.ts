@@ -11,6 +11,7 @@ export type FlowParticle = {
   startedAt: number;
   durationMs: number;
   burst: boolean;
+  trail: boolean;
 };
 
 export function particleColorForClusters(sourceCluster: ClusterId, targetCluster: ClusterId): THREE.Color {
@@ -31,7 +32,7 @@ export class ParticleFlowController {
   private edges: InterHubEdge[] = [];
   private nextSpawnByEdge = new Map<string, number>();
 
-  constructor(edges: InterHubEdge[], maxParticles = 256) {
+  constructor(edges: InterHubEdge[], maxParticles = 384) {
     this.maxParticles = maxParticles;
     this.positions = new Float32Array(maxParticles * 3);
     this.colors = new Float32Array(maxParticles * 3);
@@ -40,10 +41,10 @@ export class ParticleFlowController {
     geometry.setAttribute("color", new THREE.BufferAttribute(this.colors, 3));
     geometry.setDrawRange(0, 0);
     const material = new THREE.PointsMaterial({
-      size: 1.2,
+      size: 1.6,
       vertexColors: true,
       transparent: true,
-      opacity: 0.95,
+      opacity: 1,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
@@ -107,7 +108,7 @@ export class ParticleFlowController {
 
   private spawn(edge: InterHubEdge, nowMs: number, burst: boolean): void {
     if (this.particles.length >= this.maxParticles) this.particles.shift();
-    this.particles.push({
+    const particle = {
       edgeKey: edge.key,
       source: CLUSTER_CENTROIDS[edge.sourceCluster].clone(),
       target: CLUSTER_CENTROIDS[edge.targetCluster].clone(),
@@ -115,16 +116,25 @@ export class ParticleFlowController {
       startedAt: nowMs,
       durationMs: traversalMs(edge.key),
       burst,
+      trail: false,
+    };
+    this.particles.push(particle);
+    if (this.particles.length >= this.maxParticles) this.particles.shift();
+    this.particles.push({
+      ...particle,
+      color: particle.color.clone().multiplyScalar(0.55),
+      startedAt: nowMs + 80,
+      trail: true,
     });
   }
 }
 
-function traversalMs(key: string): number {
-  return 1800 + (hash(key) % 600);
+export function traversalMs(key: string): number {
+  return 1100 + (hash(key) % 400);
 }
 
-function spawnDelay(key: string, salt = 0): number {
-  return 800 + ((hash(`${key}:${Math.floor(salt)}`) % 400));
+export function spawnDelay(key: string, salt = 0): number {
+  return 350 + (hash(`${key}:${Math.floor(salt)}`) % 250);
 }
 
 function hash(value: string): number {

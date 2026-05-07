@@ -44,6 +44,7 @@ import { ParticleFlowController } from "@/lib/particle-flow";
 import { ParticleEffectSystem } from "@/lib/particles/agent-effects";
 import { createNebulaBackground } from "@/lib/particles/nebula-bg";
 import { spawnEdgeTrace, spawnEntityArrival } from "@/lib/particles/reactive-spawn";
+import { RadialTrafficController } from "@/lib/radial-traffic";
 import { hashStringToFloat, hubEmissiveIntensityAt, shimmerScale } from "@/lib/spoke-shimmer";
 import { hasWebGPU, preferredRendererKind } from "@/lib/webgpu-detect";
 import { BrainSocket, type BrainEvent } from "@/lib/websocket";
@@ -228,8 +229,6 @@ export function Brain() {
     scene.background = new THREE.Color("#05050a");
     const nebula = createNebulaBackground();
     scene.add(nebula.mesh);
-    const nebulaMaterial = nebula.mesh.material;
-    if (nebulaMaterial instanceof THREE.PointsMaterial) nebulaMaterial.opacity *= 0.4;
     const grid = createHexGridPlane();
     scene.add(grid);
     const clusterAuras = createClusterAuras();
@@ -382,6 +381,8 @@ export function Brain() {
     scene.add(particleSystem.points);
     const particleFlow = new ParticleFlowController(interHubEdges);
     scene.add(particleFlow.points);
+    const radialTraffic = new RadialTrafficController(slots);
+    scene.add(radialTraffic.points);
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     const hoveredIdRef = { current: null as string | null };
@@ -409,6 +410,7 @@ export function Brain() {
         nodeMesh.setColorAt(index, new THREE.Color(CLUSTER_COLORS[slot.clusterId]));
       });
       if (nodeMesh.instanceColor) nodeMesh.instanceColor.needsUpdate = true;
+      radialTraffic.setSlots(slots, performance.now());
     };
 
     const refreshInstanceTransforms = (now: number) => {
@@ -544,6 +546,7 @@ export function Brain() {
       interHubLines = buildInterHubEdges(interHubEdges);
       scene.add(interHubLines);
       particleFlow.setEdges(interHubEdges, performance.now());
+      radialTraffic.setSlots(slots, performance.now());
     };
 
     const refreshClusterLabels = () => {
@@ -661,6 +664,8 @@ export function Brain() {
       void dtMs;
       processLiveEvents(t);
       nebula.update(t);
+      nebula.mesh.rotation.z += 0.00012;
+      nebula.mesh.rotation.y += 0.00007;
       updateClusterAuras(clusterAuras, t);
       for (const [index, cluster] of CLUSTER_IDS.entries()) {
         const hub = hubMeshes.get(cluster);
@@ -671,6 +676,7 @@ export function Brain() {
       particleSystem.setParticleMultiplier(fpsGuard.particleMultiplier());
       particleSystem.update(t);
       particleFlow.update(t);
+      radialTraffic.update(t);
       const selectedId = useBrainStore.getState().selectedId;
       if (selectedId) {
         const target = findEntityPosition(entities.get(selectedId), positionsById);
@@ -728,6 +734,7 @@ export function Brain() {
       nebula.dispose();
       particleSystem.dispose();
       particleFlow.dispose();
+      radialTraffic.dispose();
       renderer.dispose();
       grid.geometry.dispose();
       grid.material.map?.dispose();
