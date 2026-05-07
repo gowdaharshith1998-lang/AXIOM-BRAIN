@@ -22,8 +22,8 @@ describe("synaptic-flow", () => {
     expect(particleCountForFps(4, "full")).toBe(12);
   });
 
-  it("uses two particles per edge in half FPS state", () => {
-    expect(particleCountForFps(4, "half")).toBe(8);
+  it("uses one particle per edge in half FPS state", () => {
+    expect(particleCountForFps(4, "half")).toBe(4);
   });
 
   it("drops particles in emergency FPS state", () => {
@@ -51,7 +51,7 @@ describe("synaptic-flow", () => {
 
     expect(flow.particleCount()).toBe(3);
     flow.updateSynapticFlow(0, 16, "half");
-    expect(flow.particleCount()).toBe(2);
+    expect(flow.particleCount()).toBe(1);
     flow.updateSynapticFlow(16, 16, "emergency");
     expect(flow.particleCount()).toBe(0);
 

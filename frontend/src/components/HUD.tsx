@@ -26,34 +26,47 @@ export function HUD() {
     return () => window.clearTimeout(timer);
   }, [lastSeq]);
 
+  const resetView = () => {
+    window.dispatchEvent(new Event("axiom:reset-view"));
+  };
+
   return (
-    <div className="absolute top-4 left-4 font-mono text-sm text-white/80 select-none pointer-events-none space-y-1">
-      <div className="flex items-center gap-2 text-lg font-semibold tracking-wider text-white/90">
-        <span>AXIOM</span>
-        <span
-          className={`h-2 w-2 rounded-full bg-[#50FA7B] ${live ? "opacity-100 animate-pulse" : "opacity-25"}`}
-          aria-hidden="true"
-        />
-      </div>
-      <div>
-        entities <span className="text-white">{entities.size}</span>
-      </div>
-      <div>
-        edges <span className="text-white">{edges.size}</span>
-      </div>
-      <div>
-        fps <span style={{ color: fpsColor }}>{fps}</span>
-      </div>
-      {selected && (
-        <div className="mt-3 pt-3 border-t border-white/10">
-          <div className="text-white/40 text-xs uppercase tracking-wider">selected</div>
-          <div>
-            {selected.type} · {name.slice(0, 32)}
-          </div>
-          <div className="text-white/40 text-xs">{selected.id.slice(0, 8)}</div>
+    <>
+      <div className="absolute top-4 left-4 font-mono text-sm text-white/80 select-none pointer-events-none space-y-1">
+        <div className="flex items-center gap-2 text-lg font-semibold tracking-wider text-white/90">
+          <span>AXIOM</span>
+          <span
+            className={`h-2 w-2 rounded-full bg-[#50FA7B] ${live ? "opacity-100 animate-pulse" : "opacity-25"}`}
+            aria-hidden="true"
+          />
         </div>
-      )}
-    </div>
+        <div>
+          entities <span className="text-white">{entities.size}</span>
+        </div>
+        <div>
+          edges <span className="text-white">{edges.size}</span>
+        </div>
+        <div>
+          fps <span style={{ color: fpsColor }}>{fps}</span>
+        </div>
+        {selected && (
+          <div className="mt-3 pt-3 border-t border-white/10">
+            <div className="text-white/40 text-xs uppercase tracking-wider">selected</div>
+            <div>
+              {selected.type} · {name.slice(0, 32)}
+            </div>
+            <div className="text-white/40 text-xs">{selected.id.slice(0, 8)}</div>
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={resetView}
+        className="reset-view-btn absolute top-4 right-4 rounded-md border border-white/10 bg-black/45 px-3 py-1.5 font-mono text-xs text-white/75 shadow-lg backdrop-blur transition hover:border-white/25 hover:bg-black/70 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/40"
+      >
+        ⟲ Reset View
+      </button>
+    </>
   );
 }
 

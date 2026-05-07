@@ -24,7 +24,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 // d3-force-3d currently publishes no TypeScript declarations.
 // @ts-expect-error missing declaration file for d3-force-3d
-import { forceSimulation, forceManyBody, forceLink, forceCenter } from "d3-force-3d";
+import { forceSimulation, forceManyBody, forceLink, forceCenter, forceRadial } from "d3-force-3d";
 import { useEffect, useRef, useState } from "react";
 
 import { AutoOrbitController } from "@/lib/auto-orbit";
@@ -61,6 +61,7 @@ import type { Edge, Entity } from "@/state/brain.store";
 type SimNode = {
   id: string;
   type: string;
+  lod?: LodLevel;
   index?: number;
   x?: number;
   y?: number;
@@ -77,6 +78,17 @@ type SimLink = {
   relationship: string;
 };
 
+type LodLevel = "near" | "far";
+
+type TuneableForce = {
+  strength?: (value: number) => TuneableForce;
+  distance?: (value: number) => TuneableForce;
+};
+
+type TuneableSimulation = {
+  force: (name: string) => TuneableForce | undefined;
+};
+
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -86,6 +98,31 @@ async function fetchJson<T>(url: string): Promise<T> {
 const NODE_RADIUS = 2.0;
 const SIM_TICKS_BEFORE_REST = 120;
 const SIM_REST_ALPHA = 0.001;
+const INITIAL_CAMERA_POSITION = new THREE.Vector3(0, 40, 220);
+const CAMERA_ANIMATION_MS = 600;
+const AUTO_FIT_ENTITY_STEP = 500;
+const USER_IDLE_AUTO_FIT_MS = 10_000;
+const FAR_LOD_DISTANCE = 280;
+const FAR_NODE_SCALE = 0.35;
+const FAR_EDGE_ALPHA = 0.12;
+const LABEL_OVERVIEW_ENTITY_LIMIT = 1500;
+
+function tuneForcesByCount(sim: TuneableSimulation, entityCount: number): void {
+  const c = Math.max(entityCount, 1);
+  // Keep the whole graph in one visual envelope as density grows.
+  const centerStrength = Math.min(0.05 + Math.log10(c) * 0.02, 0.15);
+  const chargeStrength = -30 * Math.pow(100 / Math.max(c, 100), 0.5);
+  const linkDistance = Math.max(20, 60 - Math.log10(c) * 8);
+  const linkStrength = Math.min(0.4 + Math.log10(c) * 0.05, 0.7);
+
+  sim.force("center")?.strength?.(centerStrength);
+  sim.force("charge")?.strength?.(chargeStrength);
+  sim.force("link")?.distance?.(linkDistance).strength?.(linkStrength);
+}
+
+function nextEntityThreshold(entityCount: number): number {
+  return Math.floor(entityCount / AUTO_FIT_ENTITY_STEP) * AUTO_FIT_ENTITY_STEP;
+}
 
 export function Brain() {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -164,8 +201,8 @@ export function Brain() {
     const nebula = createNebulaBackground();
     scene.add(nebula.mesh);
 
-    const camera = new THREE.PerspectiveCamera(60, width / height, 1, 2000);
-    camera.position.set(0, 40, 220);
+    const camera = new THREE.PerspectiveCamera(60, width / height, 1, 4000);
+    camera.position.copy(INITIAL_CAMERA_POSITION);
 
     // ----- Lights (essential: MeshStandardMaterial is black without them) -----
     const ambient = new THREE.AmbientLight(0xffffff, 0.5);
@@ -236,6 +273,7 @@ export function Brain() {
     const meshById = new Map<string, THREE.Mesh>();
     const ringById = new Map<string, THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>>();
     const labelByNodeId = new Map<string, HTMLDivElement>();
+    const nodeById = new Map(simData.nodes.map((node) => [node.id, node]));
     const neighborIds = new Map<string, Set<string>>();
 
     const addNodeMesh = (n: SimNode, entity?: Entity): THREE.Mesh => {
@@ -246,6 +284,7 @@ export function Brain() {
         emissiveIntensity: 0.6,
         roughness: 0.4,
         metalness: 0.1,
+        transparent: true,
       });
       const mesh = new THREE.Mesh(sphereGeom, mat);
       mesh.position.set(n.x ?? 0, n.y ?? 0, n.z ?? 0);
@@ -364,11 +403,22 @@ export function Brain() {
           .strength(0.4),
       )
       .force("center", forceCenter())
-      .alphaDecay(0.05)
+      .force("radial", forceRadial(0, 0, 0, 0).strength(0.02))
+      .alphaDecay(0.02)
+      .velocityDecay(0.5)
       .stop();
+    tuneForcesByCount(sim, simData.nodes.length);
 
     let simTicks = 0;
     const linkForce = sim.force("link") as { links: (links: SimLink[]) => void };
+    let forceTuneTimer: number | null = null;
+    const tuneForcesDebounced = () => {
+      if (forceTuneTimer !== null) window.clearTimeout(forceTuneTimer);
+      forceTuneTimer = window.setTimeout(() => {
+        tuneForcesByCount(sim, simData.nodes.length);
+        forceTuneTimer = null;
+      }, 250);
+    };
     const warmSimulation = (alpha: number) => {
       simTicks = 0;
       sim.alpha(Math.max(sim.alpha(), alpha));
@@ -387,6 +437,12 @@ export function Brain() {
         const mesh = meshById.get(n.id);
         if (!mesh) continue;
         mesh.position.set(n.x ?? 0, n.y ?? 0, n.z ?? 0);
+        n.lod = camera.position.distanceTo(mesh.position) > FAR_LOD_DISTANCE ? "far" : "near";
+        const material = mesh.material;
+        if (material instanceof THREE.MeshStandardMaterial) {
+          material.emissiveIntensity = n.lod === "far" ? 0.05 : 0.6;
+          material.opacity = n.lod === "far" ? 0.55 : 1;
+        }
         const ring = ringById.get(n.id);
         if (ring) ring.position.copy(mesh.position);
       }
@@ -411,6 +467,33 @@ export function Brain() {
       posAttr.needsUpdate = true;
     };
 
+    const applyEdgeLod = (fpsState: FpsGuardState) => {
+      const colorAttr = edgeGeom.getAttribute("color");
+      if (!(colorAttr instanceof THREE.BufferAttribute)) return;
+      const colorArr = colorAttr.array as Float32Array;
+      let updated = false;
+      for (let edgeIndex = 0; edgeIndex < simData.links.length; edgeIndex++) {
+        const link = simData.links[edgeIndex];
+        const src = typeof link.source === "object" ? link.source : undefined;
+        const tgt = typeof link.target === "object" ? link.target : undefined;
+        const far = src?.lod === "far" || tgt?.lod === "far";
+        if (!far && fpsState !== "emergency") continue;
+
+        const offset = edgeIndex * 8;
+        const alpha = fpsState === "emergency" ? 0.16 : FAR_EDGE_ALPHA;
+        colorArr[offset] = 0.45;
+        colorArr[offset + 1] = 0.48;
+        colorArr[offset + 2] = 0.55;
+        colorArr[offset + 3] = alpha;
+        colorArr[offset + 4] = 0.45;
+        colorArr[offset + 5] = 0.48;
+        colorArr[offset + 6] = 0.55;
+        colorArr[offset + 7] = alpha;
+        updated = true;
+      }
+      if (updated) colorAttr.needsUpdate = true;
+    };
+
     // ----- Interaction: hover rings, click focus, auto-orbit wake -----
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
@@ -419,6 +502,80 @@ export function Brain() {
     const flashByEdge = new Map<string, number>();
     const autoOrbit = new AutoOrbitController();
     autoOrbit.notifyInteraction(0);
+    let lastCameraInteractionMs = performance.now();
+    let lastAutoFitThreshold = nextEntityThreshold(simData.nodes.length);
+    let cameraFlight:
+      | {
+          startedAt: number;
+          durationMs: number;
+          fromPosition: THREE.Vector3;
+          toPosition: THREE.Vector3;
+          fromTarget: THREE.Vector3;
+          toTarget: THREE.Vector3;
+        }
+      | null = null;
+
+    const markCameraInteraction = (now = performance.now()) => {
+      lastCameraInteractionMs = now;
+      autoOrbit.notifyInteraction(now);
+    };
+
+    const startCameraFlight = (toPosition: THREE.Vector3, toTarget: THREE.Vector3, now = performance.now()) => {
+      focusTargetRef.current = null;
+      cameraFlight = {
+        startedAt: now,
+        durationMs: CAMERA_ANIMATION_MS,
+        fromPosition: camera.position.clone(),
+        toPosition,
+        fromTarget: controls.target.clone(),
+        toTarget,
+      };
+      markCameraInteraction(now);
+    };
+
+    const resetCamera = () => {
+      startCameraFlight(INITIAL_CAMERA_POSITION.clone(), new THREE.Vector3(0, 0, 0));
+    };
+
+    const fitToView = () => {
+      const box = new THREE.Box3();
+      let hasPoints = false;
+      for (const node of simData.nodes) {
+        const point = new THREE.Vector3(node.x ?? 0, node.y ?? 0, node.z ?? 0);
+        if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) continue;
+        box.expandByPoint(point);
+        hasPoints = true;
+      }
+      if (!hasPoints) {
+        resetCamera();
+        return;
+      }
+
+      const center = new THREE.Vector3();
+      const size = new THREE.Vector3();
+      box.getCenter(center);
+      box.getSize(size);
+
+      const fov = THREE.MathUtils.degToRad(camera.fov);
+      const verticalDistance = size.y / (2 * Math.tan(fov / 2));
+      const horizontalDistance = size.x / (2 * Math.tan(fov / 2) * Math.max(camera.aspect, 0.1));
+      const depthDistance = size.z * 0.5;
+      const distance = Math.max(verticalDistance, horizontalDistance, depthDistance, 140) * 1.35 + 30;
+      const direction = camera.position.clone().sub(controls.target);
+      if (direction.lengthSq() < 0.001) direction.set(0, 0.2, 1);
+      direction.normalize();
+
+      camera.far = Math.max(4000, distance * 4);
+      camera.updateProjectionMatrix();
+      startCameraFlight(center.clone().add(direction.multiplyScalar(distance)), center);
+    };
+
+    const maybeAutoFitAfterGrowth = () => {
+      const threshold = nextEntityThreshold(simData.nodes.length);
+      if (threshold < AUTO_FIT_ENTITY_STEP || threshold <= lastAutoFitThreshold) return;
+      lastAutoFitThreshold = threshold;
+      if (performance.now() - lastCameraInteractionMs >= USER_IDLE_AUTO_FIT_MS) fitToView();
+    };
 
     const setPointer = (ev: PointerEvent) => {
       const rect = renderer.domElement.getBoundingClientRect();
@@ -439,7 +596,7 @@ export function Brain() {
     };
 
     const onPointerDown = (ev: PointerEvent) => {
-      autoOrbit.notifyInteraction(ev.timeStamp);
+      markCameraInteraction(ev.timeStamp);
       setPointer(ev);
       const mesh = hitNode();
       if (!mesh) return;
@@ -460,11 +617,29 @@ export function Brain() {
       orbitalHalo.setTarget(mesh.position, NODE_RADIUS * 3.2, color);
       scene.add(orbitalHalo.points);
     };
-    const notifyOrbitInteraction = (ev: Event) => autoOrbit.notifyInteraction(ev.timeStamp);
+    const notifyOrbitInteraction = (ev: Event) => markCameraInteraction(ev.timeStamp);
+    const onKeyDown = (ev: KeyboardEvent) => {
+      const target = ev.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+        return;
+      }
+      const key = ev.key.toLowerCase();
+      if (key === "r" || key === "0" || key === "escape") {
+        ev.preventDefault();
+        resetCamera();
+      }
+      if (key === "f") {
+        ev.preventDefault();
+        fitToView();
+      }
+    };
+    const onHudResetView = () => resetCamera();
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("wheel", notifyOrbitInteraction, { passive: true });
     renderer.domElement.addEventListener("touchstart", notifyOrbitInteraction, { passive: true });
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("axiom:reset-view", onHudResetView);
 
     // ----- Render loop -----
     const fps = new RollingFpsCounter(60);
@@ -475,13 +650,17 @@ export function Brain() {
     let labelFpsState: FpsGuardState = "full";
     let labelBelowThresholdSince: number | null = null;
     let labelRecoverSince: number | null = null;
+    let shimmerFrame = 0;
 
     const appendEntity = (entity: Entity): THREE.Mesh => {
       const [x, y, z] = envelopePosition(entity.id);
       const node: SimNode = { id: entity.id, type: entity.type, x, y, z };
       simData.nodes.push(node);
+      nodeById.set(node.id, node);
       const mesh = addNodeMesh(node, entity);
       sim.nodes(simData.nodes);
+      tuneForcesDebounced();
+      maybeAutoFitAfterGrowth();
       warmSimulation(0.1);
       return mesh;
     };
@@ -509,6 +688,7 @@ export function Brain() {
       resizeEdgeBuffers();
       synapticFlow.setEdges(synapticEdges);
       linkForce.links(simData.links);
+      tuneForcesDebounced();
       warmSimulation(0.05);
     };
 
@@ -591,13 +771,15 @@ export function Brain() {
       for (const [nodeId, labelDiv] of labelByNodeId) {
         const mesh = meshById.get(nodeId);
         if (!mesh) continue;
-        const visible = shouldShowLabel({
-          nodeId,
-          cameraDistance: camera.position.distanceTo(mesh.position),
-          selectedId,
-          selectedNeighborIds,
-          fpsGuardState: labelFpsState,
-        });
+        const visible =
+          (nodeById.get(nodeId)?.lod ?? "near") === "near" &&
+          shouldShowLabel({
+            nodeId,
+            cameraDistance: camera.position.distanceTo(mesh.position),
+            selectedId,
+            selectedNeighborIds,
+            fpsGuardState: labelFpsState,
+          });
 
         if (visible) {
           if (labelDiv.style.display === "none") {
@@ -612,15 +794,31 @@ export function Brain() {
       }
     };
 
+    const hideAllLabels = () => {
+      for (const labelDiv of labelByNodeId.values()) {
+        if (labelDiv.style.display !== "none") {
+          labelDiv.style.opacity = "0";
+          labelDiv.style.display = "none";
+        }
+      }
+    };
+
     const updateHoverAndRings = () => {
       const hoveredId = hoveredIdRef.current;
       const activeNeighbors = hoveredId ? neighborIds.get(hoveredId) : null;
       for (const [id, mesh] of meshById) {
-        const targetScale = id === hoveredId ? 1.2 : 1;
-        mesh.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.15);
+        const lodScale = nodeById.get(id)?.lod === "far" ? FAR_NODE_SCALE : 1;
+        const targetScale = (id === hoveredId ? 1.2 : 1) * lodScale;
+        const nextScale = mesh.scale.x + (targetScale - mesh.scale.x) * 0.15;
+        mesh.scale.setScalar(nextScale);
 
         const ring = ringById.get(id);
         if (!ring) continue;
+        if (lodScale < 1) {
+          ring.visible = false;
+          ring.material.opacity = 0;
+          continue;
+        }
         const isHover = id === hoveredId;
         const isNeighbor = activeNeighbors?.has(id) ?? false;
         const targetOpacity = isHover ? 0.45 : isNeighbor ? 0.18 : 0;
@@ -667,10 +865,15 @@ export function Brain() {
       stepSim();
       syncPositions();
       nebula.update(t);
-      pulseRunner.update(meshById, t);
+      const fpsState = fpsGuard.state();
+      if (fpsState !== "emergency") pulseRunner.update(meshById, t);
       try {
-        updateEdgeShimmer(edgeShimmerSpec, t);
-        updateSynapticFlow(t, dtMs, fpsGuard.state());
+        shimmerFrame++;
+        if (fpsState === "full" || (fpsState === "half" && shimmerFrame % 2 === 0)) {
+          updateEdgeShimmer(edgeShimmerSpec, t);
+        }
+        applyEdgeLod(fpsState);
+        updateSynapticFlow(t, dtMs, fpsState);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error("[Brain] edge activity update failed:", err);
@@ -698,9 +901,24 @@ export function Brain() {
         }
       }
 
+      if (cameraFlight) {
+        const progress = Math.min(1, (t - cameraFlight.startedAt) / cameraFlight.durationMs);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        camera.position.lerpVectors(cameraFlight.fromPosition, cameraFlight.toPosition, eased);
+        controls.target.lerpVectors(cameraFlight.fromTarget, cameraFlight.toTarget, eased);
+        if (progress >= 1) cameraFlight = null;
+      }
+
       autoOrbit.applyToCamera(camera, t, dtMs);
       try {
-        updateLabelVisibility();
+        const labelsAllowed =
+          fpsState === "full" &&
+          (simData.nodes.length <= LABEL_OVERVIEW_ENTITY_LIMIT || useBrainStore.getState().selectedId !== null);
+        if (labelsAllowed) {
+          updateLabelVisibility();
+        } else {
+          hideAllLabels();
+        }
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error("[Brain] label visibility update failed:", err);
@@ -708,7 +926,10 @@ export function Brain() {
       controls.update();
       composer.render();
       try {
-        labelRenderer.render(scene, camera);
+        const labelsAllowed =
+          fpsState === "full" &&
+          (simData.nodes.length <= LABEL_OVERVIEW_ENTITY_LIMIT || useBrainStore.getState().selectedId !== null);
+        if (labelsAllowed) labelRenderer.render(scene, camera);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error("[Brain] label render failed:", err);
@@ -737,6 +958,9 @@ export function Brain() {
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("wheel", notifyOrbitInteraction);
       renderer.domElement.removeEventListener("touchstart", notifyOrbitInteraction);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("axiom:reset-view", onHudResetView);
+      if (forceTuneTimer !== null) window.clearTimeout(forceTuneTimer);
       sim.stop();
       controls.dispose();
       composer.dispose();

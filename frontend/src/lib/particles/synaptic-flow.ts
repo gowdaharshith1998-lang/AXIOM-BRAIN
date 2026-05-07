@@ -18,7 +18,7 @@ export type SynapticFlowPosition = {
 type GetNodePositions = (edge: SynapticFlowEdge) => SynapticFlowPosition | null;
 
 const PARTICLES_FULL = 3;
-const PARTICLES_HALF = 2;
+const PARTICLES_HALF = 1;
 const TWO_PI = Math.PI * 2;
 
 let activeFlow: SynapticFlow | null = null;
