@@ -7,21 +7,22 @@ import {
   CLUSTER_IDS,
   CLUSTER_LABELS,
   clusterGravityForce,
+  clusterGravityDampingFactor,
   fibonacciSpherePoints,
   isClusterId,
 } from "@/lib/cluster-layout";
 
 describe("fibonacciSpherePoints", () => {
   it("distributes n points on a sphere with the requested radius", () => {
-    const points = fibonacciSpherePoints(7, 100);
+    const points = fibonacciSpherePoints(7, 55);
     expect(points).toHaveLength(7);
     for (const point of points) {
-      expect(point.length()).toBeCloseTo(100, 3);
+      expect(point.length()).toBeCloseTo(55, 3);
     }
   });
 
   it("places points at distinct positions", () => {
-    const points = fibonacciSpherePoints(7, 100);
+    const points = fibonacciSpherePoints(7, 55);
     const seen = new Set<string>();
     for (const point of points) {
       seen.add(`${point.x.toFixed(3)},${point.y.toFixed(3)},${point.z.toFixed(3)}`);
@@ -31,10 +32,10 @@ describe("fibonacciSpherePoints", () => {
 
   it("spreads points across the sphere (covers all octants of y)", () => {
     // For n=7 the golden-angle distribution spans y from 1 down to -1.
-    const points = fibonacciSpherePoints(7, 100);
+    const points = fibonacciSpherePoints(7, 55);
     const ys = points.map((p) => p.y / 100).sort((a, b) => a - b);
-    expect(ys[0]).toBeLessThan(-0.5);
-    expect(ys[ys.length - 1]).toBeGreaterThan(0.5);
+    expect(ys[0]).toBeLessThan(-0.25);
+    expect(ys[ys.length - 1]).toBeGreaterThan(0.25);
   });
 
   it("returns an empty array for non-positive n", () => {
@@ -149,5 +150,56 @@ describe("clusterGravityForce", () => {
     const returned = force.strength(0.2);
     expect(returned).toBe(force);
     expect(force.strength()).toBe(0.2);
+  });
+
+  it("strong gravity pulls an entity more than five units toward its centroid", () => {
+    const centroid = CLUSTER_CENTROIDS.billing_payments;
+    const node = {
+      cluster_id: "billing_payments",
+      x: centroid.x + 50,
+      y: centroid.y,
+      z: centroid.z,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+    };
+    const force = clusterGravityForce();
+    force.initialize([node]);
+    force(1);
+    expect(node.vx).toBeLessThan(-5);
+  });
+
+  it("damping factor at distance six is near half strength", () => {
+    expect(clusterGravityDampingFactor(6)).toBeCloseTo(0.4, 1);
+  });
+
+  it("does not overshoot badly near the centroid", () => {
+    const centroid = CLUSTER_CENTROIDS.incidents_ops;
+    const node = {
+      cluster_id: "incidents_ops",
+      x: centroid.x + 4,
+      y: centroid.y,
+      z: centroid.z,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+    };
+    const force = clusterGravityForce();
+    force.initialize([node]);
+    for (let i = 0; i < 20; i++) {
+      force(0.1);
+      node.x += node.vx;
+      node.vx *= 0.2;
+    }
+    expect(node.x).toBeGreaterThanOrEqual(centroid.x - 1);
+  });
+
+  it("keeps centroid pairwise distance above thirty", () => {
+    const points = CLUSTER_IDS.map((id) => CLUSTER_CENTROIDS[id]);
+    for (let i = 0; i < points.length; i++) {
+      for (let j = i + 1; j < points.length; j++) {
+        expect(points[i].distanceTo(points[j])).toBeGreaterThan(30);
+      }
+    }
   });
 });

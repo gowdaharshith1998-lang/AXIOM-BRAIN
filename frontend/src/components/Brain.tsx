@@ -27,6 +27,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { forceSimulation, forceManyBody, forceLink, forceCenter, forceRadial } from "d3-force-3d";
 import { useEffect, useRef, useState } from "react";
 
+import { createClusterAuras, updateClusterAuras } from "@/components/ClusterAura";
 import { AutoOrbitController } from "@/lib/auto-orbit";
 import { envelopePosition } from "@/lib/brain-envelope";
 import { flyToEntity } from "@/lib/camera-flyto";
@@ -47,8 +48,10 @@ import {
   type ClusterId,
 } from "@/lib/cluster-layout";
 import { colorForRelationship } from "@/lib/edge-tint";
+import { edgeOpacityForClusters } from "@/lib/edge-style";
 import { RollingFpsCounter } from "@/lib/fps";
 import { FpsGuard, type FpsGuardState } from "@/lib/fps-guard";
+import { bloomStrengthForDistance, createNodeSpriteMaterial, nodeLodMode, shouldRenderEdge } from "@/lib/lod";
 import {
   displayLabelFor,
   LABEL_FPS_HIDE_THRESHOLD,
@@ -120,13 +123,13 @@ const NODE_RADIUS = 2.0;
 const SIM_TICKS_BEFORE_REST = 120;
 const SIM_REST_ALPHA = 0.001;
 const INITIAL_CAMERA_POSITION = new THREE.Vector3(0, 40, 220);
-const CAMERA_ANIMATION_MS = 600;
+const CAMERA_ANIMATION_MS = 800;
 const AUTO_FIT_ENTITY_STEP = 500;
 const USER_IDLE_AUTO_FIT_MS = 10_000;
-const FAR_LOD_DISTANCE = 280;
+const FAR_LOD_DISTANCE = 180;
 const FAR_NODE_SCALE = 0.35;
 const FAR_EDGE_ALPHA = 0.12;
-const LABEL_OVERVIEW_ENTITY_LIMIT = 1500;
+const LABEL_OVERVIEW_ENTITY_LIMIT = 3000;
 const BASE_NODE_EMISSIVE = 0.2;
 const FAR_NODE_EMISSIVE = 0.05;
 const SELECTED_NODE_EMISSIVE = 0.4;
@@ -252,6 +255,8 @@ export function Brain() {
     scene.background = new THREE.Color("#0a0a14");
     const nebula = createNebulaBackground();
     scene.add(nebula.mesh);
+    const clusterAuras = createClusterAuras();
+    for (const aura of clusterAuras) scene.add(aura);
 
     const camera = new THREE.PerspectiveCamera(60, width / height, 1, 4000);
     camera.position.copy(INITIAL_CAMERA_POSITION);
@@ -298,7 +303,8 @@ export function Brain() {
     // ----- Post-processing: UnrealBloom + ACES via composer -----
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    composer.addPass(new UnrealBloomPass(new THREE.Vector2(width, height), 0.45, 0.35, 0.92));
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.45, 0.35, 0.92);
+    composer.addPass(bloomPass);
 
     // ----- DOM label overlay (non-interactive; OrbitControls keep pointer ownership) -----
     const labelRenderer = new CSS2DRenderer();
@@ -384,6 +390,7 @@ export function Brain() {
     const sphereGeom = new THREE.SphereGeometry(NODE_RADIUS, 14, 14);
     const ringGeom = new THREE.TorusGeometry(NODE_RADIUS * 1.6, 0.035, 6, 40);
     const meshById = new Map<string, THREE.Mesh>();
+    const spriteById = new Map<string, THREE.Sprite>();
     const ringById = new Map<string, THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>>();
     const labelByNodeId = new Map<string, HTMLDivElement>();
     const labelVisibleByNodeId = new Map<string, boolean>();
@@ -407,6 +414,13 @@ export function Brain() {
       mesh.userData = { id: n.id, type: n.type };
       nodeGroup.add(mesh);
       meshById.set(n.id, mesh);
+      const sprite = new THREE.Sprite(createNodeSpriteMaterial(color));
+      sprite.position.copy(mesh.position);
+      sprite.scale.setScalar(NODE_RADIUS * 5);
+      sprite.visible = false;
+      sprite.userData = { id: n.id, type: n.type };
+      nodeGroup.add(sprite);
+      spriteById.set(n.id, sprite);
 
       if (entity) {
         const labelDiv = document.createElement("div");
@@ -504,7 +518,6 @@ export function Brain() {
         const cross = crossClusterByIndex[edgeIndex];
         const offset = edgeIndex * 8;
         const scale = cross ? crossRatio / sameRatio : 1;
-        if (scale === 1) continue;
         colorArr[offset + 3] *= scale;
         colorArr[offset + 7] *= scale;
       }
@@ -627,7 +640,14 @@ export function Brain() {
         const mesh = meshById.get(n.id);
         if (!mesh) continue;
         mesh.position.set(n.x ?? 0, n.y ?? 0, n.z ?? 0);
-        n.lod = camera.position.distanceTo(mesh.position) > FAR_LOD_DISTANCE ? "far" : "near";
+        const globalOverview = nodeLodMode(camera.position.length()) === "sprite";
+        n.lod = globalOverview || camera.position.distanceTo(mesh.position) > FAR_LOD_DISTANCE ? "far" : "near";
+        mesh.visible = n.lod === "near";
+        const sprite = spriteById.get(n.id);
+        if (sprite) {
+          sprite.visible = n.lod === "far";
+          sprite.position.copy(mesh.position);
+        }
         const material = mesh.material;
         if (material instanceof THREE.MeshStandardMaterial) {
           material.opacity = n.lod === "far" ? 0.55 : 1;
@@ -644,6 +664,16 @@ export function Brain() {
         const tgt = typeof link.target === "object" ? link.target : undefined;
         if (!src || !tgt) {
           idx += 6;
+          continue;
+        }
+        const visible = shouldRenderEdge(Math.floor((idx - 0) / 6), camera.position.length());
+        if (!visible) {
+          arr[idx++] = src.x ?? 0;
+          arr[idx++] = src.y ?? 0;
+          arr[idx++] = src.z ?? 0;
+          arr[idx++] = src.x ?? 0;
+          arr[idx++] = src.y ?? 0;
+          arr[idx++] = src.z ?? 0;
           continue;
         }
         arr[idx++] = src.x ?? 0;
@@ -665,11 +695,18 @@ export function Brain() {
         const link = simData.links[edgeIndex];
         const src = typeof link.source === "object" ? link.source : undefined;
         const tgt = typeof link.target === "object" ? link.target : undefined;
+        if (!src || !tgt) continue;
         const far = src?.lod === "far" || tgt?.lod === "far";
         if (!far && fpsState !== "emergency") continue;
 
         const offset = edgeIndex * 8;
-        const alpha = fpsState === "emergency" ? 0.16 : FAR_EDGE_ALPHA;
+        const sourceId = src.id;
+        const targetId = tgt.id;
+        const baseAlpha = edgeOpacityForClusters(
+          nodeById.get(sourceId)?.cluster_id,
+          nodeById.get(targetId)?.cluster_id,
+        );
+        const alpha = Math.min(baseAlpha, fpsState === "emergency" ? 0.16 : FAR_EDGE_ALPHA);
         colorArr[offset] = 0.45;
         colorArr[offset + 1] = 0.48;
         colorArr[offset + 2] = 0.55;
@@ -1202,6 +1239,8 @@ export function Brain() {
       advanceDrifts(t);
       syncPositions();
       nebula.update(t);
+      updateClusterAuras(clusterAuras, t);
+      bloomPass.strength = bloomStrengthForDistance(camera.position.length());
       const fpsState = fpsGuard.state();
       if (fpsState !== "emergency") {
         pulseRunner.update(
@@ -1338,6 +1377,14 @@ export function Brain() {
       ringById.forEach((r) => {
         r.material.dispose();
       });
+      spriteById.forEach((s) => {
+        s.material.dispose();
+      });
+      clusterAuras.forEach((aura) => {
+        scene.remove(aura);
+        aura.geometry.dispose();
+        aura.material.dispose();
+      });
       if (renderer.domElement.parentNode === el) {
         el.removeChild(renderer.domElement);
       }
@@ -1349,4 +1396,3 @@ export function Brain() {
 
   return <div ref={containerRef} className="absolute inset-0" aria-hidden="true" />;
 }
-

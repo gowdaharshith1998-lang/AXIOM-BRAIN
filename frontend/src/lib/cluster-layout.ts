@@ -33,21 +33,21 @@ export const CLUSTER_LABELS: Record<ClusterId, string> = {
 };
 
 export const CLUSTER_COLORS: Record<ClusterId, string> = {
-  billing_payments: "#FF79C6",
-  incidents_ops: "#FF5555",
-  engineering_code: "#7CFC9F",
-  people_teams: "#F1FA8C",
-  decisions_policy: "#BD93F9",
-  customer_support: "#8BE9FD",
-  growth_product: "#50FA7B",
+  billing_payments: "#ec4899",
+  incidents_ops: "#ef4444",
+  engineering_code: "#84cc16",
+  people_teams: "#eab308",
+  decisions_policy: "#a855f7",
+  customer_support: "#06b6d4",
+  growth_product: "#22c55e",
 };
 
-export const CLUSTER_CENTROID_RADIUS = 100;
-export const CLUSTER_GRAVITY_DEFAULT = 0.05;
+export const CLUSTER_CENTROID_RADIUS = 55;
+export const CLUSTER_GRAVITY_DEFAULT = 0.35;
 export const CLUSTER_LABEL_SHOW_DISTANCE = 250;
 export const CLUSTER_LABEL_HIDE_DISTANCE = 200;
-export const CROSS_CLUSTER_EDGE_OPACITY = 0.3;
-export const SAME_CLUSTER_EDGE_OPACITY = 0.4;
+export const CROSS_CLUSTER_EDGE_OPACITY = 0.4;
+export const SAME_CLUSTER_EDGE_OPACITY = 1.0;
 export const CROSS_CLUSTER_EDGE_WIDTH = 0.5;
 export const SAME_CLUSTER_EDGE_WIDTH = 0.7;
 
@@ -106,6 +106,13 @@ export type ClusterGravityForce = {
   strength: (value?: number) => number | ClusterGravityForce;
 };
 
+export function clusterGravityDampingFactor(distance: number): number {
+  if (distance <= 4) return 0.3;
+  if (distance >= 12) return 1;
+  const t = (distance - 4) / 8;
+  return 0.3 + 0.7 * (0.5 - 0.5 * Math.cos(Math.PI * t));
+}
+
 /**
  * d3-force-3d compatible force that nudges each classified node toward
  * the centroid of its cluster every tick. Unclassified nodes pass
@@ -127,9 +134,14 @@ export function clusterGravityForce(
       const x = node.x ?? 0;
       const y = node.y ?? 0;
       const z = node.z ?? 0;
-      node.vx = (node.vx ?? 0) + (centroid.x - x) * s * alpha;
-      node.vy = (node.vy ?? 0) + (centroid.y - y) * s * alpha;
-      node.vz = (node.vz ?? 0) + (centroid.z - z) * s * alpha;
+      const dx = centroid.x - x;
+      const dy = centroid.y - y;
+      const dz = centroid.z - z;
+      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const damped = s * clusterGravityDampingFactor(distance);
+      node.vx = (node.vx ?? 0) + dx * damped * alpha;
+      node.vy = (node.vy ?? 0) + dy * damped * alpha;
+      node.vz = (node.vz ?? 0) + dz * damped * alpha;
     }
   }) as ClusterGravityForce;
 

@@ -1,4 +1,5 @@
-const ELLIPSOID = { rx: 80, ry: 50, rz: 60 };
+export const BRAIN_ENVELOPE_RADIUS = 75;
+const ELLIPSOID = { rx: 90, ry: BRAIN_ENVELOPE_RADIUS, rz: 80 };
 
 function idToFloat(id: string, salt: number): number {
   let h = 2166136261 ^ salt;
@@ -29,4 +30,3 @@ export function envelopePosition(id: string): [number, number, number] {
     sz * ELLIPSOID.rz * (1 + noise),
   ];
 }
-
