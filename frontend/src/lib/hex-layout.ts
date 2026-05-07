@@ -5,8 +5,8 @@ import type { Edge, Entity } from "@/state/brain.store";
 
 export const CLUSTER_HUB_SPACING = 90;
 export const CLUSTER_RING_RADIUS = 18;
-export const CLUSTER_RING_STEP = 8;
-export const CLUSTER_VISIBLE_SLOTS = [6, 8, 12] as const;
+export const CLUSTER_RING_STEP = 6;
+export const CLUSTER_VISIBLE_SLOTS = [8, 12, 16, 20, 24] as const;
 export const MAX_VISIBLE_PER_CLUSTER = CLUSTER_VISIBLE_SLOTS.reduce((total, next) => total + next, 0);
 
 export const HEX_CLUSTER_CENTROIDS: Record<ClusterId, THREE.Vector3> = {
@@ -33,17 +33,17 @@ export type InterHubEdge = {
   targetCluster: ClusterId;
 };
 
-function importance(entity: Entity): number {
+export function entityImportance(entity: Entity): number {
   const direct = entity.composite_importance;
   if (typeof direct === "number" && Number.isFinite(direct)) return direct;
   const nested = entity.data?.composite_importance;
   return typeof nested === "number" && Number.isFinite(nested) ? nested : 0;
 }
 
-export function sortedVisibleEntities(entities: Entity[]): Entity[] {
+export function sortedVisibleEntities(entities: Entity[], maxVisible = MAX_VISIBLE_PER_CLUSTER): Entity[] {
   return [...entities]
-    .sort((a, b) => importance(b) - importance(a) || a.id.localeCompare(b.id))
-    .slice(0, MAX_VISIBLE_PER_CLUSTER);
+    .sort((a, b) => entityImportance(b) - entityImportance(a) || a.id.localeCompare(b.id))
+    .slice(0, maxVisible);
 }
 
 export function computeStarburstPositions(entities: Entity[]): Map<string, THREE.Vector3> {
@@ -78,6 +78,7 @@ export function computeStarburstPositions(entities: Entity[]): Map<string, THREE
 export function computeVisibleEntitySlots(
   entities: Iterable<Entity>,
   clusterIds: readonly ClusterId[],
+  maxVisiblePerCluster = MAX_VISIBLE_PER_CLUSTER,
 ): VisibleEntitySlot[] {
   const byCluster = new Map<ClusterId, Entity[]>();
   for (const id of clusterIds) byCluster.set(id, []);
@@ -90,7 +91,7 @@ export function computeVisibleEntitySlots(
 
   const slotsOut: VisibleEntitySlot[] = [];
   for (const clusterId of clusterIds) {
-    const visible = sortedVisibleEntities(byCluster.get(clusterId) ?? []);
+    const visible = sortedVisibleEntities(byCluster.get(clusterId) ?? [], maxVisiblePerCluster);
     const centroid = HEX_CLUSTER_CENTROIDS[clusterId];
     let index = 0;
     for (let ring = 0; ring < CLUSTER_VISIBLE_SLOTS.length; ring++) {

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { CLUSTER_CENTROIDS, CLUSTER_IDS } from "@/lib/cluster-layout";
 import {
+  CLUSTER_RING_STEP,
+  CLUSTER_VISIBLE_SLOTS,
   computeInterHubEdges,
   computeStarburstPositions,
   computeVisibleEntitySlots,
@@ -57,18 +59,18 @@ describe("hex cluster centroids", () => {
 });
 
 describe("computeStarburstPositions", () => {
-  it("positions the top twenty-six entities per cluster", () => {
-    const entities = Array.from({ length: 40 }, (_, i) => entity(`e${i}`, "billing_payments", 1 - i / 100));
+  it("positions the top eighty entities per cluster", () => {
+    const entities = Array.from({ length: 96 }, (_, i) => entity(`e${i}`, "billing_payments", 1 - i / 100));
     const positions = computeStarburstPositions(entities);
     expect(positions.size).toBe(MAX_VISIBLE_PER_CLUSTER);
     expect(positions.has("e0")).toBe(true);
-    expect(positions.has("e25")).toBe(true);
+    expect(positions.has("e79")).toBe(true);
   });
 
   it("omits low-importance entities", () => {
-    const entities = Array.from({ length: 40 }, (_, i) => entity(`e${i}`, "billing_payments", 1 - i / 100));
+    const entities = Array.from({ length: 96 }, (_, i) => entity(`e${i}`, "billing_payments", 1 - i / 100));
     const positions = computeStarburstPositions(entities);
-    expect(positions.has("e39")).toBe(false);
+    expect(positions.has("e95")).toBe(false);
   });
 
   it("is deterministic", () => {
@@ -80,12 +82,25 @@ describe("computeStarburstPositions", () => {
 });
 
 describe("visible slots and inter-hub edges", () => {
-  it("caps visible entities to twenty-six per cluster", () => {
+  it("caps visible entities to eighty per cluster", () => {
     const entities = CLUSTER_IDS.flatMap((cluster) =>
-      Array.from({ length: 35 }, (_, i) => entity(`${cluster}-${i}`, cluster, 1 - i / 100)),
+      Array.from({ length: 96 }, (_, i) => entity(`${cluster}-${i}`, cluster, 1 - i / 100)),
     );
     const slots = computeVisibleEntitySlots(entities, CLUSTER_IDS);
     expect(slots).toHaveLength(CLUSTER_IDS.length * MAX_VISIBLE_PER_CLUSTER);
+  });
+
+  it("uses the OMNIX dense five-ring slot budget", () => {
+    expect(CLUSTER_VISIBLE_SLOTS).toEqual([8, 12, 16, 20, 24]);
+    expect(MAX_VISIBLE_PER_CLUSTER).toBe(80);
+    expect(CLUSTER_RING_STEP).toBe(6);
+  });
+
+  it("honors a reduced visible node budget", () => {
+    const entities = Array.from({ length: 90 }, (_, i) => entity(`budget-${i}`, "billing_payments", 1 - i / 100));
+    const slots = computeVisibleEntitySlots(entities, CLUSTER_IDS, 40);
+    expect(slots).toHaveLength(40);
+    expect(slots.at(-1)?.entity.id).toBe("budget-39");
   });
 
   it("creates cross-cluster hub edges only for connected pairs", () => {

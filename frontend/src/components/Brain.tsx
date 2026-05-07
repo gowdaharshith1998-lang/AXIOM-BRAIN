@@ -27,6 +27,7 @@ import {
   isClusterId,
   type ClusterId,
 } from "@/lib/cluster-layout";
+import { buildIntraClusterMeshGroup } from "@/lib/cluster-mesh";
 import { createEdgeMaterialForClusters } from "@/lib/edge-style";
 import { RollingFpsCounter } from "@/lib/fps";
 import { FpsGuard } from "@/lib/fps-guard";
@@ -34,6 +35,7 @@ import { createHexPrismGeometry, HEX_HEIGHT, HEX_HUB_RADIUS, HEX_NODE_RADIUS } f
 import {
   computeInterHubEdges,
   computeVisibleEntitySlots,
+  entityImportance,
   findEntityPosition,
   MAX_VISIBLE_PER_CLUSTER,
   type InterHubEdge,
@@ -46,6 +48,7 @@ import { ParticleEffectSystem } from "@/lib/particles/agent-effects";
 import { createNebulaBackground } from "@/lib/particles/nebula-bg";
 import { spawnEdgeTrace, spawnEntityArrival } from "@/lib/particles/reactive-spawn";
 import { RadialTrafficController } from "@/lib/radial-traffic";
+import { createSphereNodeGeometry } from "@/lib/sphere-geometry";
 import { hashStringToFloat, hubEmissiveIntensityAt, shimmerScale } from "@/lib/spoke-shimmer";
 import { hasWebGPU, preferredRendererKind } from "@/lib/webgpu-detect";
 import { BrainSocket, type BrainEvent } from "@/lib/websocket";
@@ -60,7 +63,6 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 const INITIAL_CAMERA_POSITION = new THREE.Vector3(0, 0, 280);
 const CAMERA_ANIMATION_MS = RESET_CAMERA_MS;
-const NODE_EMISSIVE = 0.7;
 const HUB_EMISSIVE = 1.4;
 const SELECTED_SCALE = 1.22;
 const FLASH_MS = 650;
@@ -106,7 +108,7 @@ function setInstanceTransform(
   const scale = new THREE.Vector3(
     importanceScale * selectedScale * hoverScale * flashScale * spokeScale,
     importanceScale * selectedScale * hoverScale * flashScale * spokeScale,
-    1,
+    importanceScale * selectedScale * hoverScale * flashScale * spokeScale,
   );
   matrix.compose(slot.position, quat, scale);
   mesh.setMatrixAt(index, matrix);
@@ -219,7 +221,8 @@ export function Brain() {
     const state = useBrainStore.getState();
     const entities = new Map(state.entities);
     const edges = new Map(state.edges);
-    let slots = computeVisibleEntitySlots(entities.values(), CLUSTER_IDS);
+    let maxVisiblePerCluster = MAX_VISIBLE_PER_CLUSTER;
+    let slots = computeVisibleEntitySlots(entities.values(), CLUSTER_IDS, maxVisiblePerCluster);
     let interHubEdges = computeInterHubEdges(edges.values(), entities);
     const positionsById = new Map(slots.map((slot) => [slot.entity.id, slot.position.clone()]));
     const idByInstanceIndex = slots.map((slot) => slot.entity.id);
@@ -316,15 +319,13 @@ export function Brain() {
     }
     scene.add(bracketLines);
 
-    const nodeGeometry = createHexPrismGeometry(HEX_NODE_RADIUS, HEX_HEIGHT);
-    const nodeMaterial = new THREE.MeshStandardMaterial({
+    const nodeGeometry = createSphereNodeGeometry();
+    const nodeMaterial = new THREE.MeshBasicMaterial({
       color: 0xffffff,
-      emissive: 0xffffff,
-      emissiveIntensity: NODE_EMISSIVE,
-      metalness: 0.2,
-      roughness: 0.45,
       transparent: true,
-      opacity: 0.95,
+      opacity: 0.82,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
     });
     const nodeMesh = new THREE.InstancedMesh(
       nodeGeometry,
@@ -335,7 +336,9 @@ export function Brain() {
     nodeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     for (let i = 0; i < slots.length; i++) {
       setInstanceTransform(nodeMesh, i, slots[i], null, null, undefined, 0);
-      nodeMesh.setColorAt(i, new THREE.Color(CLUSTER_COLORS[slots[i].clusterId]));
+      const importance = THREE.MathUtils.clamp(entityImportance(slots[i].entity), 0, 1);
+      const color = new THREE.Color(CLUSTER_COLORS[slots[i].clusterId]).lerp(new THREE.Color("#ffffff"), importance * 0.35);
+      nodeMesh.setColorAt(i, color);
     }
     if (nodeMesh.instanceColor) nodeMesh.instanceColor.needsUpdate = true;
     scene.add(nodeMesh);
@@ -355,7 +358,7 @@ export function Brain() {
         }),
       );
       mesh.position.copy(CLUSTER_CENTROIDS[cluster]);
-      mesh.scale.setScalar(1.08);
+      mesh.scale.setScalar(1.3);
       mesh.userData = { cluster };
       hubMeshes.set(cluster, mesh);
       scene.add(mesh);
@@ -363,6 +366,8 @@ export function Brain() {
 
     let radialEdges = buildRadialEdges(slots);
     scene.add(radialEdges);
+    let intraClusterMesh = buildIntraClusterMeshGroup(slots);
+    scene.add(intraClusterMesh);
     let interHubLines = buildInterHubEdges(interHubEdges);
     scene.add(interHubLines);
 
@@ -409,7 +414,9 @@ export function Brain() {
       slots.forEach((slot, index) => {
         positionsById.set(slot.entity.id, slot.position.clone());
         idByInstanceIndex.push(slot.entity.id);
-        nodeMesh.setColorAt(index, new THREE.Color(CLUSTER_COLORS[slot.clusterId]));
+        const importance = THREE.MathUtils.clamp(entityImportance(slot.entity), 0, 1);
+        const color = new THREE.Color(CLUSTER_COLORS[slot.clusterId]).lerp(new THREE.Color("#ffffff"), importance * 0.35);
+        nodeMesh.setColorAt(index, color);
       });
       if (nodeMesh.instanceColor) nodeMesh.instanceColor.needsUpdate = true;
       radialTraffic.setSlots(slots, performance.now());
@@ -547,6 +554,16 @@ export function Brain() {
       radialEdges = buildRadialEdges(slots);
       scene.add(radialEdges);
 
+      scene.remove(intraClusterMesh);
+      intraClusterMesh.traverse((obj) => {
+        if (obj instanceof THREE.LineSegments) {
+          obj.geometry.dispose();
+          (obj.material as THREE.Material).dispose();
+        }
+      });
+      intraClusterMesh = buildIntraClusterMeshGroup(slots);
+      scene.add(intraClusterMesh);
+
       scene.remove(interHubLines);
       interHubLines.geometry.dispose();
       (interHubLines.material as THREE.Material).dispose();
@@ -576,8 +593,8 @@ export function Brain() {
           entities.set(entity.id, entity);
           const cluster = clusterIdFor(entity);
           const clusterVisible = slots.filter((slot) => slot.clusterId === cluster).length;
-          if (cluster && clusterVisible < 26) {
-            slots = computeVisibleEntitySlots(entities.values(), CLUSTER_IDS);
+          if (cluster && clusterVisible < maxVisiblePerCluster) {
+            slots = computeVisibleEntitySlots(entities.values(), CLUSTER_IDS, maxVisiblePerCluster);
             syncSlotIndexes();
             rebuildEdges();
           }
@@ -638,7 +655,7 @@ export function Brain() {
           const existing = entities.get(entityId);
           if (!existing) continue;
           entities.set(entityId, { ...existing, cluster_id: payload.cluster_id });
-          slots = computeVisibleEntitySlots(entities.values(), CLUSTER_IDS);
+          slots = computeVisibleEntitySlots(entities.values(), CLUSTER_IDS, maxVisiblePerCluster);
           syncSlotIndexes();
           rebuildEdges();
           refreshClusterLabels();
@@ -665,6 +682,12 @@ export function Brain() {
 
     const fps = new RollingFpsCounter(60);
     const fpsGuard = new FpsGuard();
+    const offBudgetChange = fpsGuard.onBudgetChange((nextBudget) => {
+      maxVisiblePerCluster = nextBudget;
+      slots = computeVisibleEntitySlots(entities.values(), CLUSTER_IDS, maxVisiblePerCluster);
+      syncSlotIndexes();
+      rebuildEdges();
+    });
     let raf = 0;
     let lastFrameMs = 0;
 
@@ -775,10 +798,17 @@ export function Brain() {
           (obj.material as THREE.Material).dispose();
         }
       });
+      intraClusterMesh.traverse((obj) => {
+        if (obj instanceof THREE.LineSegments) {
+          obj.geometry.dispose();
+          (obj.material as THREE.Material).dispose();
+        }
+      });
       interHubLines.geometry.dispose();
       (interHubLines.material as THREE.Material).dispose();
       ring.geometry.dispose();
       ring.material.dispose();
+      offBudgetChange();
       if (renderer.domElement.parentNode === el) el.removeChild(renderer.domElement);
       if (labelRenderer.domElement.parentNode === el) el.removeChild(labelRenderer.domElement);
     };
