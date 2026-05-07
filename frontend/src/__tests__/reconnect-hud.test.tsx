@@ -12,7 +12,7 @@ describe("reconnect HUD", () => {
     useBrainStore.setState({ connectionStatus: "syncing", fps: 0 });
     render(<HUD />);
     expect(screen.getByText("syncing")).toBeInTheDocument();
-    expect(screen.getByText("syncing renderer")).toBeInTheDocument();
+    expect(screen.getByText("HEALTH")).toBeInTheDocument();
   });
 
   it("shows live after first event", () => {
@@ -24,6 +24,6 @@ describe("reconnect HUD", () => {
   it("shows offline on disconnect", () => {
     useBrainStore.setState({ connectionStatus: "offline", fps: 60 });
     render(<HUD />);
-    expect(screen.getAllByText("offline · reconnecting").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("offline").length).toBeGreaterThanOrEqual(1);
   });
 });

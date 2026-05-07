@@ -1,82 +1,123 @@
-import { useEffect, useState } from "react";
-
+import { CLUSTER_IDS, isClusterId } from "@/lib/cluster-layout";
 import { useBrainStore } from "@/state/brain.store";
+import type { Edge, Entity } from "@/state/brain.store";
+
+export function computeCrossClusterCount(edges: Iterable<Edge>, entities: Map<string, Entity>): number {
+  let count = 0;
+  for (const edge of edges) {
+    const source = entities.get(edge.source_id)?.cluster_id;
+    const target = entities.get(edge.target_id)?.cluster_id;
+    if (isClusterId(source) && isClusterId(target) && source !== target) count++;
+  }
+  return count;
+}
+
+export function healthColor(percent: number): string {
+  if (percent > 90) return "#22c55e";
+  if (percent >= 70) return "#eab308";
+  return "#ef4444";
+}
+
+export function computeHealthPercent(connectionStatus: string, totalEntities: number, lowConfidenceCount = 0): number {
+  const offlinePenalty = connectionStatus === "offline" ? 0.3 : connectionStatus === "syncing" ? 0.08 : 0.02;
+  const confidencePenalty = totalEntities > 0 ? 0.2 * Math.min(1, lowConfidenceCount / totalEntities) : 0;
+  return Math.round(Math.max(0, Math.min(1, 1 - offlinePenalty - confidencePenalty)) * 100);
+}
+
+function displayName(entity: Entity): string {
+  const data = entity.data ?? {};
+  return (
+    (typeof data.name === "string" && data.name) ||
+    (typeof data.title === "string" && data.title) ||
+    (typeof data.subject === "string" && data.subject) ||
+    entity.id
+  );
+}
 
 export function HUD() {
   const entities = useBrainStore((s) => s.entities);
   const edges = useBrainStore((s) => s.edges);
-  const fps = useBrainStore((s) => s.fps);
   const selectedId = useBrainStore((s) => s.selectedId);
-  const lastSeq = useBrainStore((s) => s.lastSeq);
   const connectionStatus = useBrainStore((s) => s.connectionStatus);
-  const [liveUntil, setLiveUntil] = useState(0);
   const selected = selectedId ? entities.get(selectedId) : null;
-
-  const fpsColor = fps >= 55 ? "#50FA7B" : fps >= 30 ? "#F1FA8C" : "#FF5555";
-  const live = Date.now() < liveUntil || connectionStatus === "live";
+  const crossCluster = computeCrossClusterCount(edges.values(), entities);
+  const health = computeHealthPercent(connectionStatus, entities.size);
+  const color = healthColor(health);
   const statusLabel =
-    connectionStatus === "syncing" ? "syncing" : connectionStatus === "offline" ? "offline · reconnecting" : "live";
+    connectionStatus === "syncing" ? "syncing" : connectionStatus === "offline" ? "offline" : "live";
   const statusColor =
-    connectionStatus === "syncing" ? "#f59e0b" : connectionStatus === "offline" ? "#ef4444" : "#50FA7B";
-  const data = selected?.data ?? {};
-  const name =
-    (typeof data["name"] === "string" && data["name"]) ||
-    (typeof data["title"] === "string" && data["title"]) ||
-    (selected ? selected.id.slice(0, 8) : "");
-
-  useEffect(() => {
-    if (lastSeq === 0) return;
-    setLiveUntil(Date.now() + 3000);
-    const timer = window.setTimeout(() => setLiveUntil(0), 3000);
-    return () => window.clearTimeout(timer);
-  }, [lastSeq]);
+    connectionStatus === "syncing" ? "#eab308" : connectionStatus === "offline" ? "#ef4444" : "#22c55e";
 
   const resetView = () => {
     window.dispatchEvent(new Event("axiom:reset-view"));
   };
 
+  const rows = [
+    ["Entities", entities.size],
+    ["Edges", edges.size],
+    ["Agents", 0],
+    ["Receipts", 0],
+    ["Low-confidence", "--"],
+    ["Cross-cluster", crossCluster],
+  ] as const;
+
   return (
     <>
-      <div className="absolute top-4 left-4 font-mono text-sm text-white/80 select-none pointer-events-none space-y-1">
-        <div className="flex items-center gap-2 text-lg font-semibold tracking-wider text-white/90">
-          <span>AXIOM</span>
-          <span
-            className={`h-2 w-2 rounded-full ${live ? "opacity-100 animate-pulse" : "opacity-70"}`}
-            style={{ backgroundColor: statusColor }}
-            aria-hidden="true"
-          />
-          <span className="text-xs font-normal text-white/55">{statusLabel}</span>
-        </div>
-        <div>
-          entities <span className="text-white">{entities.size}</span>
-        </div>
-        <div>
-          edges <span className="text-white">{edges.size}</span>
-        </div>
-        {connectionStatus === "syncing" && fps === 0 ? (
-          <div className="text-[#f59e0b]">syncing renderer</div>
-        ) : (
-          <div>
-            fps <span style={{ color: fpsColor }}>{fps}</span>
+      <aside className="pointer-events-none fixed right-4 top-4 z-20 w-[280px] rounded-lg border border-white/10 bg-[#0a0c14]/70 p-4 font-mono text-xs text-white shadow-2xl backdrop-blur">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2 font-semibold tracking-[0.18em] text-white/90">
+            <span className="animate-pulse text-[#eab308]">⚡</span>
+            <span>BRAIN</span>
           </div>
-        )}
-        {selected && (
-          <div className="mt-3 pt-3 border-t border-white/10">
-            <div className="text-white/40 text-xs uppercase tracking-wider">selected</div>
-            <div>
-              {selected.type} · {name.slice(0, 32)}
+          <div className="flex items-center gap-1.5 uppercase text-white/60">
+            <span
+              className={`h-2 w-2 rounded-full ${connectionStatus === "live" ? "animate-pulse" : ""}`}
+              style={{ backgroundColor: statusColor }}
+              aria-hidden="true"
+            />
+            <span>{statusLabel}</span>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          {rows.map(([label, value]) => (
+            <div key={label} className="flex items-center justify-between">
+              <span className="text-white/55">{label}</span>
+              <span className="text-white">{value}</span>
             </div>
-            <div className="text-white/40 text-xs">{selected.id.slice(0, 8)}</div>
+          ))}
+        </div>
+
+        <div className="mt-4">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-white/55">HEALTH</span>
+            <span style={{ color }}>{health}%</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+            <div className="h-full rounded-full transition-[width]" style={{ width: `${health}%`, backgroundColor: color }} />
+          </div>
+        </div>
+
+        {selected && (
+          <div className="mt-4 border-t border-white/10 pt-3">
+            <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-white/40">Selected</div>
+            <div className="truncate text-white/85">
+              {selected.type} · {displayName(selected).slice(0, 28)}
+            </div>
           </div>
         )}
-      </div>
+      </aside>
+
       <button
         type="button"
         onClick={resetView}
-        className="reset-view-btn absolute top-4 right-4 rounded-md border border-white/10 bg-black/45 px-3 py-1.5 font-mono text-xs text-white/75 shadow-lg backdrop-blur transition hover:border-white/25 hover:bg-black/70 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/40"
+        className="fixed left-4 top-4 z-20 rounded-md border border-white/10 bg-black/45 px-3 py-1.5 font-mono text-xs text-white/75 shadow-lg backdrop-blur transition hover:border-white/25 hover:bg-black/70 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/40"
       >
         ⟲ Reset View
       </button>
+      <div className="sr-only" aria-hidden="true">
+        {CLUSTER_IDS.length}
+      </div>
     </>
   );
 }

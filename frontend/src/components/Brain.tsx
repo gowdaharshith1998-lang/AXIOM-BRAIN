@@ -1,12 +1,18 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
+import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { useEffect, useRef, useState } from "react";
 
 import { arrivalColorForCluster } from "@/components/ArrivalEffect";
+import {
+  bracketLinePoints,
+  clusterLabelAnchor,
+  createClusterBracketElement,
+  updateClusterBracketElement,
+} from "@/components/ClusterBracketLabel";
 import { createHexGridPlane } from "@/components/HexGridBackground";
 import { easeInOutCubic, RESET_CAMERA_MS, shouldResetCameraFromKey } from "@/lib/camera-reset";
 import { flyToEntity } from "@/lib/camera-flyto";
@@ -61,6 +67,16 @@ function compositeImportance(entity: Entity | undefined): number {
 
 function clusterIdFor(entity: Entity | undefined): ClusterId | null {
   return isClusterId(entity?.cluster_id) ? entity.cluster_id : null;
+}
+
+function clusterCounts(entities: Iterable<Entity>): Map<ClusterId, number> {
+  const counts = new Map<ClusterId, number>();
+  for (const cluster of CLUSTER_IDS) counts.set(cluster, 0);
+  for (const entity of entities) {
+    const cluster = clusterIdFor(entity);
+    if (cluster) counts.set(cluster, (counts.get(cluster) ?? 0) + 1);
+  }
+  return counts;
 }
 
 function setInstanceTransform(
@@ -259,6 +275,36 @@ export function Brain() {
     labelRenderer.domElement.style.pointerEvents = "none";
     labelRenderer.domElement.style.userSelect = "none";
     el.appendChild(labelRenderer.domElement);
+
+    const bracketLabelObjects = new Map<ClusterId, CSS2DObject>();
+    const bracketLabelDivs = new Map<ClusterId, HTMLDivElement>();
+    const initialCounts = clusterCounts(entities.values());
+    for (const cluster of CLUSTER_IDS) {
+      const hub = CLUSTER_CENTROIDS[cluster];
+      const anchor = clusterLabelAnchor(hub);
+      const div = createClusterBracketElement(cluster, initialCounts.get(cluster) ?? 0);
+      const object = new CSS2DObject(div);
+      object.position.copy(anchor);
+      scene.add(object);
+      bracketLabelObjects.set(cluster, object);
+      bracketLabelDivs.set(cluster, div);
+    }
+
+    const bracketLines = new THREE.Group();
+    for (const cluster of CLUSTER_IDS) {
+      const hub = CLUSTER_CENTROIDS[cluster];
+      const anchor = clusterLabelAnchor(hub);
+      const points = bracketLinePoints(hub, anchor);
+      const geometry = new THREE.BufferGeometry().setFromPoints(points);
+      const material = new THREE.LineBasicMaterial({
+        color: CLUSTER_COLORS[cluster],
+        transparent: true,
+        opacity: 0.65,
+        depthWrite: false,
+      });
+      bracketLines.add(new THREE.Line(geometry, material));
+    }
+    scene.add(bracketLines);
 
     const nodeGeometry = createHexPrismGeometry(HEX_NODE_RADIUS, HEX_HEIGHT);
     const nodeMaterial = new THREE.MeshStandardMaterial({
@@ -488,6 +534,14 @@ export function Brain() {
       scene.add(interHubLines);
     };
 
+    const refreshClusterLabels = () => {
+      const counts = clusterCounts(entities.values());
+      for (const cluster of CLUSTER_IDS) {
+        const div = bracketLabelDivs.get(cluster);
+        if (div) updateClusterBracketElement(div, cluster, counts.get(cluster) ?? 0);
+      }
+    };
+
     const processLiveEvents = (nowMs: number) => {
       const deferred: BrainEvent[] = [];
       for (const event of liveEventsRef.current) {
@@ -509,6 +563,7 @@ export function Brain() {
           spawnEntityArrival(particleSystem, position, new THREE.Color(clusterColor));
           particleSystem.ingestStream(position, clusterColor);
           flashByNode.set(entity.id, nowMs + FLASH_MS);
+          refreshClusterLabels();
           continue;
         }
 
@@ -550,6 +605,7 @@ export function Brain() {
           slots = computeVisibleEntitySlots(entities.values(), CLUSTER_IDS);
           syncSlotIndexes();
           rebuildEdges();
+          refreshClusterLabels();
           continue;
         }
 
@@ -648,6 +704,14 @@ export function Brain() {
       nodeMaterial.dispose();
       hubGeometry.dispose();
       hubMeshes.forEach((mesh) => mesh.material.dispose());
+      bracketLabelObjects.clear();
+      bracketLabelDivs.clear();
+      bracketLines.traverse((obj) => {
+        if (obj instanceof THREE.Line) {
+          obj.geometry.dispose();
+          (obj.material as THREE.Material).dispose();
+        }
+      });
       radialEdges.traverse((obj) => {
         if (obj instanceof THREE.LineSegments) {
           obj.geometry.dispose();

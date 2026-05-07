@@ -1,4 +1,5 @@
 import { Brain } from "@/components/Brain";
+import { BrandMark } from "@/components/BrandMark";
 import { CommandPalette } from "@/components/CommandPalette";
 import { EntityInspector } from "@/components/EntityInspector";
 import { HUD } from "@/components/HUD";
@@ -19,6 +20,7 @@ export function App() {
       className={`relative h-full w-full ${connectionStatus === "syncing" ? "bg-[#12081f]" : "bg-[#05050a]"}`}
     >
       <Brain />
+      <BrandMark />
       <HUD />
       <CommandPalette />
       <EntityInspector />
