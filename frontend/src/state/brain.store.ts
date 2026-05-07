@@ -23,6 +23,15 @@ export type Edge = {
 };
 
 export type ConnectionStatus = "syncing" | "live" | "offline";
+export type ClusterHealthStatus = "healthy" | "degraded" | "critical";
+
+export type ClusterHealthSnapshot = {
+  cluster_id: string;
+  status: ClusterHealthStatus;
+  ingest_rate_per_min: number;
+  last_ingest_at: string | null;
+  total_entities: number;
+};
 
 type BrainState = {
   entities: Map<string, Entity>;
@@ -31,12 +40,14 @@ type BrainState = {
   fps: number;
   selectedId: string | null;
   connectionStatus: ConnectionStatus;
+  clusterHealth: Record<string, ClusterHealthSnapshot>;
 
   bootstrap: (entities: Entity[], edges: Edge[]) => void;
   applyEvent: (event: BrainEvent) => void;
   setFps: (fps: number) => void;
   select: (id: string | null) => void;
   setConnectionStatus: (status: ConnectionStatus) => void;
+  setClusterHealth: (clusterHealth: Record<string, ClusterHealthSnapshot>) => void;
 };
 
 export const useBrainStore = create<BrainState>((set) => ({
@@ -46,6 +57,7 @@ export const useBrainStore = create<BrainState>((set) => ({
   fps: 0,
   selectedId: null,
   connectionStatus: "syncing",
+  clusterHealth: {},
 
   bootstrap: (entities, edges) =>
     set({
@@ -104,10 +116,21 @@ export const useBrainStore = create<BrainState>((set) => ({
         }
       }
 
+      if (event.type === "cluster_health_changed") {
+        const payload = event.payload as Partial<ClusterHealthSnapshot>;
+        if (typeof payload.cluster_id === "string" && typeof payload.status === "string") {
+          next.clusterHealth = {
+            ...state.clusterHealth,
+            [payload.cluster_id]: payload as ClusterHealthSnapshot,
+          };
+        }
+      }
+
       return next;
     }),
 
   setFps: (fps) => set({ fps }),
   select: (id) => set({ selectedId: id }),
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
+  setClusterHealth: (clusterHealth) => set({ clusterHealth }),
 }));

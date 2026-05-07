@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -8,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from axiom.ingest.broadcaster import EventBroadcaster
-from axiom.schema.models import Base
+from axiom.schema.models import Base, Entity
 from axiom.studio.server import create_app
 
 
@@ -31,6 +32,34 @@ def test_health_and_bootstrap_endpoints_empty(tmp_path: Path) -> None:
 
         assert client.get("/api/entities").json() == []
         assert client.get("/api/edges").json() == []
+
+
+def test_cluster_health_endpoint_returns_cluster_snapshot(tmp_path: Path) -> None:
+    db_url = _make_db_url(tmp_path)
+    engine = create_engine(db_url, future=True)
+    Base.metadata.create_all(engine)
+    session_local = sessionmaker(bind=engine, future=True)
+    with session_local() as session:
+        session.add(
+            Entity(
+                type="thread",
+                data={},
+                source_id=None,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+                cluster_id="billing_payments",
+                composite_importance=0.5,
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+    app = create_app(db_url=db_url)
+    with TestClient(app) as client:
+        payload = client.get("/api/cluster_health").json()
+
+    assert payload["billing_payments"]["cluster_id"] == "billing_payments"
+    assert payload["billing_payments"]["total_entities"] == 1
 
 
 def test_entities_p95_under_50ms_for_100_rows(tmp_path: Path) -> None:
@@ -88,4 +117,3 @@ def test_ws_replay_since_seq(tmp_path: Path) -> None:
             assert msg1["seq"] == 6
             msg2 = ws.receive_json()
             assert msg2["seq"] == 7
-

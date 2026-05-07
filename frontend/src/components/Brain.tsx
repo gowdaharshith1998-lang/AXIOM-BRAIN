@@ -8,9 +8,11 @@ import { useEffect, useRef, useState } from "react";
 
 import { arrivalColorForCluster } from "@/components/ArrivalEffect";
 import {
+  auraColorForHealth,
   createClusterAuras,
   updateClusterAuras,
 } from "@/components/ClusterAura";
+import { createClusterHubIconSprite } from "@/components/ClusterHubIcon";
 import {
   bracketLinePoints,
   clusterLabelAnchor,
@@ -53,7 +55,7 @@ import { hashStringToFloat, hubEmissiveIntensityAt, shimmerScale } from "@/lib/s
 import { hasWebGPU, preferredRendererKind } from "@/lib/webgpu-detect";
 import { BrainSocket, type BrainEvent } from "@/lib/websocket";
 import { useBrainStore } from "@/state/brain.store";
-import type { Edge, Entity } from "@/state/brain.store";
+import type { ClusterHealthSnapshot, Edge, Entity } from "@/state/brain.store";
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -87,6 +89,21 @@ function clusterCounts(entities: Iterable<Entity>): Map<ClusterId, number> {
     if (cluster) counts.set(cluster, (counts.get(cluster) ?? 0) + 1);
   }
   return counts;
+}
+
+function clusterLocById(entities: Iterable<Entity>): Map<ClusterId, string> {
+  const totals = new Map<ClusterId, number>();
+  for (const cluster of CLUSTER_IDS) totals.set(cluster, 0);
+  for (const entity of entities) {
+    const cluster = clusterIdFor(entity);
+    if (!cluster) continue;
+    totals.set(cluster, (totals.get(cluster) ?? 0) + JSON.stringify(entity.data ?? {}).length / 100);
+  }
+  const formatted = new Map<ClusterId, string>();
+  for (const cluster of CLUSTER_IDS) {
+    formatted.set(cluster, `${((totals.get(cluster) ?? 0) / 1000).toFixed(1)}K`);
+  }
+  return formatted;
 }
 
 function setInstanceTransform(
@@ -175,17 +192,20 @@ export function Brain() {
   const applyEvent = useBrainStore((s) => s.applyEvent);
   const bootstrap = useBrainStore((s) => s.bootstrap);
   const select = useBrainStore((s) => s.select);
+  const setClusterHealth = useBrainStore((s) => s.setClusterHealth);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const [ents, eds] = await Promise.all([
+        const [ents, eds, health] = await Promise.all([
           fetchJson<unknown[]>("http://127.0.0.1:8000/api/entities"),
           fetchJson<unknown[]>("http://127.0.0.1:8000/api/edges"),
+          fetchJson<Record<string, ClusterHealthSnapshot>>("http://127.0.0.1:8000/api/cluster_health").catch(() => ({})),
         ]);
         if (cancelled) return;
         bootstrap(ents as Entity[], eds as Edge[]);
+        setClusterHealth(health);
         setSceneReady(true);
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -195,7 +215,7 @@ export function Brain() {
     return () => {
       cancelled = true;
     };
-  }, [bootstrap]);
+  }, [bootstrap, setClusterHealth]);
 
   useEffect(() => {
     const url = `ws://${window.location.hostname}:8000/ws/brain`;
@@ -292,10 +312,16 @@ export function Brain() {
     const bracketLabelObjects = new Map<ClusterId, CSS2DObject>();
     const bracketLabelDivs = new Map<ClusterId, HTMLDivElement>();
     const initialCounts = clusterCounts(entities.values());
+    const initialLoc = clusterLocById(entities.values());
+    const initialHealth = useBrainStore.getState().clusterHealth;
     for (const cluster of CLUSTER_IDS) {
       const hub = CLUSTER_CENTROIDS[cluster];
       const anchor = clusterLabelAnchor(hub);
-      const div = createClusterBracketElement(cluster, initialCounts.get(cluster) ?? 0);
+      const div = createClusterBracketElement(cluster, initialCounts.get(cluster) ?? 0, {
+        entities: initialCounts.get(cluster) ?? 0,
+        loc: initialLoc.get(cluster) ?? "0.0K",
+        health: initialHealth[cluster]?.status ?? "healthy",
+      });
       const object = new CSS2DObject(div);
       object.position.copy(anchor);
       scene.add(object);
@@ -345,6 +371,7 @@ export function Brain() {
 
     const hubGeometry = createHexPrismGeometry(HEX_HUB_RADIUS, HEX_HEIGHT * 1.4);
     const hubMeshes = new Map<ClusterId, THREE.Mesh<THREE.CylinderGeometry, THREE.MeshStandardMaterial>>();
+    const hubIconSprites: THREE.Sprite[] = [];
     for (const cluster of CLUSTER_IDS) {
       const color = new THREE.Color(CLUSTER_COLORS[cluster]);
       const mesh = new THREE.Mesh(
@@ -362,6 +389,10 @@ export function Brain() {
       mesh.userData = { cluster };
       hubMeshes.set(cluster, mesh);
       scene.add(mesh);
+      const icon = createClusterHubIconSprite(cluster);
+      icon.position.copy(CLUSTER_CENTROIDS[cluster]).add(new THREE.Vector3(0, 0, 0.5));
+      hubIconSprites.push(icon);
+      scene.add(icon);
     }
 
     let radialEdges = buildRadialEdges(slots);
@@ -576,9 +607,17 @@ export function Brain() {
 
     const refreshClusterLabels = () => {
       const counts = clusterCounts(entities.values());
+      const loc = clusterLocById(entities.values());
+      const health = useBrainStore.getState().clusterHealth;
       for (const cluster of CLUSTER_IDS) {
         const div = bracketLabelDivs.get(cluster);
-        if (div) updateClusterBracketElement(div, cluster, counts.get(cluster) ?? 0);
+        if (div) {
+          updateClusterBracketElement(div, cluster, counts.get(cluster) ?? 0, {
+            entities: counts.get(cluster) ?? 0,
+            loc: loc.get(cluster) ?? "0.0K",
+            health: health[cluster]?.status ?? "healthy",
+          });
+        }
       }
     };
 
@@ -667,6 +706,11 @@ export function Brain() {
           if (typeof id !== "string") continue;
           flashByNode.set(id, nowMs + 500);
         }
+
+        if (event.type === "cluster_health_changed") {
+          refreshClusterLabels();
+          continue;
+        }
       }
       liveEventsRef.current = deferred.slice(-20);
     };
@@ -700,6 +744,11 @@ export function Brain() {
       nebula.mesh.rotation.z += 0.00012;
       nebula.mesh.rotation.y += 0.00007;
       updateClusterAuras(clusterAuras, t);
+      const health = useBrainStore.getState().clusterHealth;
+      for (const aura of clusterAuras) {
+        const cluster = aura.userData.cluster as ClusterId | undefined;
+        if (cluster) aura.material.color.copy(auraColorForHealth(cluster, health[cluster]?.status));
+      }
       for (const [index, cluster] of CLUSTER_IDS.entries()) {
         const hub = hubMeshes.get(cluster);
         if (hub) hub.material.emissiveIntensity = hubEmissiveIntensityAt(HUB_EMISSIVE, index, t);
@@ -779,6 +828,11 @@ export function Brain() {
       nodeMaterial.dispose();
       hubGeometry.dispose();
       hubMeshes.forEach((mesh) => mesh.material.dispose());
+      hubIconSprites.forEach((sprite) => {
+        const material = sprite.material as THREE.SpriteMaterial;
+        material.map?.dispose();
+        material.dispose();
+      });
       clusterAuras.forEach((aura) => {
         scene.remove(aura);
         aura.geometry.dispose();

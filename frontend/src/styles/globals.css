@@ -33,11 +33,63 @@ body {
   animation: axiom-health-shimmer 3s linear infinite;
 }
 
+.axiom-cluster-bracket-label .cluster-meta {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.health-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+.health-healthy {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.4);
+}
+
+.health-degraded {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+  border: 1px solid rgba(234, 179, 8, 0.4);
+}
+
+.health-critical {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.health-flash {
+  animation: axiom-health-flash 650ms ease-out;
+}
+
 @keyframes axiom-health-shimmer {
   0% {
     background-position: 200% 0;
   }
   100% {
     background-position: -200% 0;
+  }
+}
+
+@keyframes axiom-health-flash {
+  0% {
+    filter: drop-shadow(0 0 0 rgba(255, 255, 255, 0));
+  }
+  30% {
+    filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.75));
+  }
+  100% {
+    filter: drop-shadow(0 0 0 rgba(255, 255, 255, 0));
   }
 }

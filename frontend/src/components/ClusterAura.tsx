@@ -1,6 +1,7 @@
 import * as THREE from "three";
 
 import { CLUSTER_CENTROIDS, CLUSTER_COLORS, CLUSTER_IDS, type ClusterId } from "@/lib/cluster-layout";
+import type { ClusterHealthStatus } from "@/state/brain.store";
 
 export const CLUSTER_AURA_RADIUS = 28;
 export const CLUSTER_AURA_BASE_OPACITY = 0.06;
@@ -57,6 +58,13 @@ export function setAurasVisible(
   visible: boolean,
 ): void {
   for (const aura of auras) aura.visible = visible;
+}
+
+export function auraColorForHealth(cluster: ClusterId, status: ClusterHealthStatus | undefined): THREE.Color {
+  const base = new THREE.Color(CLUSTER_COLORS[cluster]);
+  if (status === "critical") return base.lerp(new THREE.Color("#ef4444"), 0.55);
+  if (status === "degraded") return base.lerp(new THREE.Color("#eab308"), 0.3);
+  return base;
 }
 
 export function updateClusterAuras(

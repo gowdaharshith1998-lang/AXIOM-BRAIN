@@ -1,12 +1,19 @@
 import * as THREE from "three";
 
 import { CLUSTER_COLORS, CLUSTER_LABELS, type ClusterId } from "@/lib/cluster-layout";
+import type { ClusterHealthStatus } from "@/state/brain.store";
+
+export type ClusterLabelMeta = {
+  entities: number;
+  loc: string;
+  health: ClusterHealthStatus;
+};
 
 export function clusterLabelText(cluster: ClusterId): string {
   return CLUSTER_LABELS[cluster].toUpperCase();
 }
 
-export function clusterLabelAnchor(hub: THREE.Vector3, offset = 60): THREE.Vector3 {
+export function clusterLabelAnchor(hub: THREE.Vector3, offset = 68): THREE.Vector3 {
   const dir = new THREE.Vector2(hub.x, hub.y);
   if (dir.lengthSq() < 0.001) dir.set(0, 1);
   dir.normalize().multiplyScalar(offset);
@@ -18,7 +25,24 @@ export function bracketLinePoints(hub: THREE.Vector3, anchor: THREE.Vector3): [T
   return [anchor.clone(), elbow, hub.clone()];
 }
 
-export function createClusterBracketElement(cluster: ClusterId, count: number): HTMLDivElement {
+function metaText(meta: ClusterLabelMeta): string {
+  return `${meta.entities} entities · ${meta.loc} LOC`;
+}
+
+function pillClass(status: ClusterHealthStatus): string {
+  return `health-pill health-${status}`;
+}
+
+export function createClusterBracketElement(
+  cluster: ClusterId,
+  count: number,
+  meta: Partial<ClusterLabelMeta> = {},
+): HTMLDivElement {
+  const resolved = {
+    entities: meta.entities ?? count,
+    loc: meta.loc ?? "0.0K",
+    health: meta.health ?? "healthy",
+  } satisfies ClusterLabelMeta;
   const div = document.createElement("div");
   div.className = "axiom-cluster-bracket-label";
   div.dataset.cluster = cluster;
@@ -33,12 +57,25 @@ export function createClusterBracketElement(cluster: ClusterId, count: number): 
   div.style.userSelect = "none";
   div.style.whiteSpace = "nowrap";
   div.style.textShadow = "0 0 8px rgba(0,0,0,0.95), 0 1px 2px rgba(0,0,0,0.85)";
-  div.innerHTML = `<div>${clusterLabelText(cluster)}</div><div style="margin-top:2px;font-size:10px;letter-spacing:0.08em;color:rgba(255,255,255,0.55)">${count}</div>`;
+  div.innerHTML = `<div class="cluster-name">${clusterLabelText(cluster)}</div><div class="cluster-meta">${metaText(resolved)}</div><span class="${pillClass(resolved.health)}">${resolved.health}</span>`;
   return div;
 }
 
-export function updateClusterBracketElement(div: HTMLDivElement, cluster: ClusterId, count: number): void {
-  div.innerHTML = `<div>${clusterLabelText(cluster)}</div><div style="margin-top:2px;font-size:10px;letter-spacing:0.08em;color:rgba(255,255,255,0.55)">${count}</div>`;
+export function updateClusterBracketElement(
+  div: HTMLDivElement,
+  cluster: ClusterId,
+  count: number,
+  meta: Partial<ClusterLabelMeta> = {},
+): void {
+  const previous = div.querySelector(".health-pill")?.textContent;
+  const resolved = {
+    entities: meta.entities ?? count,
+    loc: meta.loc ?? "0.0K",
+    health: meta.health ?? "healthy",
+  } satisfies ClusterLabelMeta;
+  div.innerHTML = `<div class="cluster-name">${clusterLabelText(cluster)}</div><div class="cluster-meta">${metaText(resolved)}</div><span class="${pillClass(resolved.health)}">${resolved.health}</span>`;
+  if (previous && previous !== resolved.health) div.classList.add("health-flash");
+  window.setTimeout(() => div.classList.remove("health-flash"), 650);
 }
 
 export function ClusterBracketLabel({ cluster, count }: { cluster: ClusterId; count: number }) {
@@ -48,8 +85,9 @@ export function ClusterBracketLabel({ cluster, count }: { cluster: ClusterId; co
       className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em]"
       style={{ color: CLUSTER_COLORS[cluster], opacity: 0.85 }}
     >
-      <div>{clusterLabelText(cluster)}</div>
-      <div className="mt-0.5 text-[10px] tracking-normal text-white/55">{count}</div>
+      <div className="cluster-name">{clusterLabelText(cluster)}</div>
+      <div className="cluster-meta">{count} entities · 0.0K LOC</div>
+      <span className="health-pill health-healthy">healthy</span>
     </div>
   );
 }

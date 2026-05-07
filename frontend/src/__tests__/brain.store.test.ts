@@ -187,4 +187,32 @@ describe("brain.store", () => {
     expect(useBrainStore.getState().entities.size).toBe(0);
     expect(useBrainStore.getState().lastSeq).toBe(9);
   });
+
+  it("applies cluster health websocket updates", () => {
+    useBrainStore.setState({
+      entities: new Map(),
+      edges: new Map(),
+      clusterHealth: {},
+      lastSeq: 0,
+      fps: 0,
+      selectedId: null,
+    });
+
+    useBrainStore.getState().applyEvent({
+      seq: 10,
+      type: "cluster_health_changed",
+      timestamp: 0,
+      source_id: null,
+      persisted_id: "billing_payments",
+      payload: {
+        cluster_id: "billing_payments",
+        status: "critical",
+        ingest_rate_per_min: 0,
+        last_ingest_at: null,
+        total_entities: 412,
+      },
+    });
+
+    expect(useBrainStore.getState().clusterHealth.billing_payments.status).toBe("critical");
+  });
 });

@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+from datetime import datetime
 from typing import Any, cast
 
 from fastapi import FastAPI, Query, WebSocket
@@ -15,10 +16,15 @@ from axiom.api.search import EntitySearchResult, search_entities
 from axiom.ingest.broadcaster import EventBroadcaster
 from axiom.ingest.pipeline import IngestPipeline
 from axiom.organize.agent import OrganizerAgent
+from axiom.organize.cluster_health import ClusterHealthMonitor
 from axiom.schema.dto import EdgeDTO, EntityDTO
 from axiom.schema.models import Edge, Entity
 from axiom.sources.base import IngestEvent
 from axiom.sources.live_synthetic import LiveSyntheticSource
+
+
+def datetime_now_ms() -> int:
+    return int(datetime.utcnow().timestamp() * 1000)
 
 
 def create_app(
@@ -32,6 +38,7 @@ def create_app(
     engine = create_engine(db_url, future=True)
     session_local = sessionmaker(bind=engine, future=True)
     broadcaster = EventBroadcaster()
+    cluster_health_monitor = ClusterHealthMonitor()
     live_source = (
         LiveSyntheticSource(rate_per_second=live_rate, max_events=live_pause_after)
         if live
@@ -44,7 +51,31 @@ def create_app(
         app.state.SessionLocal = session_local
         app.state.live_source = live_source
         app.state.live_task = None
+        app.state.cluster_health_task = None
         app.state.organizer = None
+        previous_health: dict[str, str] = {}
+
+        async def cluster_health_loop() -> None:
+            while True:
+                with session_local() as session:
+                    snapshot = cluster_health_monitor.snapshot(session)
+                for cluster_id, item in snapshot.items():
+                    status = item.status.value
+                    if previous_health.get(cluster_id) not in {None, status}:
+                        await broadcaster.publish(
+                            {
+                                "type": "cluster_health_changed",
+                                "source_id": None,
+                                "persisted_id": cluster_id,
+                                "payload": item.to_json(),
+                                "timestamp": datetime_now_ms(),
+                            }
+                        )
+                    previous_health[cluster_id] = status
+                await asyncio.sleep(15)
+
+        health_task = asyncio.create_task(cluster_health_loop())
+        app.state.cluster_health_task = health_task
 
         organizer: OrganizerAgent | None = None
         if enable_organizer:
@@ -66,6 +97,9 @@ def create_app(
             finally:
                 if organizer is not None:
                     await organizer.cancel()
+                health_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await health_task
                 engine.dispose()
             return
 
@@ -89,6 +123,9 @@ def create_app(
                     live_source.cancel()
                     if organizer is not None:
                         await organizer.cancel()
+                    health_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await health_task
                     engine.dispose()
 
     app = FastAPI(title="AXIOM Studio API", lifespan=lifespan)
@@ -114,6 +151,12 @@ def create_app(
             rows = session.execute(select(Entity)).scalars().all()
             return [EntityDTO.model_validate(r).model_dump(mode="json") for r in rows]
 
+    @app.get("/api/cluster_health")
+    def get_cluster_health() -> dict[str, dict[str, object]]:
+        with session_local() as session:
+            snapshot = cluster_health_monitor.snapshot(session)
+            return {cluster_id: item.to_json() for cluster_id, item in snapshot.items()}
+
     @app.get("/api/entities/search")
     def search_entities_endpoint(
         q: str = Query("", min_length=0),
@@ -135,4 +178,3 @@ def create_app(
             await ws.send_text(json.dumps(envelope))
 
     return app
-

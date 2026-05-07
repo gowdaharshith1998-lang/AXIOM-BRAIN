@@ -8,7 +8,8 @@ export type BrainEvent = {
     | "edge_added"
     | "entity_edge_created"
     | "edge_removed"
-    | "entity_classified";
+    | "entity_classified"
+    | "cluster_health_changed";
   timestamp: number;
   source_id: string | null;
   persisted_id: string | null;
