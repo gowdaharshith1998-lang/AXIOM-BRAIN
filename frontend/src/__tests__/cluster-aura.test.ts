@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   CLUSTER_AURA_RADIUS,
+  auraOpacityAt,
   auraRadiusAt,
+  auraScaleAt,
+  clusterAuraPeriod,
+  clusterAuraPhase,
   createClusterAuras,
   setAurasVisible,
   updateClusterAuras,
@@ -50,7 +54,7 @@ describe("cluster auras", () => {
 
   it("keeps aura opacity subtle", () => {
     const [aura] = createClusterAuras();
-    expect(aura.material.opacity).toBeLessThanOrEqual(0.05);
+    expect(aura.material.opacity).toBeLessThanOrEqual(0.06);
   });
 
   it("toggles visibility for all seven auras", () => {
@@ -59,5 +63,22 @@ describe("cluster auras", () => {
     expect(auras.every((aura) => aura.visible === false)).toBe(true);
     setAurasVisible(auras, true);
     expect(auras.every((aura) => aura.visible === true)).toBe(true);
+  });
+
+  it("gives each cluster a distinct pulse phase", () => {
+    const phases = CLUSTER_IDS.map((_, index) => clusterAuraPhase(index));
+    expect(new Set(phases).size).toBe(CLUSTER_IDS.length);
+  });
+
+  it("gives each cluster a distinct breathing period", () => {
+    const periods = CLUSTER_IDS.map((_, index) => clusterAuraPeriod(index));
+    expect(new Set(periods).size).toBe(CLUSTER_IDS.length);
+    expect(Math.min(...periods)).toBe(5000);
+    expect(Math.max(...periods)).toBe(8000);
+  });
+
+  it("updates scale and opacity asynchronously by index", () => {
+    expect(auraScaleAt(0, 1600)).not.toBe(auraScaleAt(1, 1600));
+    expect(auraOpacityAt(0, 1600)).not.toBe(auraOpacityAt(1, 1600));
   });
 });

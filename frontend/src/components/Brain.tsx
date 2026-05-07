@@ -8,6 +8,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { arrivalColorForCluster } from "@/components/ArrivalEffect";
 import {
+  createClusterAuras,
+  updateClusterAuras,
+} from "@/components/ClusterAura";
+import {
   bracketLinePoints,
   clusterLabelAnchor,
   createClusterBracketElement,
@@ -40,6 +44,7 @@ import { ParticleFlowController } from "@/lib/particle-flow";
 import { ParticleEffectSystem } from "@/lib/particles/agent-effects";
 import { createNebulaBackground } from "@/lib/particles/nebula-bg";
 import { spawnEdgeTrace, spawnEntityArrival } from "@/lib/particles/reactive-spawn";
+import { hashStringToFloat, hubEmissiveIntensityAt, shimmerScale } from "@/lib/spoke-shimmer";
 import { hasWebGPU, preferredRendererKind } from "@/lib/webgpu-detect";
 import { BrainSocket, type BrainEvent } from "@/lib/websocket";
 import { useBrainStore } from "@/state/brain.store";
@@ -95,9 +100,10 @@ function setInstanceTransform(
   const selectedScale = slot.entity.id === selectedId ? SELECTED_SCALE : 1;
   const hoverScale = slot.entity.id === hoveredId ? 1.14 : 1;
   const flashScale = flashUntil && flashUntil > now ? 1 + ((flashUntil - now) / FLASH_MS) * 0.25 : 1;
+  const spokeScale = shimmerScale(hashStringToFloat(slot.entity.id), now);
   const scale = new THREE.Vector3(
-    importanceScale * selectedScale * hoverScale * flashScale,
-    importanceScale * selectedScale * hoverScale * flashScale,
+    importanceScale * selectedScale * hoverScale * flashScale * spokeScale,
+    importanceScale * selectedScale * hoverScale * flashScale * spokeScale,
     1,
   );
   matrix.compose(slot.position, quat, scale);
@@ -226,6 +232,8 @@ export function Brain() {
     if (nebulaMaterial instanceof THREE.PointsMaterial) nebulaMaterial.opacity *= 0.4;
     const grid = createHexGridPlane();
     scene.add(grid);
+    const clusterAuras = createClusterAuras();
+    for (const aura of clusterAuras) scene.add(aura);
 
     const camera = new THREE.PerspectiveCamera(60, width / height, 1, 4000);
     camera.position.copy(INITIAL_CAMERA_POSITION);
@@ -653,6 +661,11 @@ export function Brain() {
       void dtMs;
       processLiveEvents(t);
       nebula.update(t);
+      updateClusterAuras(clusterAuras, t);
+      for (const [index, cluster] of CLUSTER_IDS.entries()) {
+        const hub = hubMeshes.get(cluster);
+        if (hub) hub.material.emissiveIntensity = hubEmissiveIntensityAt(HUB_EMISSIVE, index, t);
+      }
       refreshInstanceTransforms(t);
       updateSelectionRing();
       particleSystem.setParticleMultiplier(fpsGuard.particleMultiplier());
@@ -723,6 +736,11 @@ export function Brain() {
       nodeMaterial.dispose();
       hubGeometry.dispose();
       hubMeshes.forEach((mesh) => mesh.material.dispose());
+      clusterAuras.forEach((aura) => {
+        scene.remove(aura);
+        aura.geometry.dispose();
+        aura.material.dispose();
+      });
       bracketLabelObjects.clear();
       bracketLabelDivs.clear();
       bracketLines.traverse((obj) => {
