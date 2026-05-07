@@ -35,8 +35,13 @@ describe("overview LOD", () => {
   });
 
   it("reduces bloom above distance 280", () => {
+    expect(BLOOM_FULL_STRENGTH).toBe(0.25);
     expect(bloomStrengthForDistance(281)).toBe(BLOOM_OVERVIEW_STRENGTH);
     expect(bloomStrengthForDistance(280)).toBe(BLOOM_FULL_STRENGTH);
+  });
+
+  it("keeps overview bloom below full bloom", () => {
+    expect(BLOOM_OVERVIEW_STRENGTH).toBeLessThan(BLOOM_FULL_STRENGTH);
   });
 
   it("uses normal blending for sprite materials", () => {

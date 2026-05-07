@@ -36,6 +36,7 @@ import {
   type VisibleEntitySlot,
 } from "@/lib/hex-layout";
 import { BLOOM_FULL_STRENGTH } from "@/lib/lod";
+import { ParticleFlowController } from "@/lib/particle-flow";
 import { ParticleEffectSystem } from "@/lib/particles/agent-effects";
 import { createNebulaBackground } from "@/lib/particles/nebula-bg";
 import { spawnEdgeTrace, spawnEntityArrival } from "@/lib/particles/reactive-spawn";
@@ -371,6 +372,8 @@ export function Brain() {
 
     const particleSystem = new ParticleEffectSystem();
     scene.add(particleSystem.points);
+    const particleFlow = new ParticleFlowController(interHubEdges);
+    scene.add(particleFlow.points);
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     const hoveredIdRef = { current: null as string | null };
@@ -532,6 +535,7 @@ export function Brain() {
       interHubEdges = computeInterHubEdges(edges.values(), entities);
       interHubLines = buildInterHubEdges(interHubEdges);
       scene.add(interHubLines);
+      particleFlow.setEdges(interHubEdges, performance.now());
     };
 
     const refreshClusterLabels = () => {
@@ -585,12 +589,25 @@ export function Brain() {
             created_at: typeof payload.created_at === "string" ? payload.created_at : new Date().toISOString(),
           };
           edges.set(edge.id, edge);
+          const previousPairCount = interHubEdges.length;
           rebuildEdges();
           const src = findEntityPosition(entities.get(edge.source_id), positionsById);
           const tgt = findEntityPosition(entities.get(edge.target_id), positionsById);
           if (src && tgt) {
             spawnEdgeTrace(particleSystem, src, tgt, "#ffffff");
             flashByEdge.set(edge.id, nowMs + FLASH_MS);
+          }
+          if (event.type === "entity_edge_created" || interHubEdges.length > previousPairCount) {
+            const sourceCluster = clusterIdFor(entities.get(edge.source_id));
+            const targetCluster = clusterIdFor(entities.get(edge.target_id));
+            if (sourceCluster && targetCluster && sourceCluster !== targetCluster) {
+              const pair = interHubEdges.find(
+                (item) =>
+                  (item.sourceCluster === sourceCluster && item.targetCluster === targetCluster) ||
+                  (item.sourceCluster === targetCluster && item.targetCluster === sourceCluster),
+              );
+              if (pair) particleFlow.burst(pair, nowMs);
+            }
           }
           continue;
         }
@@ -640,6 +657,7 @@ export function Brain() {
       updateSelectionRing();
       particleSystem.setParticleMultiplier(fpsGuard.particleMultiplier());
       particleSystem.update(t);
+      particleFlow.update(t);
       const selectedId = useBrainStore.getState().selectedId;
       if (selectedId) {
         const target = findEntityPosition(entities.get(selectedId), positionsById);
@@ -696,6 +714,7 @@ export function Brain() {
       composer.dispose();
       nebula.dispose();
       particleSystem.dispose();
+      particleFlow.dispose();
       renderer.dispose();
       grid.geometry.dispose();
       grid.material.map?.dispose();

@@ -5,7 +5,7 @@ export type NodeLodMode = "sprite" | "sphere";
 export const NODE_SPRITE_DISTANCE = 280;
 export const EDGE_SKIP_DISTANCE = 320;
 export const BLOOM_REDUCE_DISTANCE = 280;
-export const BLOOM_FULL_STRENGTH = 0.3;
+export const BLOOM_FULL_STRENGTH = 0.25;
 export const BLOOM_OVERVIEW_STRENGTH = 0.12;
 
 export function nodeLodMode(cameraDistance: number): NodeLodMode {

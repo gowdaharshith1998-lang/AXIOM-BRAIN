@@ -1,3 +1,4 @@
+import { BottomToolbar } from "@/components/BottomToolbar";
 import { Brain } from "@/components/Brain";
 import { BrandMark } from "@/components/BrandMark";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -22,6 +23,7 @@ export function App() {
       <Brain />
       <BrandMark />
       <HUD />
+      <BottomToolbar />
       <CommandPalette />
       <EntityInspector />
     </div>

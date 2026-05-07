@@ -114,7 +114,11 @@ export function CommandPalette() {
       }
     };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("axiom:open-palette", openPalette);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("axiom:open-palette", openPalette);
+    };
   }, []);
 
   useEffect(() => {
