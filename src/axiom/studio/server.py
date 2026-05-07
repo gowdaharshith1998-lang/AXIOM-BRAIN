@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from axiom.api.search import EntitySearchResult, search_entities
 from axiom.ingest.broadcaster import EventBroadcaster
 from axiom.ingest.pipeline import IngestPipeline
 from axiom.schema.dto import EdgeDTO, EntityDTO
@@ -91,6 +92,14 @@ def create_app(
         with session_local() as session:
             rows = session.execute(select(Entity)).scalars().all()
             return [EntityDTO.model_validate(r).model_dump(mode="json") for r in rows]
+
+    @app.get("/api/entities/search")
+    def search_entities_endpoint(
+        q: str = Query("", min_length=0),
+        limit: int = Query(8, ge=1, le=25),
+    ) -> list[EntitySearchResult]:
+        with session_local() as session:
+            return search_entities(session, q, limit=limit)
 
     @app.get("/api/edges")
     def get_edges() -> list[dict[str, Any]]:

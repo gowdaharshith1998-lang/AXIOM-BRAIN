@@ -29,6 +29,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { AutoOrbitController } from "@/lib/auto-orbit";
 import { envelopePosition } from "@/lib/brain-envelope";
+import { flyToEntity } from "@/lib/camera-flyto";
 import { colorForRelationship } from "@/lib/edge-tint";
 import { RollingFpsCounter } from "@/lib/fps";
 import { FpsGuard, type FpsGuardState } from "@/lib/fps-guard";
@@ -106,6 +107,11 @@ const FAR_LOD_DISTANCE = 280;
 const FAR_NODE_SCALE = 0.35;
 const FAR_EDGE_ALPHA = 0.12;
 const LABEL_OVERVIEW_ENTITY_LIMIT = 1500;
+const BASE_NODE_EMISSIVE = 0.2;
+const FAR_NODE_EMISSIVE = 0.05;
+const SELECTED_NODE_EMISSIVE = 0.4;
+const NEIGHBOR_NODE_EMISSIVE = 0.3;
+const DIMMED_NODE_EMISSIVE = BASE_NODE_EMISSIVE * 0.5;
 
 function tuneForcesByCount(sim: TuneableSimulation, entityCount: number): void {
   const c = Math.max(entityCount, 1);
@@ -235,7 +241,7 @@ export function Brain() {
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.0;
+    renderer.toneMappingExposure = 0.85;
     el.appendChild(renderer.domElement);
 
     // ----- Orbit controls -----
@@ -246,7 +252,7 @@ export function Brain() {
     // ----- Post-processing: UnrealBloom + ACES via composer -----
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    composer.addPass(new UnrealBloomPass(new THREE.Vector2(width, height), 0.65, 0.6, 0.2));
+    composer.addPass(new UnrealBloomPass(new THREE.Vector2(width, height), 0.45, 0.35, 0.85));
 
     // ----- DOM label overlay (non-interactive; OrbitControls keep pointer ownership) -----
     const labelRenderer = new CSS2DRenderer();
@@ -269,7 +275,7 @@ export function Brain() {
     scene.add(nodeGroup);
 
     const sphereGeom = new THREE.SphereGeometry(NODE_RADIUS, 14, 14);
-    const ringGeom = new THREE.TorusGeometry(NODE_RADIUS * 2.0, 0.035, 6, 40);
+    const ringGeom = new THREE.TorusGeometry(NODE_RADIUS * 1.6, 0.035, 6, 40);
     const meshById = new Map<string, THREE.Mesh>();
     const ringById = new Map<string, THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>>();
     const labelByNodeId = new Map<string, HTMLDivElement>();
@@ -281,7 +287,7 @@ export function Brain() {
       const mat = new THREE.MeshStandardMaterial({
         color,
         emissive: color,
-        emissiveIntensity: 0.6,
+        emissiveIntensity: BASE_NODE_EMISSIVE,
         roughness: 0.4,
         metalness: 0.1,
         transparent: true,
@@ -391,6 +397,30 @@ export function Brain() {
     });
 
     let orbitalHalo: OrbitalHalo | null = null;
+    let haloTargetId: string | null = null;
+
+    const removeOrbitalHalo = () => {
+      if (!orbitalHalo) return;
+      scene.remove(orbitalHalo.points);
+      orbitalHalo.dispose();
+      orbitalHalo = null;
+      haloTargetId = null;
+    };
+
+    const showSelectionHalo = (id: string) => {
+      const mesh = meshById.get(id);
+      if (!mesh) return;
+      const meshMaterial = mesh.material;
+      const color =
+        meshMaterial instanceof THREE.MeshStandardMaterial ? meshMaterial.color.clone() : new THREE.Color("#FFFFFF");
+      if (!orbitalHalo || haloTargetId !== id) {
+        removeOrbitalHalo();
+        orbitalHalo = new OrbitalHalo(color);
+        scene.add(orbitalHalo.points);
+      }
+      orbitalHalo.setTarget(mesh.position, NODE_RADIUS * 3.2, color);
+      haloTargetId = id;
+    };
 
     // ----- d3-force-3d simulation -----
     const sim = forceSimulation(simData.nodes, 3)
@@ -440,7 +470,6 @@ export function Brain() {
         n.lod = camera.position.distanceTo(mesh.position) > FAR_LOD_DISTANCE ? "far" : "near";
         const material = mesh.material;
         if (material instanceof THREE.MeshStandardMaterial) {
-          material.emissiveIntensity = n.lod === "far" ? 0.05 : 0.6;
           material.opacity = n.lod === "far" ? 0.55 : 1;
         }
         const ring = ringById.get(n.id);
@@ -492,6 +521,34 @@ export function Brain() {
         updated = true;
       }
       if (updated) colorAttr.needsUpdate = true;
+    };
+
+    const selectionBaseIntensity = (id: string): number => {
+      const selectedId = useBrainStore.getState().selectedId;
+      if (!selectedId) return nodeById.get(id)?.lod === "far" ? FAR_NODE_EMISSIVE : BASE_NODE_EMISSIVE;
+      if (id === selectedId) return SELECTED_NODE_EMISSIVE;
+      const selectedNeighbors = neighborIds.get(selectedId);
+      if (selectedNeighbors?.has(id)) return NEIGHBOR_NODE_EMISSIVE;
+      return DIMMED_NODE_EMISSIVE;
+    };
+
+    const applySelectionToEdges = () => {
+      const selectedId = useBrainStore.getState().selectedId;
+      if (!selectedId) return;
+      const colorAttr = edgeGeom.getAttribute("color");
+      if (!(colorAttr instanceof THREE.BufferAttribute)) return;
+      const colorArr = colorAttr.array as Float32Array;
+      for (let edgeIndex = 0; edgeIndex < simData.links.length; edgeIndex++) {
+        const link = simData.links[edgeIndex];
+        const sourceId = typeof link.source === "string" ? link.source : link.source.id;
+        const targetId = typeof link.target === "string" ? link.target : link.target.id;
+        const connectedToSelected = sourceId === selectedId || targetId === selectedId;
+        const multiplier = connectedToSelected ? 1.5 : 0.4;
+        const offset = edgeIndex * 8;
+        colorArr[offset + 3] = Math.min(colorArr[offset + 3] * multiplier, 0.68);
+        colorArr[offset + 7] = Math.min(colorArr[offset + 7] * multiplier, 0.68);
+      }
+      colorAttr.needsUpdate = true;
     };
 
     // ----- Interaction: hover rings, click focus, auto-orbit wake -----
@@ -599,23 +656,17 @@ export function Brain() {
       markCameraInteraction(ev.timeStamp);
       setPointer(ev);
       const mesh = hitNode();
-      if (!mesh) return;
+      if (!mesh) {
+        select(null);
+        removeOrbitalHalo();
+        return;
+      }
       const id = (mesh.userData as { id?: string }).id;
       if (typeof id !== "string") return;
       select(id);
       focusTargetRef.current = mesh.position.clone();
       flashByNode.set(id, ev.timeStamp + 450);
-
-      const meshMaterial = mesh.material;
-      const color =
-        meshMaterial instanceof THREE.MeshStandardMaterial ? meshMaterial.color.clone() : new THREE.Color("#FFFFFF");
-      if (orbitalHalo) {
-        scene.remove(orbitalHalo.points);
-        orbitalHalo.dispose();
-      }
-      orbitalHalo = new OrbitalHalo(color);
-      orbitalHalo.setTarget(mesh.position, NODE_RADIUS * 3.2, color);
-      scene.add(orbitalHalo.points);
+      showSelectionHalo(id);
     };
     const notifyOrbitInteraction = (ev: Event) => markCameraInteraction(ev.timeStamp);
     const onKeyDown = (ev: KeyboardEvent) => {
@@ -624,7 +675,16 @@ export function Brain() {
         return;
       }
       const key = ev.key.toLowerCase();
-      if (key === "r" || key === "0" || key === "escape") {
+      if (key === "escape") {
+        ev.preventDefault();
+        if (useBrainStore.getState().selectedId) {
+          select(null);
+          removeOrbitalHalo();
+        } else {
+          resetCamera();
+        }
+      }
+      if (key === "r" || key === "0") {
         ev.preventDefault();
         resetCamera();
       }
@@ -634,12 +694,25 @@ export function Brain() {
       }
     };
     const onHudResetView = () => resetCamera();
+    const onFlyToEntity = (ev: Event) => {
+      const id = (ev as CustomEvent<{ id?: string }>).detail?.id;
+      if (!id) return;
+      const mesh = meshById.get(id);
+      if (!mesh) return;
+      select(id);
+      focusTargetRef.current = null;
+      flyToEntity(camera, controls, mesh.position.clone(), 1200);
+      flashByNode.set(id, performance.now() + 450);
+      showSelectionHalo(id);
+      markCameraInteraction();
+    };
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("wheel", notifyOrbitInteraction, { passive: true });
     renderer.domElement.addEventListener("touchstart", notifyOrbitInteraction, { passive: true });
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("axiom:reset-view", onHudResetView);
+    window.addEventListener("axiom:fly-to-entity", onFlyToEntity);
 
     // ----- Render loop -----
     const fps = new RollingFpsCounter(60);
@@ -805,10 +878,13 @@ export function Brain() {
 
     const updateHoverAndRings = () => {
       const hoveredId = hoveredIdRef.current;
+      const selectedId = useBrainStore.getState().selectedId;
       const activeNeighbors = hoveredId ? neighborIds.get(hoveredId) : null;
+      const selectedNeighbors = selectedId ? neighborIds.get(selectedId) : null;
       for (const [id, mesh] of meshById) {
         const lodScale = nodeById.get(id)?.lod === "far" ? FAR_NODE_SCALE : 1;
-        const targetScale = (id === hoveredId ? 1.2 : 1) * lodScale;
+        const isSelected = id === selectedId;
+        const targetScale = (isSelected ? 1.14 : id === hoveredId ? 1.2 : 1) * lodScale;
         const nextScale = mesh.scale.x + (targetScale - mesh.scale.x) * 0.15;
         mesh.scale.setScalar(nextScale);
 
@@ -821,7 +897,8 @@ export function Brain() {
         }
         const isHover = id === hoveredId;
         const isNeighbor = activeNeighbors?.has(id) ?? false;
-        const targetOpacity = isHover ? 0.45 : isNeighbor ? 0.18 : 0;
+        const isSelectedNeighbor = selectedNeighbors?.has(id) ?? false;
+        const targetOpacity = isSelected ? 0.7 : isHover ? 0.45 : isSelectedNeighbor ? 0.28 : isNeighbor ? 0.18 : 0;
         ring.visible = targetOpacity > 0.01 || ring.material.opacity > 0.01;
         ring.material.opacity += (targetOpacity - ring.material.opacity) * 0.18;
         ring.lookAt(camera.position);
@@ -837,7 +914,7 @@ export function Brain() {
         }
         const material = mesh.material;
         if (material instanceof THREE.MeshStandardMaterial) {
-          material.emissiveIntensity += ((until - nowMs) / 600) * 1.2;
+          material.emissiveIntensity += ((until - nowMs) / 600) * 0.25;
         }
       }
 
@@ -866,13 +943,15 @@ export function Brain() {
       syncPositions();
       nebula.update(t);
       const fpsState = fpsGuard.state();
-      if (fpsState !== "emergency") pulseRunner.update(meshById, t);
+      if (fpsState !== "emergency") pulseRunner.update(meshById, t, (id) => selectionBaseIntensity(id));
       try {
         shimmerFrame++;
-        if (fpsState === "full" || (fpsState === "half" && shimmerFrame % 2 === 0)) {
+        const selectionActive = useBrainStore.getState().selectedId !== null;
+        if (selectionActive || fpsState === "full" || (fpsState === "half" && shimmerFrame % 2 === 0)) {
           updateEdgeShimmer(edgeShimmerSpec, t);
         }
         applyEdgeLod(fpsState);
+        applySelectionToEdges();
         updateSynapticFlow(t, dtMs, fpsState);
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -882,6 +961,12 @@ export function Brain() {
       updateFlashes(t);
       particleSystem.setParticleMultiplier(fpsGuard.particleMultiplier());
       particleSystem.update(t);
+      const selectedId = useBrainStore.getState().selectedId;
+      if (selectedId) {
+        showSelectionHalo(selectedId);
+      } else {
+        removeOrbitalHalo();
+      }
       orbitalHalo?.update(t);
 
       const v = fps.tick(t);
@@ -960,6 +1045,7 @@ export function Brain() {
       renderer.domElement.removeEventListener("touchstart", notifyOrbitInteraction);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("axiom:reset-view", onHudResetView);
+      window.removeEventListener("axiom:fly-to-entity", onFlyToEntity);
       if (forceTuneTimer !== null) window.clearTimeout(forceTuneTimer);
       sim.stop();
       controls.dispose();
