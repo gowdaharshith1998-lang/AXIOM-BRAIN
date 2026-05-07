@@ -5,6 +5,8 @@ import { App } from "@/App";
 import { useBrainStore } from "@/state/brain.store";
 
 vi.mock("@/components/Brain", () => ({ Brain: () => <div /> }));
+vi.mock("@/components/SourcesRail", () => ({ SourcesRail: () => <div /> }));
+vi.mock("@/components/InspectorPanel", () => ({ InspectorPanel: () => <div /> }));
 
 describe("browser title", () => {
   it("includes entity count when live", () => {

@@ -26,7 +26,7 @@ export function BottomToolbar() {
   };
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-5 z-20 flex flex-col items-center gap-3 font-mono text-xs text-white/75">
+    <div className="pointer-events-none fixed bottom-5 left-[220px] right-[320px] z-20 flex flex-col items-center gap-3 font-mono text-xs text-white/75">
       <button
         type="button"
         onClick={openSearch}

@@ -1,17 +1,17 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { BrandMark } from "@/components/BrandMark";
 
 describe("BrandMark", () => {
+  afterEach(cleanup);
   it("renders the AXIOM mark", () => {
     render(<BrandMark />);
     expect(screen.getByText("AXIOM")).toBeInTheDocument();
   });
 
-  it("is centered at the top of the viewport", () => {
-    const { container } = render(<BrandMark />);
-    expect(container.firstElementChild?.className).toContain("left-1/2");
-    expect(container.firstElementChild?.className).toContain("-translate-x-1/2");
+  it("renders the company-brain tagline", () => {
+    render(<BrandMark />);
+    expect(screen.getAllByText("Your company, brought to life").length).toBeGreaterThanOrEqual(1);
   });
 });

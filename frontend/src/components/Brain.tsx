@@ -181,6 +181,7 @@ export function Brain() {
   const applyEvent = useBrainStore((s) => s.applyEvent);
   const bootstrap = useBrainStore((s) => s.bootstrap);
   const select = useBrainStore((s) => s.select);
+  const selectCluster = useBrainStore((s) => s.selectCluster);
   const setClusterHealth = useBrainStore((s) => s.setClusterHealth);
 
   useEffect(() => {
@@ -418,6 +419,11 @@ export function Brain() {
     const flashByEdge = new Map<string, number>();
     const conduitPulseUntil = new Map<string, number>();
     let paletteOpen = false;
+    const layerVisibility = {
+      traffic_flow: true,
+      dependencies: true,
+      health: true,
+    };
     let cameraFlight:
       | {
           startedAt: number;
@@ -509,6 +515,13 @@ export function Brain() {
       return typeof instanceId === "number" ? (idByInstanceIndex[instanceId] ?? null) : null;
     };
 
+    const hitHubCluster = (): ClusterId | null => {
+      raycaster.setFromCamera(pointer, camera);
+      const hits = raycaster.intersectObjects(Array.from(hubMeshes.values()), false);
+      const cluster = hits[0]?.object.userData.cluster;
+      return isClusterId(cluster) ? cluster : null;
+    };
+
     const onPointerMove = (ev: PointerEvent) => {
       idleOrbit.noteUserInput(ev.timeStamp);
       setPointer(ev);
@@ -520,6 +533,12 @@ export function Brain() {
       setPointer(ev);
       const id = hitNodeId();
       if (!id) {
+        const cluster = hitHubCluster();
+        if (cluster) {
+          selectCluster(cluster);
+          focusTargetRef.current = CLUSTER_CENTROIDS[cluster].clone();
+          return;
+        }
         select(null);
         return;
       }
@@ -563,6 +582,27 @@ export function Brain() {
     const onPaletteState = (ev: Event) => {
       paletteOpen = Boolean((ev as CustomEvent<{ open?: boolean }>).detail?.open);
     };
+    const onLayerToggle = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ layer?: string; enabled?: boolean }>).detail;
+      if (!detail?.layer || typeof detail.enabled !== "boolean") return;
+      const enabled = detail.enabled;
+      if (detail.layer === "traffic_flow") {
+        layerVisibility.traffic_flow = enabled;
+        interHubLines.visible = enabled;
+        particleFlow.points.visible = enabled;
+      }
+      if (detail.layer === "dependencies") {
+        layerVisibility.dependencies = enabled;
+        radialEdges.visible = enabled;
+        intraClusterMesh.visible = enabled;
+      }
+      if (detail.layer === "health") {
+        layerVisibility.health = enabled;
+        bracketLabelObjects.forEach((object) => {
+          object.visible = enabled;
+        });
+      }
+    };
     const notifyUserInput = (ev: Event) => idleOrbit.noteUserInput(ev.timeStamp);
 
     const rebuildEdges = () => {
@@ -574,6 +614,7 @@ export function Brain() {
         }
       });
       radialEdges = buildRadialEdges(slots);
+      radialEdges.visible = layerVisibility.dependencies;
       scene.add(radialEdges);
 
       scene.remove(intraClusterMesh);
@@ -584,6 +625,7 @@ export function Brain() {
         }
       });
       intraClusterMesh = buildIntraClusterMeshGroup(slots);
+      intraClusterMesh.visible = layerVisibility.dependencies;
       scene.add(intraClusterMesh);
 
       scene.remove(interHubLines);
@@ -597,6 +639,7 @@ export function Brain() {
       conduitPaths = conduitPathsForEdges(interHubEdges);
       const conduitBuild = buildConduitLines(conduitPaths);
       interHubLines = conduitBuild.group;
+      interHubLines.visible = layerVisibility.traffic_flow;
       conduitLinesByKey = conduitBuild.linesByKey;
       scene.add(interHubLines);
       particleFlow.setEdges(conduitPaths, performance.now());
@@ -724,6 +767,7 @@ export function Brain() {
     window.addEventListener("axiom:reset-view", onHudResetView);
     window.addEventListener("axiom:fly-to-entity", onFlyToEntity);
     window.addEventListener("axiom:palette-state", onPaletteState);
+    window.addEventListener("axiom:layer-toggle", onLayerToggle);
 
     const fps = new RollingFpsCounter(60);
     const fpsGuard = new FpsGuard();
@@ -825,6 +869,7 @@ export function Brain() {
       window.removeEventListener("axiom:reset-view", onHudResetView);
       window.removeEventListener("axiom:fly-to-entity", onFlyToEntity);
       window.removeEventListener("axiom:palette-state", onPaletteState);
+      window.removeEventListener("axiom:layer-toggle", onLayerToggle);
       controls.dispose();
       composer.dispose();
       nebula.dispose();
@@ -881,7 +926,7 @@ export function Brain() {
       if (renderer.domElement.parentNode === el) el.removeChild(renderer.domElement);
       if (labelRenderer.domElement.parentNode === el) el.removeChild(labelRenderer.domElement);
     };
-  }, [sceneReady, select, setFps]);
+  }, [sceneReady, select, selectCluster, setFps]);
 
   return <div ref={containerRef} className="absolute inset-0" aria-hidden="true" />;
 }

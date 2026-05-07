@@ -33,19 +33,42 @@ export type ClusterHealthSnapshot = {
   total_entities: number;
 };
 
+export type AgentActionLog = {
+  action_id: string;
+  agent_name: string;
+  cluster_id: string;
+  skill_called: string;
+  decision?: "allow" | "deny";
+  reason?: string;
+  timestamp: string;
+};
+
+export type LedgerReceipt = {
+  receipt_id: string;
+  action_id: string;
+  decision: "allow" | "deny";
+  agent_name: string;
+  merkle_root: string;
+  timestamp: string;
+};
+
 type BrainState = {
   entities: Map<string, Entity>;
   edges: Map<string, Edge>;
   lastSeq: number;
   fps: number;
   selectedId: string | null;
+  selectedClusterId: string | null;
   connectionStatus: ConnectionStatus;
   clusterHealth: Record<string, ClusterHealthSnapshot>;
+  agentActions: AgentActionLog[];
+  receipts: LedgerReceipt[];
 
   bootstrap: (entities: Entity[], edges: Edge[]) => void;
   applyEvent: (event: BrainEvent) => void;
   setFps: (fps: number) => void;
   select: (id: string | null) => void;
+  selectCluster: (id: string | null) => void;
   setConnectionStatus: (status: ConnectionStatus) => void;
   setClusterHealth: (clusterHealth: Record<string, ClusterHealthSnapshot>) => void;
 };
@@ -56,8 +79,11 @@ export const useBrainStore = create<BrainState>((set) => ({
   lastSeq: 0,
   fps: 0,
   selectedId: null,
+  selectedClusterId: null,
   connectionStatus: "syncing",
   clusterHealth: {},
+  agentActions: [],
+  receipts: [],
 
   bootstrap: (entities, edges) =>
     set({
@@ -130,7 +156,8 @@ export const useBrainStore = create<BrainState>((set) => ({
     }),
 
   setFps: (fps) => set({ fps }),
-  select: (id) => set({ selectedId: id }),
+  select: (id) => set({ selectedId: id, selectedClusterId: null }),
+  selectCluster: (id) => set({ selectedClusterId: id, selectedId: null }),
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
   setClusterHealth: (clusterHealth) => set({ clusterHealth }),
 }));

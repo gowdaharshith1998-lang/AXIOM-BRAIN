@@ -62,6 +62,27 @@ def test_cluster_health_endpoint_returns_cluster_snapshot(tmp_path: Path) -> Non
     assert payload["billing_payments"]["total_entities"] == 1
 
 
+def test_sources_endpoint_returns_synthetic_rows(tmp_path: Path) -> None:
+    db_url = _make_db_url(tmp_path)
+    engine = create_engine(db_url, future=True)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    app = create_app(db_url=db_url)
+    with TestClient(app) as client:
+        payload = client.get("/api/sources").json()
+
+    assert [row["name"] for row in payload] == [
+        "Slack",
+        "Linear",
+        "GitHub",
+        "Notion",
+        "Email",
+        "Meetings",
+    ]
+    assert payload[0]["live"] is True
+
+
 def test_entities_p95_under_50ms_for_100_rows(tmp_path: Path) -> None:
     db_url = _make_db_url(tmp_path)
     engine = create_engine(db_url, future=True)

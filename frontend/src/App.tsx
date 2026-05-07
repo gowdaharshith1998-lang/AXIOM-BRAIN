@@ -1,9 +1,8 @@
 import { BottomToolbar } from "@/components/BottomToolbar";
 import { Brain } from "@/components/Brain";
-import { BrandMark } from "@/components/BrandMark";
 import { CommandPalette } from "@/components/CommandPalette";
-import { EntityInspector } from "@/components/EntityInspector";
-import { HUD } from "@/components/HUD";
+import { InspectorPanel } from "@/components/InspectorPanel";
+import { SourcesRail } from "@/components/SourcesRail";
 import { useBrainStore } from "@/state/brain.store";
 import { useEffect } from "react";
 
@@ -20,12 +19,13 @@ export function App() {
     <div
       className={`relative h-full w-full ${connectionStatus === "syncing" ? "bg-[#12081f]" : "bg-[#05050a]"}`}
     >
-      <Brain />
-      <BrandMark />
-      <HUD />
+      <SourcesRail />
+      <div className="fixed inset-y-0 left-[220px] right-[320px]">
+        <Brain />
+      </div>
+      <InspectorPanel />
       <BottomToolbar />
       <CommandPalette />
-      <EntityInspector />
     </div>
   );
 }

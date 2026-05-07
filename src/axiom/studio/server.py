@@ -21,6 +21,7 @@ from axiom.schema.dto import EdgeDTO, EntityDTO
 from axiom.schema.models import Edge, Entity
 from axiom.sources.base import IngestEvent
 from axiom.sources.live_synthetic import LiveSyntheticSource
+from axiom.studio.sources import synthetic_sources_snapshot
 
 
 def datetime_now_ms() -> int:
@@ -156,6 +157,11 @@ def create_app(
         with session_local() as session:
             snapshot = cluster_health_monitor.snapshot(session)
             return {cluster_id: item.to_json() for cluster_id, item in snapshot.items()}
+
+    @app.get("/api/sources")
+    def get_sources() -> list[dict[str, object]]:
+        with session_local() as session:
+            return synthetic_sources_snapshot(session)
 
     @app.get("/api/entities/search")
     def search_entities_endpoint(
