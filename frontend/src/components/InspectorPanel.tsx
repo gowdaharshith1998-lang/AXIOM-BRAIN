@@ -27,6 +27,7 @@ export function InspectorPanel() {
   const selectedClusterId = useBrainStore((s) => s.selectedClusterId);
   const clusterHealth = useBrainStore((s) => s.clusterHealth);
   const receipts = useBrainStore((s) => s.receipts);
+  const actions = useBrainStore((s) => s.agentActions);
   const selected = selectedId ? entities.get(selectedId) : null;
 
   return (
@@ -34,7 +35,13 @@ export function InspectorPanel() {
       {selected ? (
         <EntityDetail entity={selected} edges={edges} />
       ) : isClusterId(selectedClusterId) ? (
-        <ClusterDetail cluster={selectedClusterId} entities={entities} edges={edges} health={clusterHealth[selectedClusterId]?.status ?? "healthy"} />
+        <ClusterDetail
+          cluster={selectedClusterId}
+          entities={entities}
+          edges={edges}
+          health={clusterHealth[selectedClusterId]?.status ?? "healthy"}
+          actions={actions.filter((action) => action.cluster_id === selectedClusterId).slice(0, 5)}
+        />
       ) : (
         <DefaultArchitecture entities={entities.size} edges={edges.size} receipts={receipts.length} />
       )}
@@ -99,11 +106,13 @@ function ClusterDetail({
   entities,
   edges,
   health,
+  actions,
 }: {
   cluster: ClusterId;
   entities: Map<string, Entity>;
   edges: Map<string, unknown>;
   health: string;
+  actions: { action_id: string; agent_name: string; skill_called: string; decision?: string; reason?: string }[];
 }) {
   const clusterEntities = Array.from(entities.values())
     .filter((entity) => entity.cluster_id === cluster)
@@ -153,6 +162,21 @@ function ClusterDetail({
         <Metric label="Customer Support" value={Math.min(89, edges.size)} />
         <Metric label="Decisions & Policy" value={Math.min(56, edges.size)} />
         <Metric label="Engineering & Code" value={Math.min(34, edges.size)} />
+      </PanelSection>
+
+      <PanelSection title="Recent AEGIS actions">
+        <div className="space-y-2 text-[10px]">
+          {actions.map((action) => (
+            <div key={action.action_id}>
+              <span className={action.decision === "deny" ? "text-[#ef4444]" : "text-[#22c55e]"}>
+                {(action.decision ?? "eval").toUpperCase()}
+              </span>{" "}
+              {action.agent_name} - {action.skill_called}
+              {action.reason && <div className="ml-10 text-white/35">{action.reason}</div>}
+            </div>
+          ))}
+          {actions.length === 0 && <div className="text-white/35">Waiting for agent_action events.</div>}
+        </div>
       </PanelSection>
     </div>
   );

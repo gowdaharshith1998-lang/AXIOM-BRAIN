@@ -71,6 +71,7 @@ type BrainState = {
   selectCluster: (id: string | null) => void;
   setConnectionStatus: (status: ConnectionStatus) => void;
   setClusterHealth: (clusterHealth: Record<string, ClusterHealthSnapshot>) => void;
+  addAgentAction: (action: AgentActionLog) => void;
 };
 
 export const useBrainStore = create<BrainState>((set) => ({
@@ -152,6 +153,14 @@ export const useBrainStore = create<BrainState>((set) => ({
         }
       }
 
+      if (event.type === "agent_action" || event.type === "agent_action_evaluated") {
+        const payload = event.payload as Partial<AgentActionLog>;
+        if (typeof payload.action_id === "string") {
+          const existing = state.agentActions.filter((action) => action.action_id !== payload.action_id);
+          next.agentActions = [{ ...(payload as AgentActionLog) }, ...existing].slice(0, 25);
+        }
+      }
+
       return next;
     }),
 
@@ -160,4 +169,8 @@ export const useBrainStore = create<BrainState>((set) => ({
   selectCluster: (id) => set({ selectedClusterId: id, selectedId: null }),
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
   setClusterHealth: (clusterHealth) => set({ clusterHealth }),
+  addAgentAction: (action) =>
+    set((state) => ({
+      agentActions: [action, ...state.agentActions.filter((item) => item.action_id !== action.action_id)].slice(0, 25),
+    })),
 }));

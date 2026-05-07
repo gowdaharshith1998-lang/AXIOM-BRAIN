@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+import asyncio
+import random
+from datetime import datetime
+from uuid import uuid4
+
+from axiom.govern.policy_evaluator import SyntheticPolicyEvaluator
+from axiom.ingest.broadcaster import EventBroadcaster
+from axiom.organize.clusters import CLUSTER_IDS
+
+AGENTS = ("claude", "cursor", "gpt-5")
+INTENTS = ("read", "write", "execute")
+
+
+def _now() -> str:
+    return datetime.utcnow().isoformat()
+
+
+def synthetic_action_payload(rng: random.Random | None = None) -> dict[str, object]:
+    source = rng or random.Random()
+    cluster = source.choice(CLUSTER_IDS)
+    intent = source.choice(INTENTS)
+    return {
+        "action_id": f"act_{uuid4().hex[:12]}",
+        "agent_name": source.choice(AGENTS),
+        "cluster_id": cluster,
+        "intent": intent,
+        "skill_called": f"skills.{cluster}.lookup",
+        "timestamp": _now(),
+    }
+
+
+async def emit_agent_actions(
+    broadcaster: EventBroadcaster,
+    *,
+    evaluator: SyntheticPolicyEvaluator | None = None,
+    rng: random.Random | None = None,
+) -> None:
+    source = rng or random.Random()
+    policy = evaluator or SyntheticPolicyEvaluator(rng=source)
+    while True:
+        await asyncio.sleep(source.uniform(4, 8))
+        payload = synthetic_action_payload(source)
+        await broadcaster.publish(
+            {
+                "type": "agent_action",
+                "source_id": None,
+                "persisted_id": payload["action_id"],
+                "payload": payload,
+                "timestamp": int(datetime.utcnow().timestamp() * 1000),
+            }
+        )
+        await asyncio.sleep(0.2)
+        decision = policy.evaluate(str(payload["cluster_id"]), str(payload["intent"]))
+        await broadcaster.publish(
+            {
+                "type": "agent_action_evaluated",
+                "source_id": None,
+                "persisted_id": payload["action_id"],
+                "payload": {
+                    **payload,
+                    "decision": decision.decision,
+                    "reason": decision.reason,
+                    "policy_id": decision.policy_id,
+                    "timestamp": _now(),
+                },
+                "timestamp": int(datetime.utcnow().timestamp() * 1000),
+            }
+        )

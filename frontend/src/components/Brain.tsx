@@ -21,6 +21,8 @@ import {
 } from "@/components/ClusterBracketLabel";
 import { createHexGridPlane } from "@/components/HexGridBackground";
 import { easeInOutCubic, RESET_CAMERA_MS, shouldResetCameraFromKey } from "@/lib/camera-reset";
+import { AegisGate, createAegisRing } from "@/lib/aegis-gate";
+import { AegisParticleController } from "@/lib/aegis-particles";
 import { flyToEntity } from "@/lib/camera-flyto";
 import {
   CLUSTER_CENTROIDS,
@@ -363,6 +365,7 @@ export function Brain() {
     const hubGeometry = createHexPrismGeometry(HEX_HUB_RADIUS, HEX_HEIGHT * 1.4);
     const hubMeshes = new Map<ClusterId, THREE.Mesh<THREE.CylinderGeometry, THREE.MeshStandardMaterial>>();
     const hubIconSprites: THREE.Sprite[] = [];
+    const aegisGates = new Map<ClusterId, AegisGate>();
     for (const cluster of CLUSTER_IDS) {
       const color = new THREE.Color(CLUSTER_COLORS[cluster]);
       const mesh = new THREE.Mesh(
@@ -384,6 +387,11 @@ export function Brain() {
       icon.position.copy(CLUSTER_CENTROIDS[cluster]).add(new THREE.Vector3(0, 0, 0.5));
       hubIconSprites.push(icon);
       scene.add(icon);
+      const gateRing = createAegisRing(cluster);
+      gateRing.position.copy(CLUSTER_CENTROIDS[cluster]);
+      gateRing.rotation.x = Math.PI / 2;
+      scene.add(gateRing);
+      aegisGates.set(cluster, new AegisGate(cluster, gateRing, CLUSTER_COLORS[cluster]));
     }
 
     let radialEdges = buildRadialEdges(slots);
@@ -412,6 +420,8 @@ export function Brain() {
     scene.add(particleFlow.points);
     const radialTraffic = new RadialTrafficController(slots);
     scene.add(radialTraffic.points);
+    const aegisParticles = new AegisParticleController();
+    scene.add(aegisParticles.group);
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     const hoveredIdRef = { current: null as string | null };
@@ -755,6 +765,25 @@ export function Brain() {
           refreshClusterLabels();
           continue;
         }
+
+        if (event.type === "agent_action") {
+          const payload = event.payload as { action_id?: string; cluster_id?: string };
+          if (typeof payload.action_id === "string" && isClusterId(payload.cluster_id)) {
+            aegisParticles.spawn(payload.action_id, payload.cluster_id, nowMs);
+            aegisGates.get(payload.cluster_id)?.setState("evaluating", nowMs);
+          }
+          continue;
+        }
+
+        if (event.type === "agent_action_evaluated") {
+          const payload = event.payload as { action_id?: string; cluster_id?: string; decision?: string };
+          if (typeof payload.action_id === "string" && isClusterId(payload.cluster_id)) {
+            const decision = payload.decision === "deny" ? "deny" : "allow";
+            aegisParticles.evaluate(payload.action_id, decision);
+            aegisGates.get(payload.cluster_id)?.setState(decision, nowMs);
+          }
+          continue;
+        }
       }
       liveEventsRef.current = deferred.slice(-20);
     };
@@ -797,6 +826,7 @@ export function Brain() {
       for (const [index, cluster] of CLUSTER_IDS.entries()) {
         const hub = hubMeshes.get(cluster);
         if (hub) hub.material.emissiveIntensity = hubEmissiveIntensityAt(HUB_EMISSIVE, index, t);
+        aegisGates.get(cluster)?.update(t);
       }
       refreshInstanceTransforms(t);
       updateSelectionRing();
@@ -814,6 +844,7 @@ export function Brain() {
         }
       }
       radialTraffic.update(t);
+      aegisParticles.update(t);
       const selectedId = useBrainStore.getState().selectedId;
       if (selectedId) {
         const target = findEntityPosition(entities.get(selectedId), positionsById);
@@ -876,6 +907,7 @@ export function Brain() {
       particleSystem.dispose();
       particleFlow.dispose();
       radialTraffic.dispose();
+      aegisParticles.dispose();
       renderer.dispose();
       grid.geometry.dispose();
       grid.material.map?.dispose();
@@ -884,6 +916,10 @@ export function Brain() {
       nodeMaterial.dispose();
       hubGeometry.dispose();
       hubMeshes.forEach((mesh) => mesh.material.dispose());
+      aegisGates.forEach((gate) => {
+        gate.ring.geometry.dispose();
+        gate.ring.material.dispose();
+      });
       hubIconSprites.forEach((sprite) => {
         const material = sprite.material as THREE.SpriteMaterial;
         material.map?.dispose();

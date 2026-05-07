@@ -215,4 +215,25 @@ describe("brain.store", () => {
 
     expect(useBrainStore.getState().clusterHealth.billing_payments.status).toBe("critical");
   });
+
+  it("records evaluated agent actions", () => {
+    useBrainStore.setState({ agentActions: [], lastSeq: 0 });
+    useBrainStore.getState().applyEvent({
+      seq: 11,
+      type: "agent_action_evaluated",
+      timestamp: 0,
+      source_id: null,
+      persisted_id: "act_1",
+      payload: {
+        action_id: "act_1",
+        agent_name: "claude",
+        cluster_id: "billing_payments",
+        skill_called: "skills.billing.refund_lookup",
+        decision: "deny",
+        reason: "policy AEGIS-7 blocks write to billing without RFC",
+        timestamp: "t",
+      },
+    });
+    expect(useBrainStore.getState().agentActions[0].decision).toBe("deny");
+  });
 });
