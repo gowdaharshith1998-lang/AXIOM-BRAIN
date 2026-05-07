@@ -5,6 +5,7 @@ import random
 from datetime import datetime
 from uuid import uuid4
 
+from axiom.govern.ledger import synthetic_receipt
 from axiom.govern.policy_evaluator import SyntheticPolicyEvaluator
 from axiom.ingest.broadcaster import EventBroadcaster
 from axiom.organize.clusters import CLUSTER_IDS
@@ -39,6 +40,7 @@ async def emit_agent_actions(
 ) -> None:
     source = rng or random.Random()
     policy = evaluator or SyntheticPolicyEvaluator(rng=source)
+    receipt_index = 0
     while True:
         await asyncio.sleep(source.uniform(4, 8))
         payload = synthetic_action_payload(source)
@@ -65,6 +67,21 @@ async def emit_agent_actions(
                     "policy_id": decision.policy_id,
                     "timestamp": _now(),
                 },
+                "timestamp": int(datetime.utcnow().timestamp() * 1000),
+            }
+        )
+        receipt_index += 1
+        await broadcaster.publish(
+            {
+                "type": "receipt_added",
+                "source_id": None,
+                "persisted_id": payload["action_id"],
+                "payload": synthetic_receipt(
+                    action_id=str(payload["action_id"]),
+                    decision=decision.decision,
+                    agent_name=str(payload["agent_name"]),
+                    index=receipt_index,
+                ),
                 "timestamp": int(datetime.utcnow().timestamp() * 1000),
             }
         )

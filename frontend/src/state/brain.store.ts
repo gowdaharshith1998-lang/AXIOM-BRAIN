@@ -52,6 +52,16 @@ export type LedgerReceipt = {
   timestamp: string;
 };
 
+export type WardenInsight = {
+  insight_id: string;
+  severity: "info" | "warning" | "critical";
+  message: string;
+  confidence: number;
+  related_entity_ids: string[];
+  recommended_actions: string[];
+  timestamp: string;
+};
+
 type BrainState = {
   entities: Map<string, Entity>;
   edges: Map<string, Edge>;
@@ -63,6 +73,7 @@ type BrainState = {
   clusterHealth: Record<string, ClusterHealthSnapshot>;
   agentActions: AgentActionLog[];
   receipts: LedgerReceipt[];
+  insights: WardenInsight[];
 
   bootstrap: (entities: Entity[], edges: Edge[]) => void;
   applyEvent: (event: BrainEvent) => void;
@@ -72,6 +83,8 @@ type BrainState = {
   setConnectionStatus: (status: ConnectionStatus) => void;
   setClusterHealth: (clusterHealth: Record<string, ClusterHealthSnapshot>) => void;
   addAgentAction: (action: AgentActionLog) => void;
+  addReceipt: (receipt: LedgerReceipt) => void;
+  addInsight: (insight: WardenInsight) => void;
 };
 
 export const useBrainStore = create<BrainState>((set) => ({
@@ -85,6 +98,7 @@ export const useBrainStore = create<BrainState>((set) => ({
   clusterHealth: {},
   agentActions: [],
   receipts: [],
+  insights: [],
 
   bootstrap: (entities, edges) =>
     set({
@@ -161,6 +175,20 @@ export const useBrainStore = create<BrainState>((set) => ({
         }
       }
 
+      if (event.type === "receipt_added") {
+        const payload = event.payload as Partial<LedgerReceipt>;
+        if (typeof payload.receipt_id === "string") {
+          next.receipts = [payload as LedgerReceipt, ...state.receipts].slice(0, 30);
+        }
+      }
+
+      if (event.type === "insight_flagged") {
+        const payload = event.payload as Partial<WardenInsight>;
+        if (typeof payload.insight_id === "string") {
+          next.insights = [payload as WardenInsight, ...state.insights].slice(0, 10);
+        }
+      }
+
       return next;
     }),
 
@@ -173,4 +201,6 @@ export const useBrainStore = create<BrainState>((set) => ({
     set((state) => ({
       agentActions: [action, ...state.agentActions.filter((item) => item.action_id !== action.action_id)].slice(0, 25),
     })),
+  addReceipt: (receipt) => set((state) => ({ receipts: [receipt, ...state.receipts].slice(0, 30) })),
+  addInsight: (insight) => set((state) => ({ insights: [insight, ...state.insights].slice(0, 10) })),
 }));

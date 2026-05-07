@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from axiom.api.search import EntitySearchResult, search_entities
 from axiom.govern.agent_actions import emit_agent_actions
+from axiom.govern.warden import emit_warden_insights
 from axiom.ingest.broadcaster import EventBroadcaster
 from axiom.ingest.pipeline import IngestPipeline
 from axiom.organize.agent import OrganizerAgent
@@ -55,6 +56,7 @@ def create_app(
         app.state.live_task = None
         app.state.cluster_health_task = None
         app.state.agent_action_task = None
+        app.state.warden_task = None
         app.state.organizer = None
         previous_health: dict[str, str] = {}
 
@@ -79,8 +81,10 @@ def create_app(
 
         health_task = asyncio.create_task(cluster_health_loop())
         agent_action_task = asyncio.create_task(emit_agent_actions(broadcaster))
+        warden_task = asyncio.create_task(emit_warden_insights(broadcaster, session_local))
         app.state.cluster_health_task = health_task
         app.state.agent_action_task = agent_action_task
+        app.state.warden_task = warden_task
 
         organizer: OrganizerAgent | None = None
         if enable_organizer:
@@ -104,10 +108,13 @@ def create_app(
                     await organizer.cancel()
                 health_task.cancel()
                 agent_action_task.cancel()
+                warden_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await health_task
                 with suppress(asyncio.CancelledError):
                     await agent_action_task
+                with suppress(asyncio.CancelledError):
+                    await warden_task
                 engine.dispose()
             return
 
@@ -133,10 +140,13 @@ def create_app(
                         await organizer.cancel()
                     health_task.cancel()
                     agent_action_task.cancel()
+                    warden_task.cancel()
                     with suppress(asyncio.CancelledError):
                         await health_task
                     with suppress(asyncio.CancelledError):
                         await agent_action_task
+                    with suppress(asyncio.CancelledError):
+                        await warden_task
                     engine.dispose()
 
     app = FastAPI(title="AXIOM Studio API", lifespan=lifespan)

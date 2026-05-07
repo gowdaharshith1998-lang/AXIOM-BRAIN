@@ -114,6 +114,7 @@ function setInstanceTransform(
   slot: VisibleEntitySlot,
   selectedId: string | null,
   hoveredId: string | null,
+  highlightedIds: Set<string>,
   flashUntil: number | undefined,
   now: number,
 ): void {
@@ -122,12 +123,13 @@ function setInstanceTransform(
   const importanceScale = THREE.MathUtils.lerp(0.7, 1.6, compositeImportance(slot.entity));
   const selectedScale = slot.entity.id === selectedId ? SELECTED_SCALE : 1;
   const hoverScale = slot.entity.id === hoveredId ? 1.14 : 1;
+  const highlightScale = highlightedIds.has(slot.entity.id) ? 1.28 : 1;
   const flashScale = flashUntil && flashUntil > now ? 1 + ((flashUntil - now) / FLASH_MS) * 0.25 : 1;
   const spokeScale = shimmerScale(hashStringToFloat(slot.entity.id), now);
   const scale = new THREE.Vector3(
-    importanceScale * selectedScale * hoverScale * flashScale * spokeScale,
-    importanceScale * selectedScale * hoverScale * flashScale * spokeScale,
-    importanceScale * selectedScale * hoverScale * flashScale * spokeScale,
+    importanceScale * selectedScale * hoverScale * highlightScale * flashScale * spokeScale,
+    importanceScale * selectedScale * hoverScale * highlightScale * flashScale * spokeScale,
+    importanceScale * selectedScale * hoverScale * highlightScale * flashScale * spokeScale,
   );
   matrix.compose(slot.position, quat, scale);
   mesh.setMatrixAt(index, matrix);
@@ -354,7 +356,7 @@ export function Brain() {
     nodeMesh.count = slots.length;
     nodeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     for (let i = 0; i < slots.length; i++) {
-      setInstanceTransform(nodeMesh, i, slots[i], null, null, undefined, 0);
+      setInstanceTransform(nodeMesh, i, slots[i], null, null, new Set(), undefined, 0);
       const importance = THREE.MathUtils.clamp(entityImportance(slots[i].entity), 0, 1);
       const color = new THREE.Color(CLUSTER_COLORS[slots[i].clusterId]).lerp(new THREE.Color("#ffffff"), importance * 0.35);
       nodeMesh.setColorAt(i, color);
@@ -427,6 +429,7 @@ export function Brain() {
     const hoveredIdRef = { current: null as string | null };
     const flashByNode = new Map<string, number>();
     const flashByEdge = new Map<string, number>();
+    const highlightedIds = new Set<string>();
     const conduitPulseUntil = new Map<string, number>();
     let paletteOpen = false;
     const layerVisibility = {
@@ -469,6 +472,7 @@ export function Brain() {
           slots[i],
           selectedId,
           hoveredIdRef.current,
+          highlightedIds,
           flashByNode.get(slots[i].entity.id),
           now,
         );
@@ -612,6 +616,12 @@ export function Brain() {
           object.visible = enabled;
         });
       }
+    };
+    const onHighlightEntities = (ev: Event) => {
+      const ids = (ev as CustomEvent<{ ids?: string[] }>).detail?.ids ?? [];
+      highlightedIds.clear();
+      for (const id of ids) highlightedIds.add(id);
+      for (const id of ids) flashByNode.set(id, performance.now() + 1600);
     };
     const notifyUserInput = (ev: Event) => idleOrbit.noteUserInput(ev.timeStamp);
 
@@ -797,6 +807,7 @@ export function Brain() {
     window.addEventListener("axiom:fly-to-entity", onFlyToEntity);
     window.addEventListener("axiom:palette-state", onPaletteState);
     window.addEventListener("axiom:layer-toggle", onLayerToggle);
+    window.addEventListener("axiom:highlight-entities", onHighlightEntities);
 
     const fps = new RollingFpsCounter(60);
     const fpsGuard = new FpsGuard();
@@ -901,6 +912,7 @@ export function Brain() {
       window.removeEventListener("axiom:fly-to-entity", onFlyToEntity);
       window.removeEventListener("axiom:palette-state", onPaletteState);
       window.removeEventListener("axiom:layer-toggle", onLayerToggle);
+      window.removeEventListener("axiom:highlight-entities", onHighlightEntities);
       controls.dispose();
       composer.dispose();
       nebula.dispose();

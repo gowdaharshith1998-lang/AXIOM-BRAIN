@@ -1,5 +1,6 @@
 import type React from "react";
 
+import { AIInsightCard } from "@/components/AIInsightCard";
 import { CLUSTER_LABELS, isClusterId, type ClusterId } from "@/lib/cluster-layout";
 import { useBrainStore, type Entity } from "@/state/brain.store";
 
@@ -95,6 +96,8 @@ function DefaultArchitecture({ entities, edges, receipts }: { entities: number; 
         <StatusDot label="AEGIS governance active" color="#22c55e" />
         <StatusDot label={`LEDGER ${receipts || 89} receipts today`} color="#eab308" />
       </PanelSection>
+
+      <AIInsightCard />
 
       <div className="mt-8 text-[10px] italic text-white/35">the company brain - Tom Blomfield, S26 RFS</div>
     </div>

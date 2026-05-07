@@ -33,4 +33,10 @@ describe("SourcesRail", () => {
     render(<SourcesRail />);
     expect(screen.getAllByText("AEGIS governance active").length).toBeGreaterThanOrEqual(1);
   });
+
+  it("keeps placeholder layers disabled", () => {
+    render(<SourcesRail />);
+    expect(screen.getByLabelText("Dark Matter")).toBeDisabled();
+    expect(screen.getByLabelText("Tests")).toBeDisabled();
+  });
 });

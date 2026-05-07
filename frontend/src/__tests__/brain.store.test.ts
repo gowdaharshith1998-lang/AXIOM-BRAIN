@@ -236,4 +236,41 @@ describe("brain.store", () => {
     });
     expect(useBrainStore.getState().agentActions[0].decision).toBe("deny");
   });
+
+  it("records receipts and insights", () => {
+    useBrainStore.setState({ receipts: [], insights: [], lastSeq: 0 });
+    useBrainStore.getState().applyEvent({
+      seq: 12,
+      type: "receipt_added",
+      timestamp: 0,
+      source_id: null,
+      persisted_id: "r1",
+      payload: {
+        receipt_id: "abc",
+        action_id: "act_1",
+        decision: "allow",
+        agent_name: "claude",
+        merkle_root: "root",
+        timestamp: "t",
+      },
+    });
+    useBrainStore.getState().applyEvent({
+      seq: 13,
+      type: "insight_flagged",
+      timestamp: 0,
+      source_id: null,
+      persisted_id: "ins_1",
+      payload: {
+        insight_id: "ins_1",
+        severity: "warning",
+        message: "PR-341 modifies billing code without RFC reference",
+        confidence: 0.87,
+        related_entity_ids: ["e1"],
+        recommended_actions: [],
+        timestamp: "t",
+      },
+    });
+    expect(useBrainStore.getState().receipts).toHaveLength(1);
+    expect(useBrainStore.getState().insights[0].insight_id).toBe("ins_1");
+  });
 });

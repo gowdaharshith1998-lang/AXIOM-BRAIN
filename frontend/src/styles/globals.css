@@ -93,3 +93,14 @@ body {
     filter: drop-shadow(0 0 0 rgba(255, 255, 255, 0));
   }
 }
+
+@keyframes axiom-ledger-slide {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

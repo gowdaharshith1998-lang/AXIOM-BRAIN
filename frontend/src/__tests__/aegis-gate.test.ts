@@ -16,4 +16,10 @@ describe("AegisGate", () => {
     gate.update(700);
     expect(gate.currentState()).toBe("idle");
   });
+
+  it("uses red for deny state", () => {
+    const gate = new AegisGate("billing_payments", createAegisRing("billing_payments"));
+    gate.setState("deny", 0);
+    expect(`#${gate.ring.material.color.getHexString()}`).toBe("#ef4444");
+  });
 });

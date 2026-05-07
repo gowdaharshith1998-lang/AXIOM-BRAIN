@@ -18,4 +18,13 @@ describe("AegisParticleController", () => {
     expect(controller.activeCount()).toBe(0);
     controller.dispose();
   });
+
+  it("keeps denied particles active until fade completes", () => {
+    const controller = new AegisParticleController();
+    controller.spawn("act_2", "incidents_ops", 0);
+    controller.evaluate("act_2", "deny");
+    controller.update(100);
+    expect(controller.activeCount()).toBe(1);
+    controller.dispose();
+  });
 });

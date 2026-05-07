@@ -19,12 +19,12 @@ function entity(id: string, cluster_id: string, composite_importance: number): E
 describe("visibleExportData", () => {
   it("includes visible entities and cluster metadata", () => {
     const state = {
-      entities: new Map(Array.from({ length: 30 }, (_, i) => [`e${i}`, entity(`e${i}`, "billing_payments", 1 - i / 100)])),
+      entities: new Map(Array.from({ length: 96 }, (_, i) => [`e${i}`, entity(`e${i}`, "billing_payments", 1 - i / 100)])),
       edges: new Map([["edge", { id: "edge", source_id: "e0", target_id: "e1", relationship: "mentions", data: {}, created_at: "t" }]]),
     };
     const data = visibleExportData(state);
     expect(data.version).toBe("0.1");
-    expect(data.entities).toHaveLength(26);
+    expect(data.entities).toHaveLength(80);
     expect(data.edges).toHaveLength(1);
     expect(data.clusters).toHaveLength(7);
   });

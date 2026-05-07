@@ -7,6 +7,7 @@ import { useBrainStore } from "@/state/brain.store";
 vi.mock("@/components/Brain", () => ({ Brain: () => <div /> }));
 vi.mock("@/components/SourcesRail", () => ({ SourcesRail: () => <div /> }));
 vi.mock("@/components/InspectorPanel", () => ({ InspectorPanel: () => <div /> }));
+vi.mock("@/components/LedgerRibbon", () => ({ LedgerRibbon: () => <div /> }));
 
 describe("browser title", () => {
   it("includes entity count when live", () => {

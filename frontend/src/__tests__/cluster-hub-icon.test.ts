@@ -14,4 +14,8 @@ describe("ClusterHubIcon", () => {
     expect(sprite.scale.x).toBe(4);
     expect(sprite.userData.kind).toBe("cluster-hub-icon");
   });
+
+  it("maps growth to an ASCII trend label", () => {
+    expect(iconTextForCluster("growth_product")).toBe("UP");
+  });
 });

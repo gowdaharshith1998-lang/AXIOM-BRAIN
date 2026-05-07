@@ -11,7 +11,9 @@ export type BrainEvent = {
     | "entity_classified"
     | "cluster_health_changed"
     | "agent_action"
-    | "agent_action_evaluated";
+    | "agent_action_evaluated"
+    | "receipt_added"
+    | "insight_flagged";
   timestamp: number;
   source_id: string | null;
   persisted_id: string | null;

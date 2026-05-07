@@ -54,4 +54,10 @@ describe("InspectorPanel", () => {
     expect(screen.getAllByText("Stripe webhook handler").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/engineering_code/)).toBeInTheDocument();
   });
+
+  it("embeds AI insight in the default inspector", () => {
+    useBrainStore.setState({ entities: new Map(), edges: new Map(), selectedId: null, selectedClusterId: null, insights: [] });
+    render(<InspectorPanel />);
+    expect(screen.getByText("AI Insight")).toBeInTheDocument();
+  });
 });
