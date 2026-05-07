@@ -17,3 +17,27 @@ body {
   overflow: hidden;
 }
 
+.axiom-value-flash {
+  color: #ec4899;
+  transition: color 200ms ease-out;
+}
+
+.axiom-health-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--health-color) 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    var(--health-color) 100%
+  );
+  background-size: 200% 100%;
+  animation: axiom-health-shimmer 3s linear infinite;
+}
+
+@keyframes axiom-health-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}

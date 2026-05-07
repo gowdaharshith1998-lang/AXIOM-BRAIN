@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { computeCrossClusterCount, computeHealthPercent, healthColor, HUD } from "@/components/HUD";
 import { useBrainStore } from "@/state/brain.store";
@@ -117,5 +117,48 @@ describe("HUD", () => {
     });
     render(<HUD />);
     expect(screen.getAllByText(/Refund escalation policy/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("flashes count values on change", () => {
+    vi.useFakeTimers();
+    useBrainStore.setState({
+      entities: new Map(),
+      edges: new Map(),
+      selectedId: null,
+      connectionStatus: "live",
+    });
+    const { container, rerender } = render(<HUD />);
+    useBrainStore.setState({
+      entities: new Map([
+        [
+          "e1",
+          {
+            id: "e1",
+            type: "thread",
+            data: {},
+            source_id: null,
+            created_at: "t",
+            updated_at: "t",
+          },
+        ],
+      ]),
+    });
+    rerender(<HUD />);
+    expect(container.querySelector(".axiom-value-flash")).toBeTruthy();
+    act(() => vi.advanceTimersByTime(700));
+    rerender(<HUD />);
+    expect(container.querySelector(".axiom-value-flash")).toBeFalsy();
+    vi.useRealTimers();
+  });
+
+  it("animates the live pip when live", () => {
+    useBrainStore.setState({ connectionStatus: "live" });
+    const { container } = render(<HUD />);
+    expect(container.querySelector(".h-2.w-2.rounded-full.animate-pulse")).toBeTruthy();
+  });
+
+  it("adds shimmer animation to the health bar", () => {
+    const { container } = render(<HUD />);
+    expect(container.querySelector(".axiom-health-shimmer")).toBeTruthy();
   });
 });

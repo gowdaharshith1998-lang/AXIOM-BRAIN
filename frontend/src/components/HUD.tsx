@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+
 import { CLUSTER_IDS, isClusterId } from "@/lib/cluster-layout";
 import { useBrainStore } from "@/state/brain.store";
 import type { Edge, Entity } from "@/state/brain.store";
@@ -41,6 +43,8 @@ export function HUD() {
   const connectionStatus = useBrainStore((s) => s.connectionStatus);
   const selected = selectedId ? entities.get(selectedId) : null;
   const crossCluster = computeCrossClusterCount(edges.values(), entities);
+  const [flashUntil, setFlashUntil] = useState<Record<string, number>>({});
+  const previousCounts = useRef({ entities: entities.size, edges: edges.size, crossCluster });
   const health = computeHealthPercent(connectionStatus, entities.size);
   const color = healthColor(health);
   const statusLabel =
@@ -60,6 +64,24 @@ export function HUD() {
     ["Low-confidence", "--"],
     ["Cross-cluster", crossCluster],
   ] as const;
+
+  useEffect(() => {
+    const next = { entities: entities.size, edges: edges.size, crossCluster };
+    const changed: Record<string, number> = {};
+    if (next.entities !== previousCounts.current.entities) changed.Entities = Date.now() + 600;
+    if (next.edges !== previousCounts.current.edges) changed.Edges = Date.now() + 600;
+    if (next.crossCluster !== previousCounts.current.crossCluster) changed["Cross-cluster"] = Date.now() + 600;
+    previousCounts.current = next;
+    if (Object.keys(changed).length === 0) return;
+    setFlashUntil((current) => ({ ...current, ...changed }));
+    const timer = window.setTimeout(() => {
+      setFlashUntil((current) => {
+        const now = Date.now();
+        return Object.fromEntries(Object.entries(current).filter(([, until]) => until > now));
+      });
+    }, 620);
+    return () => window.clearTimeout(timer);
+  }, [entities.size, edges.size, crossCluster]);
 
   return (
     <>
@@ -83,7 +105,7 @@ export function HUD() {
           {rows.map(([label, value]) => (
             <div key={label} className="flex items-center justify-between">
               <span className="text-white/55">{label}</span>
-              <span className="text-white">{value}</span>
+              <span className={flashUntil[label] ? "axiom-value-flash" : "text-white"}>{value}</span>
             </div>
           ))}
         </div>
@@ -94,7 +116,16 @@ export function HUD() {
             <span style={{ color }}>{health}%</span>
           </div>
           <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
-            <div className="h-full rounded-full transition-[width]" style={{ width: `${health}%`, backgroundColor: color }} />
+            <div
+              className="axiom-health-shimmer h-full rounded-full transition-[width]"
+              style={
+                {
+                  width: `${health}%`,
+                  backgroundColor: color,
+                  "--health-color": color,
+                } as CSSProperties
+              }
+            />
           </div>
         </div>
 

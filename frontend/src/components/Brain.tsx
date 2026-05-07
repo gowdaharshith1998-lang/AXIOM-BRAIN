@@ -40,6 +40,7 @@ import {
   type VisibleEntitySlot,
 } from "@/lib/hex-layout";
 import { BLOOM_FULL_STRENGTH } from "@/lib/lod";
+import { IdleOrbitController } from "@/lib/idle-orbit";
 import { ParticleFlowController } from "@/lib/particle-flow";
 import { ParticleEffectSystem } from "@/lib/particles/agent-effects";
 import { createNebulaBackground } from "@/lib/particles/nebula-bg";
@@ -269,6 +270,7 @@ export function Brain() {
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.target.set(0, 0, 0);
+    const idleOrbit = new IdleOrbitController(camera, controls);
 
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
@@ -449,6 +451,7 @@ export function Brain() {
     };
 
     const startCameraFlight = (toPosition: THREE.Vector3, toTarget: THREE.Vector3, now = performance.now()) => {
+      idleOrbit.noteUserInput(now);
       focusTargetRef.current = null;
       cameraFlight = {
         startedAt: now,
@@ -478,11 +481,13 @@ export function Brain() {
     };
 
     const onPointerMove = (ev: PointerEvent) => {
+      idleOrbit.noteUserInput(ev.timeStamp);
       setPointer(ev);
       hoveredIdRef.current = hitNodeId();
     };
 
     const onPointerDown = (ev: PointerEvent) => {
+      idleOrbit.noteUserInput(ev.timeStamp);
       setPointer(ev);
       const id = hitNodeId();
       if (!id) {
@@ -496,6 +501,7 @@ export function Brain() {
     };
 
     const onKeyDown = (ev: KeyboardEvent) => {
+      idleOrbit.noteUserInput(ev.timeStamp);
       const target = ev.target;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
         return;
@@ -521,12 +527,14 @@ export function Brain() {
       focusTargetRef.current = null;
       flyToEntity(camera, controls, position, 1200);
       flashByNode.set(id, performance.now() + 450);
+      idleOrbit.noteUserInput();
     };
 
     const onHudResetView = () => resetCamera();
     const onPaletteState = (ev: Event) => {
       paletteOpen = Boolean((ev as CustomEvent<{ open?: boolean }>).detail?.open);
     };
+    const notifyUserInput = (ev: Event) => idleOrbit.noteUserInput(ev.timeStamp);
 
     const rebuildEdges = () => {
       scene.remove(radialEdges);
@@ -648,6 +656,8 @@ export function Brain() {
 
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
+    renderer.domElement.addEventListener("wheel", notifyUserInput, { passive: true });
+    renderer.domElement.addEventListener("touchstart", notifyUserInput, { passive: true });
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("axiom:reset-view", onHudResetView);
     window.addEventListener("axiom:fly-to-entity", onFlyToEntity);
@@ -697,6 +707,7 @@ export function Brain() {
         if (progress >= 1) cameraFlight = null;
       }
       ring.lookAt(camera.position);
+      if (!cameraFlight && !focusTargetRef.current) idleOrbit.update(t);
       controls.update();
       composer.render();
       labelRenderer.render(scene, camera);
@@ -725,6 +736,8 @@ export function Brain() {
       window.cancelAnimationFrame(raf);
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
+      renderer.domElement.removeEventListener("wheel", notifyUserInput);
+      renderer.domElement.removeEventListener("touchstart", notifyUserInput);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("axiom:reset-view", onHudResetView);
       window.removeEventListener("axiom:fly-to-entity", onFlyToEntity);
