@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 import uuid_utils as uuid
-from sqlalchemy import DateTime, ForeignKey, Index, String
+from sqlalchemy import DateTime, Float, ForeignKey, Index, String
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -44,6 +44,12 @@ class Entity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True
+    )
+    cluster_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True, default=None
+    )
+    composite_importance: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, index=True
     )
 
 

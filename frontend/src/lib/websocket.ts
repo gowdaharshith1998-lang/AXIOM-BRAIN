@@ -5,9 +5,10 @@ export type BrainEvent = {
     | "entity_modified"
     | "entity_removed"
     | "edge_added"
-    | "edge_removed";
+    | "edge_removed"
+    | "entity_classified";
   timestamp: number;
-  source_id: string;
+  source_id: string | null;
   persisted_id: string | null;
   payload: Record<string, unknown>;
 };

@@ -15,3 +15,12 @@
 **Hosted demo:** `https://axiomctrl.com` (placeholder until Phase 11)
 
 **Calibra:** Integration lands in Phase 7. Phases 1–2 do not import or install Calibra.
+
+## Configuration
+
+Copy `.env.example` to `.env` and fill in any keys you need. Notable values:
+
+| Variable | Purpose |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | Optional. Enables the Phase 5.7 hybrid cluster classifier's LLM fallback (Anthropic Haiku). When unset, the classifier still works — it falls back to keyword matching and the default cluster (`decisions_policy`). |
+| `DATABASE_URL` | SQLAlchemy URL. Defaults to `sqlite:///./axiom.db`. |

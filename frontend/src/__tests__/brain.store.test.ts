@@ -109,5 +109,58 @@ describe("brain.store", () => {
 
     expect(useBrainStore.getState().edges.has("l1")).toBe(true);
   });
+
+  it("applies entity_classified to update cluster_id on existing entity", () => {
+    const existing = {
+      id: "e7",
+      type: "thread",
+      data: { title: "Refund inquiry" },
+      source_id: null,
+      created_at: "t",
+      updated_at: "t",
+      cluster_id: null,
+    } as const;
+    useBrainStore.setState({
+      entities: new Map([[existing.id, { ...existing }]]),
+      edges: new Map(),
+      lastSeq: 0,
+      fps: 0,
+      selectedId: null,
+    });
+
+    useBrainStore.getState().applyEvent({
+      seq: 5,
+      type: "entity_classified",
+      timestamp: 0,
+      source_id: null,
+      persisted_id: "e7",
+      payload: { entity_id: "e7", cluster_id: "billing_payments" },
+    });
+
+    expect(useBrainStore.getState().entities.get("e7")?.cluster_id).toBe("billing_payments");
+    expect(useBrainStore.getState().lastSeq).toBe(5);
+  });
+
+  it("ignores entity_classified for unknown entity ids", () => {
+    useBrainStore.setState({
+      entities: new Map(),
+      edges: new Map(),
+      lastSeq: 0,
+      fps: 0,
+      selectedId: null,
+    });
+
+    useBrainStore.getState().applyEvent({
+      seq: 9,
+      type: "entity_classified",
+      timestamp: 0,
+      source_id: null,
+      persisted_id: "ghost",
+      payload: { entity_id: "ghost", cluster_id: "billing_payments" },
+    });
+
+    expect(useBrainStore.getState().entities.size).toBe(0);
+    expect(useBrainStore.getState().lastSeq).toBe(9);
+  });
 });
 

@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from axiom.api.search import EntitySearchResult, search_entities
 from axiom.ingest.broadcaster import EventBroadcaster
 from axiom.ingest.pipeline import IngestPipeline
+from axiom.organize.agent import OrganizerAgent
 from axiom.schema.dto import EdgeDTO, EntityDTO
 from axiom.schema.models import Edge, Entity
 from axiom.sources.base import IngestEvent
@@ -26,6 +27,7 @@ def create_app(
     live: bool = False,
     live_rate: float = 0.125,
     live_pause_after: int | None = None,
+    enable_organizer: bool = True,
 ) -> FastAPI:
     engine = create_engine(db_url, future=True)
     session_local = sessionmaker(bind=engine, future=True)
@@ -42,11 +44,28 @@ def create_app(
         app.state.SessionLocal = session_local
         app.state.live_source = live_source
         app.state.live_task = None
+        app.state.organizer = None
+
+        organizer: OrganizerAgent | None = None
+        if enable_organizer:
+            organizer = OrganizerAgent(
+                session_factory=session_local,
+                broadcaster=broadcaster,
+            )
+            try:
+                await organizer.backfill_once()
+            except Exception:  # noqa: BLE001
+                # Backfill is best-effort; the loop will retry continuously.
+                pass
+            organizer.start()
+            app.state.organizer = organizer
 
         if live_source is None:
             try:
                 yield
             finally:
+                if organizer is not None:
+                    await organizer.cancel()
                 engine.dispose()
             return
 
@@ -68,6 +87,8 @@ def create_app(
                     yield
                 finally:
                     live_source.cancel()
+                    if organizer is not None:
+                        await organizer.cancel()
                     engine.dispose()
 
     app = FastAPI(title="AXIOM Studio API", lifespan=lifespan)

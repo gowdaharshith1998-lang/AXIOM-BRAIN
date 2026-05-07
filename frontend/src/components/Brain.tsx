@@ -30,6 +30,22 @@ import { useEffect, useRef, useState } from "react";
 import { AutoOrbitController } from "@/lib/auto-orbit";
 import { envelopePosition } from "@/lib/brain-envelope";
 import { flyToEntity } from "@/lib/camera-flyto";
+import {
+  CLUSTER_CENTROIDS,
+  CLUSTER_COLORS,
+  CLUSTER_GRAVITY_DEFAULT,
+  CLUSTER_IDS,
+  CLUSTER_LABELS,
+  CLUSTER_LABEL_HIDE_DISTANCE,
+  CLUSTER_LABEL_SHOW_DISTANCE,
+  CROSS_CLUSTER_EDGE_OPACITY,
+  CROSS_CLUSTER_EDGE_WIDTH,
+  SAME_CLUSTER_EDGE_OPACITY,
+  SAME_CLUSTER_EDGE_WIDTH,
+  clusterGravityForce,
+  isClusterId,
+  type ClusterId,
+} from "@/lib/cluster-layout";
 import { colorForRelationship } from "@/lib/edge-tint";
 import { RollingFpsCounter } from "@/lib/fps";
 import { FpsGuard, type FpsGuardState } from "@/lib/fps-guard";
@@ -73,6 +89,7 @@ type SimNode = {
   vx?: number;
   vy?: number;
   vz?: number;
+  cluster_id?: string | null;
 };
 
 type SimLink = {
@@ -136,9 +153,23 @@ function nextEntityThreshold(entityCount: number): number {
 }
 
 function compositeImportance(entity: Entity | undefined): number {
-  const value = entity?.data?.composite_importance;
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+  if (!entity) return 0;
+  const top = entity.composite_importance;
+  if (typeof top === "number" && Number.isFinite(top)) return top;
+  const nested = entity.data?.composite_importance;
+  return typeof nested === "number" && Number.isFinite(nested) ? nested : 0;
 }
+
+function clusterIdFor(entity: Entity | undefined): ClusterId | null {
+  if (!entity) return null;
+  const direct = entity.cluster_id;
+  if (isClusterId(direct)) return direct;
+  return null;
+}
+
+const NODE_RADIUS_IMPORTANCE_BOOST = 1.5;
+const NODE_EMISSIVE_IMPORTANCE_BOOST = 0.15;
+const NODE_DRIFT_DURATION_MS = 800;
 
 function labelImportance(entity: Entity | undefined, connectionCount = 0): number {
   return compositeImportance(entity) || connectionCount / 1000;
@@ -202,7 +233,8 @@ export function Brain() {
     const simData = (() => {
       const nodes: SimNode[] = Array.from(entities.values()).map((e) => {
         const [x, y, z] = envelopePosition(e.id);
-        return { id: e.id, type: e.type, x, y, z };
+        const cluster = clusterIdFor(e);
+        return { id: e.id, type: e.type, x, y, z, cluster_id: cluster };
       });
       // Edges may reference entities not yet in the store; filter to safe links.
       const nodeIds = new Set(nodes.map((n) => n.id));
@@ -284,6 +316,67 @@ export function Brain() {
     labelRenderer.domElement.style.userSelect = "none";
     el.appendChild(labelRenderer.domElement);
 
+    // ----- Cluster centroid labels (visible at overview zoom) -----
+    const clusterLabelGroup = new THREE.Group();
+    scene.add(clusterLabelGroup);
+    const clusterLabelByCluster = new Map<ClusterId, HTMLDivElement>();
+    const clusterCountByCluster = new Map<ClusterId, number>();
+    for (const cluster of CLUSTER_IDS) {
+      const centroid = CLUSTER_CENTROIDS[cluster];
+      const labelDiv = document.createElement("div");
+      labelDiv.className = "axiom-cluster-label";
+      labelDiv.dataset.cluster = cluster;
+      labelDiv.style.color = CLUSTER_COLORS[cluster];
+      labelDiv.style.fontSize = "14px";
+      labelDiv.style.fontWeight = "600";
+      labelDiv.style.letterSpacing = "0.04em";
+      labelDiv.style.textTransform = "uppercase";
+      labelDiv.style.opacity = "0";
+      labelDiv.style.transition = "opacity 350ms ease-out";
+      labelDiv.style.pointerEvents = "none";
+      labelDiv.style.userSelect = "none";
+      labelDiv.style.transform = "translate(-50%, -50%)";
+      labelDiv.style.whiteSpace = "nowrap";
+      labelDiv.style.textShadow = "0 0 6px rgba(0,0,0,0.95), 0 1px 2px rgba(0,0,0,0.85)";
+      labelDiv.textContent = `${CLUSTER_LABELS[cluster]} · 0`;
+      const labelObj = new CSS2DObject(labelDiv);
+      labelObj.position.copy(centroid);
+      clusterLabelGroup.add(labelObj);
+      clusterLabelByCluster.set(cluster, labelDiv);
+      clusterCountByCluster.set(cluster, 0);
+    }
+
+    const refreshClusterCounts = () => {
+      const tally = new Map<ClusterId, number>();
+      for (const cluster of CLUSTER_IDS) tally.set(cluster, 0);
+      for (const node of simData.nodes) {
+        if (isClusterId(node.cluster_id)) {
+          tally.set(node.cluster_id, (tally.get(node.cluster_id) ?? 0) + 1);
+        }
+      }
+      for (const cluster of CLUSTER_IDS) {
+        const count = tally.get(cluster) ?? 0;
+        if (clusterCountByCluster.get(cluster) === count) continue;
+        clusterCountByCluster.set(cluster, count);
+        const div = clusterLabelByCluster.get(cluster);
+        if (div) div.textContent = `${CLUSTER_LABELS[cluster]} · ${count}`;
+      }
+    };
+    refreshClusterCounts();
+
+    const updateClusterLabels = () => {
+      const cameraDistance = camera.position.length();
+      const overview = cameraDistance > CLUSTER_LABEL_SHOW_DISTANCE;
+      const closeUp = cameraDistance < CLUSTER_LABEL_HIDE_DISTANCE;
+      for (const div of clusterLabelByCluster.values()) {
+        if (overview) {
+          div.style.opacity = "0.85";
+        } else if (closeUp) {
+          div.style.opacity = "0";
+        }
+      }
+    };
+
     // ----- Build node meshes -----
     const nodeGroup = new THREE.Group();
     scene.add(nodeGroup);
@@ -299,16 +392,18 @@ export function Brain() {
 
     const addNodeMesh = (n: SimNode, entity?: Entity): THREE.Mesh => {
       const color = new THREE.Color(colorForType(n.type));
+      const importance = compositeImportance(entity);
       const mat = new THREE.MeshStandardMaterial({
         color,
         emissive: color,
-        emissiveIntensity: BASE_NODE_EMISSIVE,
+        emissiveIntensity: BASE_NODE_EMISSIVE + importance * NODE_EMISSIVE_IMPORTANCE_BOOST,
         roughness: 0.4,
         metalness: 0.1,
         transparent: true,
       });
       const mesh = new THREE.Mesh(sphereGeom, mat);
       mesh.position.set(n.x ?? 0, n.y ?? 0, n.z ?? 0);
+      mesh.scale.setScalar(1 + importance * NODE_RADIUS_IMPORTANCE_BOOST);
       mesh.userData = { id: n.id, type: n.type };
       nodeGroup.add(mesh);
       meshById.set(n.id, mesh);
@@ -376,6 +471,49 @@ export function Brain() {
     const edgeKeys = simData.links.map((link) => link.id);
     const edgeRelationships = simData.links.map((link) => link.relationship);
     const edgePhases = new Map(edgeKeys.map((key) => [key, phaseOffsetFromEdgeKey(key)]));
+    const crossClusterByIndex: boolean[] = simData.links.map((link) => {
+      const sourceId = typeof link.source === "string" ? link.source : link.source.id;
+      const targetId = typeof link.target === "string" ? link.target : link.target.id;
+      const sourceCluster = nodeById.get(sourceId)?.cluster_id;
+      const targetCluster = nodeById.get(targetId)?.cluster_id;
+      if (!isClusterId(sourceCluster) || !isClusterId(targetCluster)) return false;
+      return sourceCluster !== targetCluster;
+    });
+
+    const refreshCrossClusterFlag = (edgeIndex: number) => {
+      const link = simData.links[edgeIndex];
+      if (!link) return;
+      const sourceId = typeof link.source === "string" ? link.source : link.source.id;
+      const targetId = typeof link.target === "string" ? link.target : link.target.id;
+      const sourceCluster = nodeById.get(sourceId)?.cluster_id;
+      const targetCluster = nodeById.get(targetId)?.cluster_id;
+      if (!isClusterId(sourceCluster) || !isClusterId(targetCluster)) {
+        crossClusterByIndex[edgeIndex] = false;
+        return;
+      }
+      crossClusterByIndex[edgeIndex] = sourceCluster !== targetCluster;
+    };
+
+    const applyClusterEdgeStyling = () => {
+      const colorAttr = edgeGeom.getAttribute("color");
+      if (!(colorAttr instanceof THREE.BufferAttribute)) return;
+      const colorArr = colorAttr.array as Float32Array;
+      const sameRatio = SAME_CLUSTER_EDGE_OPACITY;
+      const crossRatio = CROSS_CLUSTER_EDGE_OPACITY;
+      for (let edgeIndex = 0; edgeIndex < simData.links.length; edgeIndex++) {
+        const cross = crossClusterByIndex[edgeIndex];
+        const offset = edgeIndex * 8;
+        const scale = cross ? crossRatio / sameRatio : 1;
+        if (scale === 1) continue;
+        colorArr[offset + 3] *= scale;
+        colorArr[offset + 7] *= scale;
+      }
+      colorAttr.needsUpdate = true;
+    };
+    // Width is informational only — WebGL does not honour linewidth > 1
+    // for line primitives — but keep the constants exported for tests.
+    void SAME_CLUSTER_EDGE_WIDTH;
+    void CROSS_CLUSTER_EDGE_WIDTH;
     const shouldRunSynapticFlow = (sourceId: string, targetId: string) =>
       compositeImportance(useBrainStore.getState().entities.get(sourceId)) > SYNAPTIC_FLOW_IMPORTANCE_THRESHOLD &&
       compositeImportance(useBrainStore.getState().entities.get(targetId)) > SYNAPTIC_FLOW_IMPORTANCE_THRESHOLD;
@@ -455,6 +593,7 @@ export function Brain() {
       )
       .force("center", forceCenter())
       .force("radial", forceRadial(0, 0, 0, 0).strength(0.02))
+      .force("cluster", clusterGravityForce(CLUSTER_GRAVITY_DEFAULT))
       .alphaDecay(0.02)
       .velocityDecay(0.5)
       .stop();
@@ -746,9 +885,43 @@ export function Brain() {
     let labelRecoverSince: number | null = null;
     let shimmerFrame = 0;
 
+    const drifts = new Map<
+      string,
+      { from: THREE.Vector3; to: THREE.Vector3; startedAt: number; durationMs: number }
+    >();
+
+    const beginNodeDrift = (id: string, target: THREE.Vector3, durationMs: number, now = performance.now()) => {
+      const node = nodeById.get(id);
+      if (!node) return;
+      const from = new THREE.Vector3(node.x ?? 0, node.y ?? 0, node.z ?? 0);
+      drifts.set(id, { from, to: target.clone(), startedAt: now, durationMs });
+    };
+
+    const advanceDrifts = (nowMs: number) => {
+      if (drifts.size === 0) return;
+      for (const [id, drift] of drifts) {
+        const node = nodeById.get(id);
+        if (!node) {
+          drifts.delete(id);
+          continue;
+        }
+        const progress = Math.min(1, (nowMs - drift.startedAt) / Math.max(1, drift.durationMs));
+        const eased = 1 - Math.pow(1 - progress, 3); // easeOutCubic
+        node.x = drift.from.x + (drift.to.x - drift.from.x) * eased;
+        node.y = drift.from.y + (drift.to.y - drift.from.y) * eased;
+        node.z = drift.from.z + (drift.to.z - drift.from.z) * eased;
+        // Hold velocity at zero while we are explicitly steering.
+        node.vx = 0;
+        node.vy = 0;
+        node.vz = 0;
+        if (progress >= 1) drifts.delete(id);
+      }
+    };
+
     const appendEntity = (entity: Entity): THREE.Mesh => {
       const [x, y, z] = envelopePosition(entity.id);
-      const node: SimNode = { id: entity.id, type: entity.type, x, y, z };
+      const cluster = clusterIdFor(entity);
+      const node: SimNode = { id: entity.id, type: entity.type, x, y, z, cluster_id: cluster };
       simData.nodes.push(node);
       nodeById.set(node.id, node);
       const mesh = addNodeMesh(node, entity);
@@ -756,6 +929,7 @@ export function Brain() {
       tuneForcesDebounced();
       maybeAutoFitAfterGrowth();
       warmSimulation(0.1);
+      refreshClusterCounts();
       return mesh;
     };
 
@@ -773,6 +947,8 @@ export function Brain() {
       edgeKeys.push(edge.id);
       edgeRelationships.push(edge.relationship);
       edgePhases.set(edge.id, phaseOffsetFromEdgeKey(edge.id));
+      crossClusterByIndex.push(false);
+      refreshCrossClusterFlag(simData.links.length - 1);
       if (shouldRunSynapticFlow(edge.source_id, edge.target_id)) {
         synapticEdges.push({
           id: edge.id,
@@ -786,6 +962,24 @@ export function Brain() {
       linkForce.links(simData.links);
       tuneForcesDebounced();
       warmSimulation(0.05);
+    };
+
+    const reclassifyNode = (id: string, clusterId: ClusterId, now: number) => {
+      const node = nodeById.get(id);
+      if (!node) return;
+      const previous = node.cluster_id;
+      node.cluster_id = clusterId;
+      if (previous !== clusterId) {
+        beginNodeDrift(id, CLUSTER_CENTROIDS[clusterId], NODE_DRIFT_DURATION_MS, now);
+        warmSimulation(0.05);
+        for (let i = 0; i < simData.links.length; i++) {
+          const link = simData.links[i];
+          const sourceId = typeof link.source === "string" ? link.source : link.source.id;
+          const targetId = typeof link.target === "string" ? link.target : link.target.id;
+          if (sourceId === id || targetId === id) refreshCrossClusterFlag(i);
+        }
+        refreshClusterCounts();
+      }
     };
 
     const processLiveEvents = (nowMs: number) => {
@@ -820,8 +1014,18 @@ export function Brain() {
           continue;
         }
 
+        if (event.type === "entity_classified") {
+          const payload = event.payload as { entity_id?: string; cluster_id?: string };
+          const entityId = payload.entity_id ?? event.persisted_id;
+          if (typeof entityId !== "string") continue;
+          if (!isClusterId(payload.cluster_id)) continue;
+          reclassifyNode(entityId, payload.cluster_id, nowMs);
+          continue;
+        }
+
         if (event.type === "entity_modified") {
           const id = event.persisted_id ?? event.source_id;
+          if (typeof id !== "string") continue;
           const mesh = meshById.get(id);
           if (!mesh) continue;
           const material = mesh.material;
@@ -932,10 +1136,14 @@ export function Brain() {
       const selectedId = useBrainStore.getState().selectedId;
       const activeNeighbors = hoveredId ? neighborIds.get(hoveredId) : null;
       const selectedNeighbors = selectedId ? neighborIds.get(selectedId) : null;
+      const stateEntities = useBrainStore.getState().entities;
       for (const [id, mesh] of meshById) {
         const lodScale = nodeById.get(id)?.lod === "far" ? FAR_NODE_SCALE : 1;
         const isSelected = id === selectedId;
-        const targetScale = (isSelected ? 1.14 : id === hoveredId ? 1.2 : 1) * lodScale;
+        const importance = compositeImportance(stateEntities.get(id));
+        const importanceScale = 1 + importance * NODE_RADIUS_IMPORTANCE_BOOST;
+        const targetScale =
+          (isSelected ? 1.14 : id === hoveredId ? 1.2 : 1) * lodScale * importanceScale;
         const nextScale = mesh.scale.x + (targetScale - mesh.scale.x) * 0.15;
         mesh.scale.setScalar(nextScale);
 
@@ -991,6 +1199,7 @@ export function Brain() {
       lastFrameMs = t;
       processLiveEvents(t);
       stepSim();
+      advanceDrifts(t);
       syncPositions();
       nebula.update(t);
       const fpsState = fpsGuard.state();
@@ -1008,6 +1217,7 @@ export function Brain() {
         if (selectionActive || fpsState === "full" || (fpsState === "half" && shimmerFrame % 2 === 0)) {
           updateEdgeShimmer(edgeShimmerSpec, t);
         }
+        applyClusterEdgeStyling();
         applyEdgeLod(fpsState);
         applySelectionToEdges();
         updateSynapticFlow(t, dtMs, fpsState);
@@ -1054,6 +1264,7 @@ export function Brain() {
 
       autoOrbit.applyToCamera(camera, t, dtMs);
       try {
+        updateClusterLabels();
         const labelsAllowed =
           fpsState === "full" &&
           (simData.nodes.length <= LABEL_OVERVIEW_ENTITY_LIMIT || useBrainStore.getState().selectedId !== null);
@@ -1119,6 +1330,8 @@ export function Brain() {
       edgeMat.dispose();
       labelByNodeId.clear();
       labelVisibleByNodeId.clear();
+      clusterLabelByCluster.clear();
+      clusterCountByCluster.clear();
       meshById.forEach((m) => {
         (m.material as THREE.Material).dispose();
       });

@@ -9,6 +9,8 @@ export type Entity = {
   source_id: string | null;
   created_at: string;
   updated_at: string;
+  cluster_id?: string | null;
+  composite_importance?: number;
 };
 
 export type Edge = {
@@ -67,6 +69,20 @@ export const useBrainStore = create<BrainState>((set) => ({
         const payload = event.payload as unknown as Omit<Edge, "id">;
         edges.set(event.persisted_id, { id: event.persisted_id, ...payload });
         next.edges = edges;
+      }
+
+      if (event.type === "entity_classified") {
+        const payload = event.payload as { entity_id?: string; cluster_id?: string };
+        const id = payload.entity_id ?? event.persisted_id;
+        const cluster_id = payload.cluster_id;
+        if (typeof id === "string" && typeof cluster_id === "string") {
+          const existing = state.entities.get(id);
+          if (existing) {
+            const entities = new Map(state.entities);
+            entities.set(id, { ...existing, cluster_id });
+            next.entities = entities;
+          }
+        }
       }
 
       return next;

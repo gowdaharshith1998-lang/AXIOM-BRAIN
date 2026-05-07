@@ -1,0 +1,204 @@
+"""Phase 5.7.D — background organizer agent.
+
+The agent runs two cooperative loops:
+
+  * ``classify_loop``  — every ``CLASSIFY_INTERVAL_SEC`` seconds, finds up
+    to ``CLASSIFY_BATCH_SIZE`` unclassified entities, picks a cluster
+    via the hybrid classifier, persists it, and broadcasts an
+    ``entity_classified`` event so the brain can lerp the node to its
+    cluster centroid.
+
+  * ``centrality_loop`` — every ``CENTRALITY_INTERVAL_SEC`` seconds, runs
+    the PageRank+degree+recency scorer over the whole graph.
+
+Both loops survive individual exceptions; the only way to stop them is
+via ``cancel()`` (called by the FastAPI lifespan).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from collections.abc import Awaitable, Callable
+from typing import Any, Final, Protocol
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
+
+from axiom.organize.centrality import CentralityScorer
+from axiom.organize.classifier import HybridClassifier
+from axiom.organize.clusters import is_valid_cluster_id
+from axiom.schema.models import Entity
+
+logger = logging.getLogger("axiom.organize.agent")
+
+CLASSIFY_INTERVAL_SEC: Final[float] = 5.0
+CLASSIFY_BATCH_SIZE: Final[int] = 20
+CENTRALITY_INTERVAL_SEC: Final[float] = 30.0
+
+
+class _Broadcaster(Protocol):
+    async def publish(self, envelope: dict[str, Any]) -> int: ...
+
+
+SessionFactory = Callable[[], Session]
+
+
+class OrganizerAgent:
+    """Background classification + centrality loop.
+
+    Designed for FastAPI lifespan: the caller wires ``broadcaster`` and a
+    sync ``session_factory`` (matches the rest of studio/server.py),
+    starts the loops, and cancels them on shutdown.
+    """
+
+    def __init__(
+        self,
+        *,
+        session_factory: SessionFactory | sessionmaker[Session],
+        broadcaster: _Broadcaster | None = None,
+        classifier: HybridClassifier | None = None,
+        scorer: CentralityScorer | None = None,
+        classify_interval_sec: float = CLASSIFY_INTERVAL_SEC,
+        centrality_interval_sec: float = CENTRALITY_INTERVAL_SEC,
+        sleeper: Callable[[float], Awaitable[None]] | None = None,
+    ) -> None:
+        self._session_factory: SessionFactory = (
+            session_factory if not isinstance(session_factory, sessionmaker) else session_factory
+        )
+        self._broadcaster = broadcaster
+        self.classifier: HybridClassifier = classifier or HybridClassifier()
+        self.scorer: CentralityScorer = scorer or CentralityScorer()
+        self.classify_interval_sec = classify_interval_sec
+        self.centrality_interval_sec = centrality_interval_sec
+        self._sleep: Callable[[float], Awaitable[None]] = sleeper or asyncio.sleep
+        self._tasks: list[asyncio.Task[None]] = []
+        self._stop = False
+
+    # ── one-shot hooks (used directly in tests + during boot backfill) ──
+
+    def classify_one(self, entity: Entity) -> str | None:
+        """Classify a single entity via the underlying hybrid classifier."""
+
+        return self.classifier.classify(entity)
+
+    async def classify_pending(self) -> int:
+        """Classify up to one batch of unclassified entities. Returns count."""
+
+        try:
+            session = self._session_factory()
+        except Exception:  # noqa: BLE001
+            logger.exception("organizer: failed to open db session")
+            return 0
+        try:
+            unclassified = (
+                session.execute(
+                    select(Entity).where(Entity.cluster_id.is_(None)).limit(CLASSIFY_BATCH_SIZE)
+                )
+                .scalars()
+                .all()
+            )
+            if not unclassified:
+                return 0
+
+            classified_payloads: list[dict[str, Any]] = []
+            for entity in unclassified:
+                cluster_id = self.classify_one(entity)
+                if not is_valid_cluster_id(cluster_id):
+                    continue
+                entity.cluster_id = cluster_id
+                classified_payloads.append(
+                    {
+                        "type": "entity_classified",
+                        "timestamp": int(time.time() * 1000),
+                        "source_id": entity.source_id,
+                        "persisted_id": entity.id,
+                        "payload": {
+                            "entity_id": entity.id,
+                            "cluster_id": cluster_id,
+                        },
+                    }
+                )
+
+            session.commit()
+        except Exception:  # noqa: BLE001
+            logger.exception("organizer: classification batch failed")
+            session.rollback()
+            return 0
+        finally:
+            session.close()
+
+        if self._broadcaster is None:
+            return len(classified_payloads)
+        for envelope in classified_payloads:
+            try:
+                await self._broadcaster.publish(envelope)
+            except Exception:  # noqa: BLE001
+                logger.exception("organizer: broadcast failed")
+        return len(classified_payloads)
+
+    async def recompute_centrality(self) -> int:
+        try:
+            session = self._session_factory()
+        except Exception:  # noqa: BLE001
+            logger.exception("organizer: failed to open db session for centrality")
+            return 0
+        try:
+            return self.scorer.recompute_all(session)
+        except Exception:  # noqa: BLE001
+            logger.exception("organizer: centrality recompute failed")
+            session.rollback()
+            return 0
+        finally:
+            session.close()
+
+    async def backfill_once(self) -> int:
+        """Drain every unclassified entity in batches. Used at app boot."""
+
+        total = 0
+        while True:
+            count = await self.classify_pending()
+            total += count
+            if count == 0:
+                break
+        return total
+
+    # ── long-running loops ──────────────────────────────────────────────
+
+    async def classify_loop(self) -> None:
+        while not self._stop:
+            try:
+                await self.classify_pending()
+            except Exception:  # noqa: BLE001 — loop must survive
+                logger.exception("organizer: classify_loop iteration failed")
+            await self._sleep(self.classify_interval_sec)
+
+    async def centrality_loop(self) -> None:
+        while not self._stop:
+            try:
+                await self.recompute_centrality()
+            except Exception:  # noqa: BLE001
+                logger.exception("organizer: centrality_loop iteration failed")
+            await self._sleep(self.centrality_interval_sec)
+
+    def start(self) -> list[asyncio.Task[None]]:
+        if self._tasks:
+            return self._tasks
+        self._stop = False
+        self._tasks = [
+            asyncio.create_task(self.classify_loop(), name="organizer.classify"),
+            asyncio.create_task(self.centrality_loop(), name="organizer.centrality"),
+        ]
+        return self._tasks
+
+    async def cancel(self) -> None:
+        self._stop = True
+        for task in self._tasks:
+            task.cancel()
+        for task in self._tasks:
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+        self._tasks = []

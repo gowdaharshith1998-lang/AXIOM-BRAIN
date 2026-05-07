@@ -14,6 +14,7 @@ dependencies = [
     "python-dotenv",
     "httpx",
     "uuid-utils",
+    "networkx>=3.0",
 ]
 
 [project.optional-dependencies]

@@ -27,6 +27,8 @@ class EntityDTO(BaseModel):
     source_id: str | None = None
     created_at: datetime
     updated_at: datetime
+    cluster_id: str | None = None
+    composite_importance: float = 0.0
 
 
 class EdgeDTO(BaseModel):
