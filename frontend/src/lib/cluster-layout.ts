@@ -1,14 +1,6 @@
-// Phase 5.7.C — Cluster lobe layout.
-//
-// Lays out the seven canonical semantic clusters as Fibonacci-sphere
-// centroids in 3D, then exposes a d3-force-3d compatible gravity force
-// that pulls every classified node toward its cluster centroid. Together
-// with the existing charge / link / center forces, this produces seven
-// visually distinct lobes around the brain at overview zoom, while
-// cross-cluster edges remain present (just visually subtler — see the
-// dashed-edge styling in Brain.tsx).
-
 import * as THREE from "three";
+
+import { HEX_CLUSTER_CENTROIDS } from "@/lib/hex-layout";
 
 export const CLUSTER_IDS = [
   "billing_payments",
@@ -42,11 +34,11 @@ export const CLUSTER_COLORS: Record<ClusterId, string> = {
   growth_product: "#22c55e",
 };
 
-export const CLUSTER_CENTROID_RADIUS = 55;
+export const CLUSTER_CENTROID_RADIUS = 90;
 export const CLUSTER_GRAVITY_DEFAULT = 0.35;
 export const CLUSTER_LABEL_SHOW_DISTANCE = 250;
 export const CLUSTER_LABEL_HIDE_DISTANCE = 200;
-export const CROSS_CLUSTER_EDGE_OPACITY = 0.4;
+export const CROSS_CLUSTER_EDGE_OPACITY = 0.25;
 export const SAME_CLUSTER_EDGE_OPACITY = 1.0;
 export const CROSS_CLUSTER_EDGE_WIDTH = 0.5;
 export const SAME_CLUSTER_EDGE_WIDTH = 0.7;
@@ -81,14 +73,7 @@ export function fibonacciSpherePoints(n: number, radius: number): THREE.Vector3[
   return points;
 }
 
-export const CLUSTER_CENTROIDS: Record<ClusterId, THREE.Vector3> = (() => {
-  const points = fibonacciSpherePoints(CLUSTER_IDS.length, CLUSTER_CENTROID_RADIUS);
-  const out: Partial<Record<ClusterId, THREE.Vector3>> = {};
-  CLUSTER_IDS.forEach((id, i) => {
-    out[id] = points[i];
-  });
-  return out as Record<ClusterId, THREE.Vector3>;
-})();
+export const CLUSTER_CENTROIDS: Record<ClusterId, THREE.Vector3> = HEX_CLUSTER_CENTROIDS;
 
 export type ClusterGravityNode = {
   cluster_id?: string | null;

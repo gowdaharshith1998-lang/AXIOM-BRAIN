@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { BRAIN_ENVELOPE_RADIUS } from "@/lib/brain-envelope";
 import { CLUSTER_CENTROIDS, CLUSTER_IDS } from "@/lib/cluster-layout";
 
 describe("brain lobe integration", () => {
-  it("envelope contains all centroids", () => {
+  it("hex constellation layout intentionally expands past the old envelope", () => {
     for (const cluster of CLUSTER_IDS) {
-      expect(CLUSTER_CENTROIDS[cluster].length()).toBeLessThanOrEqual(BRAIN_ENVELOPE_RADIUS);
+      expect(CLUSTER_CENTROIDS[cluster].length()).toBeLessThanOrEqual(100);
     }
   });
 

@@ -1,0 +1,149 @@
+import * as THREE from "three";
+
+import type { ClusterId } from "@/lib/cluster-layout";
+import type { Edge, Entity } from "@/state/brain.store";
+
+export const CLUSTER_HUB_SPACING = 90;
+export const CLUSTER_RING_RADIUS = 18;
+export const CLUSTER_RING_STEP = 8;
+export const CLUSTER_VISIBLE_SLOTS = [6, 8, 12] as const;
+export const MAX_VISIBLE_PER_CLUSTER = CLUSTER_VISIBLE_SLOTS.reduce((total, next) => total + next, 0);
+
+export const HEX_CLUSTER_CENTROIDS: Record<ClusterId, THREE.Vector3> = {
+  billing_payments: new THREE.Vector3(-90, 0, 0),
+  incidents_ops: new THREE.Vector3(-45, 78, 0),
+  engineering_code: new THREE.Vector3(45, 78, 0),
+  people_teams: new THREE.Vector3(90, 0, 0),
+  decisions_policy: new THREE.Vector3(45, -78, 0),
+  customer_support: new THREE.Vector3(-45, -78, -8),
+  growth_product: new THREE.Vector3(0, 0, 6),
+};
+
+export type VisibleEntitySlot = {
+  entity: Entity;
+  clusterId: ClusterId;
+  position: THREE.Vector3;
+  ring: number;
+  slot: number;
+};
+
+export type InterHubEdge = {
+  key: string;
+  sourceCluster: ClusterId;
+  targetCluster: ClusterId;
+};
+
+function importance(entity: Entity): number {
+  const direct = entity.composite_importance;
+  if (typeof direct === "number" && Number.isFinite(direct)) return direct;
+  const nested = entity.data?.composite_importance;
+  return typeof nested === "number" && Number.isFinite(nested) ? nested : 0;
+}
+
+export function sortedVisibleEntities(entities: Entity[]): Entity[] {
+  return [...entities]
+    .sort((a, b) => importance(b) - importance(a) || a.id.localeCompare(b.id))
+    .slice(0, MAX_VISIBLE_PER_CLUSTER);
+}
+
+export function computeStarburstPositions(entities: Entity[]): Map<string, THREE.Vector3> {
+  const positioned = new Map<string, THREE.Vector3>();
+  const visible = sortedVisibleEntities(entities);
+  const cluster = visible.find((entity) => entity.cluster_id)?.cluster_id;
+  if (!cluster || !(cluster in HEX_CLUSTER_CENTROIDS)) return positioned;
+  const centroid = HEX_CLUSTER_CENTROIDS[cluster as ClusterId];
+
+  let index = 0;
+  for (let ring = 0; ring < CLUSTER_VISIBLE_SLOTS.length; ring++) {
+    const slots = CLUSTER_VISIBLE_SLOTS[ring];
+    const radius = CLUSTER_RING_RADIUS + ring * CLUSTER_RING_STEP;
+    for (let slot = 0; slot < slots && index < visible.length; slot++) {
+      const angle = (slot / slots) * Math.PI * 2;
+      const z = centroid.z + (ring - 1) * 1.8;
+      positioned.set(
+        visible[index].id,
+        new THREE.Vector3(
+          centroid.x + Math.cos(angle) * radius,
+          centroid.y + Math.sin(angle) * radius,
+          z,
+        ),
+      );
+      index++;
+    }
+  }
+
+  return positioned;
+}
+
+export function computeVisibleEntitySlots(
+  entities: Iterable<Entity>,
+  clusterIds: readonly ClusterId[],
+): VisibleEntitySlot[] {
+  const byCluster = new Map<ClusterId, Entity[]>();
+  for (const id of clusterIds) byCluster.set(id, []);
+  for (const entity of entities) {
+    const cluster = entity.cluster_id;
+    if (cluster && byCluster.has(cluster as ClusterId)) {
+      byCluster.get(cluster as ClusterId)?.push(entity);
+    }
+  }
+
+  const slotsOut: VisibleEntitySlot[] = [];
+  for (const clusterId of clusterIds) {
+    const visible = sortedVisibleEntities(byCluster.get(clusterId) ?? []);
+    const centroid = HEX_CLUSTER_CENTROIDS[clusterId];
+    let index = 0;
+    for (let ring = 0; ring < CLUSTER_VISIBLE_SLOTS.length; ring++) {
+      const slots = CLUSTER_VISIBLE_SLOTS[ring];
+      const radius = CLUSTER_RING_RADIUS + ring * CLUSTER_RING_STEP;
+      for (let slot = 0; slot < slots && index < visible.length; slot++) {
+        const angle = (slot / slots) * Math.PI * 2;
+        const position = new THREE.Vector3(
+          centroid.x + Math.cos(angle) * radius,
+          centroid.y + Math.sin(angle) * radius,
+          centroid.z + (ring - 1) * 1.8,
+        );
+        slotsOut.push({ entity: visible[index], clusterId, position, ring: ring + 1, slot });
+        index++;
+      }
+    }
+  }
+  return slotsOut;
+}
+
+export function countEntitiesByCluster(entities: Iterable<Entity>, clusterId: ClusterId): number {
+  let count = 0;
+  for (const entity of entities) {
+    if (entity.cluster_id === clusterId) count++;
+  }
+  return count;
+}
+
+export function computeInterHubEdges(
+  edges: Iterable<Edge>,
+  entitiesById: Map<string, Entity>,
+): InterHubEdge[] {
+  const pairs = new Map<string, InterHubEdge>();
+  for (const edge of edges) {
+    const sourceCluster = entitiesById.get(edge.source_id)?.cluster_id as ClusterId | undefined;
+    const targetCluster = entitiesById.get(edge.target_id)?.cluster_id as ClusterId | undefined;
+    if (!sourceCluster || !targetCluster || sourceCluster === targetCluster) continue;
+    if (!(sourceCluster in HEX_CLUSTER_CENTROIDS) || !(targetCluster in HEX_CLUSTER_CENTROIDS)) continue;
+    const sorted = [sourceCluster, targetCluster].sort() as [ClusterId, ClusterId];
+    const key = `${sorted[0]}:${sorted[1]}`;
+    if (!pairs.has(key)) pairs.set(key, { key, sourceCluster: sorted[0], targetCluster: sorted[1] });
+  }
+  return Array.from(pairs.values()).sort((a, b) => a.key.localeCompare(b.key));
+}
+
+export function findEntityPosition(
+  entity: Entity | undefined,
+  positionsById: Map<string, THREE.Vector3>,
+): THREE.Vector3 | null {
+  if (!entity) return null;
+  const visible = positionsById.get(entity.id);
+  if (visible) return visible.clone();
+  const cluster = entity.cluster_id as ClusterId | undefined;
+  if (cluster && cluster in HEX_CLUSTER_CENTROIDS) return HEX_CLUSTER_CENTROIDS[cluster].clone();
+  return null;
+}

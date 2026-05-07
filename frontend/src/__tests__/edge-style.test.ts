@@ -18,7 +18,7 @@ describe("edge cluster styling", () => {
   it("uses dashed low-opacity material across clusters", () => {
     const mat = createEdgeMaterialForClusters("billing_payments", "incidents_ops", "#fff");
     expect(mat).toBeInstanceOf(THREE.LineDashedMaterial);
-    expect(mat.opacity).toBe(0.4);
+    expect(mat.opacity).toBe(0.25);
   });
 
   it("swaps edge mode when cluster id changes", () => {

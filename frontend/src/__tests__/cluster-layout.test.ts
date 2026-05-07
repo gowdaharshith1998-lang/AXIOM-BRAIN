@@ -44,11 +44,11 @@ describe("fibonacciSpherePoints", () => {
 });
 
 describe("CLUSTER_CENTROIDS", () => {
-  it("provides one centroid per cluster id", () => {
+  it("provides one hex-packed centroid per cluster id", () => {
     for (const id of CLUSTER_IDS) {
       expect(CLUSTER_CENTROIDS[id]).toBeDefined();
-      expect(CLUSTER_CENTROIDS[id].length()).toBeCloseTo(CLUSTER_CENTROID_RADIUS, 3);
     }
+    expect(CLUSTER_CENTROID_RADIUS).toBe(90);
   });
 
   it("provides a label and a color for each cluster", () => {
@@ -194,11 +194,11 @@ describe("clusterGravityForce", () => {
     expect(node.x).toBeGreaterThanOrEqual(centroid.x - 1);
   });
 
-  it("keeps centroid pairwise distance above thirty", () => {
+  it("keeps centroid pairwise distance above seventy", () => {
     const points = CLUSTER_IDS.map((id) => CLUSTER_CENTROIDS[id]);
     for (let i = 0; i < points.length; i++) {
       for (let j = i + 1; j < points.length; j++) {
-        expect(points[i].distanceTo(points[j])).toBeGreaterThan(30);
+        expect(points[i].distanceTo(points[j])).toBeGreaterThan(70);
       }
     }
   });
