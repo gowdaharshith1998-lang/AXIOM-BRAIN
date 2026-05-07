@@ -115,12 +115,38 @@ describe("shouldShowLabel", () => {
     expect(
       shouldShowLabel({
         nodeId: "n5",
-        cameraDistance: 100,
+        cameraDistance: 80,
         selectedId: null,
         selectedNeighborIds: new Set(),
         fpsGuardState: "full",
       }),
     ).toBe(true);
+  });
+
+  it("keeps visible labels through the hysteresis band", () => {
+    expect(
+      shouldShowLabel({
+        nodeId: "n5",
+        cameraDistance: 100,
+        selectedId: null,
+        selectedNeighborIds: new Set(),
+        fpsGuardState: "full",
+        currentlyVisible: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not show hidden labels inside the hysteresis band", () => {
+    expect(
+      shouldShowLabel({
+        nodeId: "n5",
+        cameraDistance: 100,
+        selectedId: null,
+        selectedNeighborIds: new Set(),
+        fpsGuardState: "full",
+        currentlyVisible: false,
+      }),
+    ).toBe(false);
   });
 
   it("hides everything but selected labels during emergency cull", () => {

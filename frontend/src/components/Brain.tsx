@@ -112,6 +112,8 @@ const FAR_NODE_EMISSIVE = 0.05;
 const SELECTED_NODE_EMISSIVE = 0.4;
 const NEIGHBOR_NODE_EMISSIVE = 0.3;
 const DIMMED_NODE_EMISSIVE = BASE_NODE_EMISSIVE * 0.5;
+const IDLE_PULSE_IMPORTANCE_THRESHOLD = 0.4;
+const SYNAPTIC_FLOW_IMPORTANCE_THRESHOLD = 0.3;
 
 function tuneForcesByCount(sim: TuneableSimulation, entityCount: number): void {
   const c = Math.max(entityCount, 1);
@@ -128,6 +130,11 @@ function tuneForcesByCount(sim: TuneableSimulation, entityCount: number): void {
 
 function nextEntityThreshold(entityCount: number): number {
   return Math.floor(entityCount / AUTO_FIT_ENTITY_STEP) * AUTO_FIT_ENTITY_STEP;
+}
+
+function compositeImportance(entity: Entity | undefined): number {
+  const value = entity?.data?.composite_importance;
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 export function Brain() {
@@ -252,7 +259,7 @@ export function Brain() {
     // ----- Post-processing: UnrealBloom + ACES via composer -----
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    composer.addPass(new UnrealBloomPass(new THREE.Vector2(width, height), 0.45, 0.35, 0.85));
+    composer.addPass(new UnrealBloomPass(new THREE.Vector2(width, height), 0.45, 0.35, 0.92));
 
     // ----- DOM label overlay (non-interactive; OrbitControls keep pointer ownership) -----
     const labelRenderer = new CSS2DRenderer();
@@ -279,6 +286,7 @@ export function Brain() {
     const meshById = new Map<string, THREE.Mesh>();
     const ringById = new Map<string, THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>>();
     const labelByNodeId = new Map<string, HTMLDivElement>();
+    const labelVisibleByNodeId = new Map<string, boolean>();
     const nodeById = new Map(simData.nodes.map((node) => [node.id, node]));
     const neighborIds = new Map<string, Set<string>>();
 
@@ -302,9 +310,9 @@ export function Brain() {
         const labelDiv = document.createElement("div");
         labelDiv.className = "axiom-label";
         labelDiv.textContent = displayLabelFor(entity);
-        labelDiv.style.display = "none";
+        labelDiv.style.display = "block";
         labelDiv.style.opacity = "0";
-        labelDiv.style.transition = "opacity 200ms ease-out";
+        labelDiv.style.transition = "opacity 250ms ease-out";
         labelDiv.style.transform = "translate(-50%, -130%)";
         labelDiv.style.whiteSpace = "nowrap";
         labelDiv.style.maxWidth = "200px";
@@ -318,6 +326,7 @@ export function Brain() {
         labelObj.position.set(0, NODE_RADIUS * 1.45, 0);
         mesh.add(labelObj);
         labelByNodeId.set(n.id, labelDiv);
+        labelVisibleByNodeId.set(n.id, false);
       }
 
       const ringMat = new THREE.MeshBasicMaterial({
@@ -360,10 +369,15 @@ export function Brain() {
     const edgeKeys = simData.links.map((link) => link.id);
     const edgeRelationships = simData.links.map((link) => link.relationship);
     const edgePhases = new Map(edgeKeys.map((key) => [key, phaseOffsetFromEdgeKey(key)]));
-    const synapticEdges: SynapticFlowEdge[] = simData.links.map((link) => {
+    const shouldRunSynapticFlow = (sourceId: string, targetId: string) =>
+      compositeImportance(useBrainStore.getState().entities.get(sourceId)) > SYNAPTIC_FLOW_IMPORTANCE_THRESHOLD &&
+      compositeImportance(useBrainStore.getState().entities.get(targetId)) > SYNAPTIC_FLOW_IMPORTANCE_THRESHOLD;
+
+    const synapticEdges: SynapticFlowEdge[] = simData.links.flatMap((link) => {
       const sourceId = typeof link.source === "string" ? link.source : link.source.id;
       const targetId = typeof link.target === "string" ? link.target : link.target.id;
-      return { id: link.id, sourceId, targetId, relationship: link.relationship };
+      if (!shouldRunSynapticFlow(sourceId, targetId)) return [];
+      return [{ id: link.id, sourceId, targetId, relationship: link.relationship }];
     });
     const edgeShimmerSpec = {
       geom: edgeGeom,
@@ -752,12 +766,14 @@ export function Brain() {
       edgeKeys.push(edge.id);
       edgeRelationships.push(edge.relationship);
       edgePhases.set(edge.id, phaseOffsetFromEdgeKey(edge.id));
-      synapticEdges.push({
-        id: edge.id,
-        sourceId: edge.source_id,
-        targetId: edge.target_id,
-        relationship: edge.relationship,
-      });
+      if (shouldRunSynapticFlow(edge.source_id, edge.target_id)) {
+        synapticEdges.push({
+          id: edge.id,
+          sourceId: edge.source_id,
+          targetId: edge.target_id,
+          relationship: edge.relationship,
+        });
+      }
       resizeEdgeBuffers();
       synapticFlow.setEdges(synapticEdges);
       linkForce.links(simData.links);
@@ -852,27 +868,20 @@ export function Brain() {
             selectedId,
             selectedNeighborIds,
             fpsGuardState: labelFpsState,
+            currentlyVisible: labelVisibleByNodeId.get(nodeId) ?? false,
           });
 
-        if (visible) {
-          if (labelDiv.style.display === "none") {
-            labelDiv.style.display = "block";
-            labelDiv.style.opacity = "0";
-          }
-          labelDiv.style.opacity = "1";
-        } else {
-          labelDiv.style.opacity = "0";
-          labelDiv.style.display = "none";
-        }
+        labelVisibleByNodeId.set(nodeId, visible);
+        labelDiv.style.opacity = visible ? "1" : "0";
       }
     };
 
     const hideAllLabels = () => {
       for (const labelDiv of labelByNodeId.values()) {
-        if (labelDiv.style.display !== "none") {
-          labelDiv.style.opacity = "0";
-          labelDiv.style.display = "none";
-        }
+        labelDiv.style.opacity = "0";
+      }
+      for (const nodeId of labelVisibleByNodeId.keys()) {
+        labelVisibleByNodeId.set(nodeId, false);
       }
     };
 
@@ -928,7 +937,7 @@ export function Brain() {
           flashByEdge.delete(link.id);
           return;
         }
-        const alpha = 0.45 * ((until - nowMs) / 600);
+        const alpha = 0.28 * ((until - nowMs) / 600);
         colorArr[i * 8 + 3] = Math.max(colorArr[i * 8 + 3], alpha);
         colorArr[i * 8 + 7] = Math.max(colorArr[i * 8 + 7], alpha);
       });
@@ -943,7 +952,14 @@ export function Brain() {
       syncPositions();
       nebula.update(t);
       const fpsState = fpsGuard.state();
-      if (fpsState !== "emergency") pulseRunner.update(meshById, t, (id) => selectionBaseIntensity(id));
+      if (fpsState !== "emergency") {
+        pulseRunner.update(
+          meshById,
+          t,
+          (id) => selectionBaseIntensity(id),
+          (id) => compositeImportance(useBrainStore.getState().entities.get(id)) > IDLE_PULSE_IMPORTANCE_THRESHOLD,
+        );
+      }
       try {
         shimmerFrame++;
         const selectionActive = useBrainStore.getState().selectedId !== null;
@@ -1060,6 +1076,7 @@ export function Brain() {
       edgeGeom.dispose();
       edgeMat.dispose();
       labelByNodeId.clear();
+      labelVisibleByNodeId.clear();
       meshById.forEach((m) => {
         (m.material as THREE.Material).dispose();
       });

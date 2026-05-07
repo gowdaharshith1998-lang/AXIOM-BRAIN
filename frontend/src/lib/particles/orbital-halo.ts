@@ -14,6 +14,7 @@ export class OrbitalHalo {
     this.material = new THREE.PointsMaterial({
       color,
       size: 3,
+      sizeAttenuation: true,
       transparent: true,
       opacity: 0.4,
       depthWrite: false,

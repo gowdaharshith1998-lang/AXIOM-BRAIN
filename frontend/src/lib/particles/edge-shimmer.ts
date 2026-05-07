@@ -2,8 +2,8 @@ import * as THREE from "three";
 
 import { colorForRelationship } from "@/lib/edge-tint";
 
-const MIN_OPACITY = 0.25;
-const MAX_OPACITY = 0.45;
+const MIN_OPACITY = 0.2;
+const MAX_OPACITY = 0.32;
 const TWO_PI = Math.PI * 2;
 
 function hashToUnit(id: string): number {

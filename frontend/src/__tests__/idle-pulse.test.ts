@@ -9,8 +9,8 @@ describe("idle-pulse", () => {
 
   it("stays inside the requested breath range", () => {
     for (let t = 0; t <= 10000; t += 125) {
-      expect(breath(t)).toBeGreaterThanOrEqual(0.85);
-      expect(breath(t)).toBeLessThanOrEqual(1.15);
+      expect(breath(t)).toBeGreaterThanOrEqual(0.929);
+      expect(breath(t)).toBeLessThanOrEqual(1.071);
     }
   });
 

@@ -12,6 +12,7 @@ export class IdlePulseRunner {
     meshes: ReadonlyMap<string, THREE.Mesh>,
     timeMs: number,
     baseIntensityFor?: (id: string, mesh: PulsedMesh) => number,
+    shouldPulseFor?: (id: string, mesh: PulsedMesh) => boolean,
   ): void {
     for (const [id, mesh] of meshes) {
       const material = mesh.material;
@@ -20,7 +21,7 @@ export class IdlePulseRunner {
       const pulsed = mesh as PulsedMesh;
       const phase = this.phaseFor(id);
       const base = baseIntensityFor?.(id, pulsed) ?? this.baseFor(id, pulsed.material.emissiveIntensity);
-      pulsed.material.emissiveIntensity = base * breath(timeMs, phase);
+      pulsed.material.emissiveIntensity = shouldPulseFor?.(id, pulsed) === false ? base : base * breath(timeMs, phase);
     }
   }
 

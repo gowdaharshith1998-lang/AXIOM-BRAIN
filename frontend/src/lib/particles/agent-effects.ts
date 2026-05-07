@@ -16,6 +16,10 @@ function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3);
 }
 
+function clampUnit(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
 function makeSigningBurst(pos: THREE.Vector3, color: string): ParticleEffectDescriptor {
   const particleCount = 40;
   const particles = Array.from({ length: particleCount }, (_, i) => {
@@ -162,10 +166,10 @@ export class ParticleEffectSystem implements ParticleEffectSink {
       this.positions[write * 3] = pos.x;
       this.positions[write * 3 + 1] = pos.y;
       this.positions[write * 3 + 2] = pos.z;
-      this.colors[write * 3] = particle.color.r;
-      this.colors[write * 3 + 1] = particle.color.g;
-      this.colors[write * 3 + 2] = particle.color.b;
-      this.alphas[write] = Math.sin(raw * Math.PI) * 0.9;
+      this.colors[write * 3] = clampUnit(particle.color.r);
+      this.colors[write * 3 + 1] = clampUnit(particle.color.g);
+      this.colors[write * 3 + 2] = clampUnit(particle.color.b);
+      this.alphas[write] = Math.sin(raw * Math.PI) * 0.55;
       write++;
     }
 

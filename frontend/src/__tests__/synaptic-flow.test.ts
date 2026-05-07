@@ -18,8 +18,8 @@ const edge: SynapticFlowEdge = {
 };
 
 describe("synaptic-flow", () => {
-  it("uses three particles per edge in full FPS state", () => {
-    expect(particleCountForFps(4, "full")).toBe(12);
+  it("uses one particle per edge in full FPS state", () => {
+    expect(particleCountForFps(4, "full")).toBe(4);
   });
 
   it("uses one particle per edge in half FPS state", () => {
@@ -49,7 +49,7 @@ describe("synaptic-flow", () => {
       target: new THREE.Vector3(10, 0, 0),
     }));
 
-    expect(flow.particleCount()).toBe(3);
+    expect(flow.particleCount()).toBe(1);
     flow.updateSynapticFlow(0, 16, "half");
     expect(flow.particleCount()).toBe(1);
     flow.updateSynapticFlow(16, 16, "emergency");

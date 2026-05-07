@@ -17,7 +17,7 @@ export type SynapticFlowPosition = {
 
 type GetNodePositions = (edge: SynapticFlowEdge) => SynapticFlowPosition | null;
 
-const PARTICLES_FULL = 3;
+const PARTICLES_FULL = 1;
 const PARTICLES_HALF = 1;
 const TWO_PI = Math.PI * 2;
 
@@ -62,9 +62,10 @@ export class SynapticFlow {
   private readonly geometry = new THREE.BufferGeometry();
   private readonly material = new THREE.PointsMaterial({
     size: 2.5,
+    sizeAttenuation: true,
     vertexColors: true,
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.55,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
@@ -122,9 +123,9 @@ export class SynapticFlow {
       positions[posOffset + 2] = pos.z;
 
       color.set(colorForRelationship(edge.relationship));
-      colors[posOffset] = color.r;
-      colors[posOffset + 1] = color.g;
-      colors[posOffset + 2] = color.b;
+      colors[posOffset] = Math.min(color.r, 1);
+      colors[posOffset + 1] = Math.min(color.g, 1);
+      colors[posOffset + 2] = Math.min(color.b, 1);
     }
 
     positionAttr.needsUpdate = true;
@@ -154,7 +155,7 @@ export class SynapticFlow {
       for (let slot = 0; slot < particlesPerEdge; slot++) {
         this.edgeIndexByParticle[particleIndex] = edgeIndex;
         this.progress[particleIndex] = (phaseUnit + slot / Math.max(1, particlesPerEdge)) % 1;
-        this.speed[particleIndex] = 0.4 + ((phaseUnit + slot * 0.173) % 0.2);
+        this.speed[particleIndex] = 0.25 + ((phaseUnit + slot * 0.173) % 0.15);
         particleIndex++;
       }
     }
