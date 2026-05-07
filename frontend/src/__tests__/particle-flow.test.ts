@@ -73,10 +73,16 @@ describe("ParticleFlowController", () => {
   it("trail particles follow main particles", () => {
     const flow = new ParticleFlowController([]);
     flow.burst(edge, 0);
-    const drawRange = flow.points.geometry.drawRange;
     flow.update(100);
-    expect(drawRange.count).toBeLessThanOrEqual(flow.activeCount());
+    expect(flow.points.children.filter((child) => child.visible)).toHaveLength(flow.activeCount());
     expect(flow.activeCount()).toBeGreaterThan(3);
+    flow.dispose();
+  });
+
+  it("pulse doubles conduit activity window", () => {
+    const flow = new ParticleFlowController([edge]);
+    flow.pulse(edge, 0);
+    expect(flow.activeCount()).toBe(6);
     flow.dispose();
   });
 });

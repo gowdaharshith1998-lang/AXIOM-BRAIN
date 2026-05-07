@@ -30,7 +30,7 @@ import {
   type ClusterId,
 } from "@/lib/cluster-layout";
 import { buildIntraClusterMeshGroup } from "@/lib/cluster-mesh";
-import { createEdgeMaterialForClusters } from "@/lib/edge-style";
+import { conduitPathsForEdges, createConduitLine, type ConduitPath } from "@/lib/curved-conduits";
 import { RollingFpsCounter } from "@/lib/fps";
 import { FpsGuard } from "@/lib/fps-guard";
 import { createHexPrismGeometry, HEX_HEIGHT, HEX_HUB_RADIUS, HEX_NODE_RADIUS } from "@/lib/hex-geometry";
@@ -159,26 +159,15 @@ function buildRadialEdges(slots: VisibleEntitySlot[]): THREE.Group {
   return group;
 }
 
-function buildInterHubEdges(interHubEdges: InterHubEdge[]): THREE.LineSegments {
-  const positions = new Float32Array(interHubEdges.length * 2 * 3);
-  let index = 0;
-  for (const edge of interHubEdges) {
-    const source = CLUSTER_CENTROIDS[edge.sourceCluster];
-    const target = CLUSTER_CENTROIDS[edge.targetCluster];
-    positions[index++] = source.x;
-    positions[index++] = source.y;
-    positions[index++] = source.z;
-    positions[index++] = target.x;
-    positions[index++] = target.y;
-    positions[index++] = target.z;
+function buildConduitLines(paths: ConduitPath[]): { group: THREE.Group; linesByKey: Map<string, THREE.Line> } {
+  const group = new THREE.Group();
+  const linesByKey = new Map<string, THREE.Line>();
+  for (const path of paths) {
+    const line = createConduitLine(path);
+    group.add(line);
+    linesByKey.set(path.key, line);
   }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  const material = createEdgeMaterialForClusters("billing_payments", "incidents_ops", "#ffffff");
-  material.opacity = 0.25;
-  const lines = new THREE.LineSegments(geometry, material);
-  lines.computeLineDistances();
-  return lines;
+  return { group, linesByKey };
 }
 
 export function Brain() {
@@ -244,6 +233,7 @@ export function Brain() {
     let maxVisiblePerCluster = MAX_VISIBLE_PER_CLUSTER;
     let slots = computeVisibleEntitySlots(entities.values(), CLUSTER_IDS, maxVisiblePerCluster);
     let interHubEdges = computeInterHubEdges(edges.values(), entities);
+    let conduitPaths = conduitPathsForEdges(interHubEdges);
     const positionsById = new Map(slots.map((slot) => [slot.entity.id, slot.position.clone()]));
     const idByInstanceIndex = slots.map((slot) => slot.entity.id);
 
@@ -399,7 +389,7 @@ export function Brain() {
     scene.add(radialEdges);
     let intraClusterMesh = buildIntraClusterMeshGroup(slots);
     scene.add(intraClusterMesh);
-    let interHubLines = buildInterHubEdges(interHubEdges);
+    let { group: interHubLines, linesByKey: conduitLinesByKey } = buildConduitLines(conduitPaths);
     scene.add(interHubLines);
 
     const ring = new THREE.Mesh(
@@ -417,7 +407,7 @@ export function Brain() {
 
     const particleSystem = new ParticleEffectSystem();
     scene.add(particleSystem.points);
-    const particleFlow = new ParticleFlowController(interHubEdges);
+    const particleFlow = new ParticleFlowController(conduitPaths);
     scene.add(particleFlow.points);
     const radialTraffic = new RadialTrafficController(slots);
     scene.add(radialTraffic.points);
@@ -426,6 +416,7 @@ export function Brain() {
     const hoveredIdRef = { current: null as string | null };
     const flashByNode = new Map<string, number>();
     const flashByEdge = new Map<string, number>();
+    const conduitPulseUntil = new Map<string, number>();
     let paletteOpen = false;
     let cameraFlight:
       | {
@@ -596,12 +587,19 @@ export function Brain() {
       scene.add(intraClusterMesh);
 
       scene.remove(interHubLines);
-      interHubLines.geometry.dispose();
-      (interHubLines.material as THREE.Material).dispose();
+      interHubLines.traverse((obj) => {
+        if (obj instanceof THREE.Line) {
+          obj.geometry.dispose();
+          (obj.material as THREE.Material).dispose();
+        }
+      });
       interHubEdges = computeInterHubEdges(edges.values(), entities);
-      interHubLines = buildInterHubEdges(interHubEdges);
+      conduitPaths = conduitPathsForEdges(interHubEdges);
+      const conduitBuild = buildConduitLines(conduitPaths);
+      interHubLines = conduitBuild.group;
+      conduitLinesByKey = conduitBuild.linesByKey;
       scene.add(interHubLines);
-      particleFlow.setEdges(interHubEdges, performance.now());
+      particleFlow.setEdges(conduitPaths, performance.now());
       radialTraffic.setSlots(slots, performance.now());
     };
 
@@ -681,7 +679,10 @@ export function Brain() {
                   (item.sourceCluster === sourceCluster && item.targetCluster === targetCluster) ||
                   (item.sourceCluster === targetCluster && item.targetCluster === sourceCluster),
               );
-              if (pair) particleFlow.burst(pair, nowMs);
+              if (pair) {
+                particleFlow.pulse(pair, nowMs);
+                conduitPulseUntil.set(pair.key, nowMs + 600);
+              }
             }
           }
           continue;
@@ -758,6 +759,16 @@ export function Brain() {
       particleSystem.setParticleMultiplier(fpsGuard.particleMultiplier());
       particleSystem.update(t);
       particleFlow.update(t);
+      for (const [key, line] of conduitLinesByKey) {
+        const material = line.material as THREE.LineBasicMaterial;
+        const until = conduitPulseUntil.get(key) ?? 0;
+        if (until > t) {
+          const remaining = (until - t) / 600;
+          material.opacity = THREE.MathUtils.lerp(0.45, 0.75, remaining);
+        } else {
+          material.opacity = 0.45;
+        }
+      }
       radialTraffic.update(t);
       const selectedId = useBrainStore.getState().selectedId;
       if (selectedId) {
@@ -858,8 +869,12 @@ export function Brain() {
           (obj.material as THREE.Material).dispose();
         }
       });
-      interHubLines.geometry.dispose();
-      (interHubLines.material as THREE.Material).dispose();
+      interHubLines.traverse((obj) => {
+        if (obj instanceof THREE.Line) {
+          obj.geometry.dispose();
+          (obj.material as THREE.Material).dispose();
+        }
+      });
       ring.geometry.dispose();
       ring.material.dispose();
       offBudgetChange();
