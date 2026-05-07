@@ -56,5 +56,56 @@ describe("websocket", () => {
       st.mockRestore();
     }
   });
-});
 
+  it("reports live after first event and offline on disconnect", () => {
+    const Original = globalThis.WebSocket;
+    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
+    const statuses: string[] = [];
+    const st = vi.spyOn(window, "setTimeout");
+
+    try {
+      const sock = new BrainSocket("ws://x/ws/brain");
+      sock.onStatus((status) => statuses.push(status));
+      sock.start();
+      const ws = MockWebSocket.instances.at(-1)!;
+      ws.onmessage?.({
+        data: JSON.stringify({
+          seq: 1,
+          type: "entity_added",
+          timestamp: 0,
+          source_id: "s",
+          persisted_id: "p",
+          payload: {},
+        }),
+      });
+      ws.close();
+      expect(statuses).toContain("live");
+      expect(statuses).toContain("offline");
+      sock.close();
+    } finally {
+      globalThis.WebSocket = Original;
+      st.mockRestore();
+    }
+  });
+
+  it("uses exponential reconnect backoff from one to sixteen seconds", () => {
+    const Original = globalThis.WebSocket;
+    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
+    const st = vi.spyOn(window, "setTimeout");
+
+    try {
+      const sock = new BrainSocket("ws://x/ws/brain");
+      sock.start();
+      MockWebSocket.instances.at(-1)!.close();
+      sock.start();
+      MockWebSocket.instances.at(-1)!.close();
+      sock.start();
+      MockWebSocket.instances.at(-1)!.close();
+      expect(st.mock.calls.map((call) => call[1])).toEqual(expect.arrayContaining([1000, 2000, 4000]));
+      sock.close();
+    } finally {
+      globalThis.WebSocket = Original;
+      st.mockRestore();
+    }
+  });
+});

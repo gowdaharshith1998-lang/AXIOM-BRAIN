@@ -28,6 +28,7 @@ import { forceSimulation, forceManyBody, forceLink, forceCenter, forceRadial } f
 import { useEffect, useRef, useState } from "react";
 
 import { createClusterAuras, updateClusterAuras } from "@/components/ClusterAura";
+import { arrivalColorForCluster } from "@/components/ArrivalEffect";
 import { AutoOrbitController } from "@/lib/auto-orbit";
 import { envelopePosition } from "@/lib/brain-envelope";
 import { flyToEntity } from "@/lib/camera-flyto";
@@ -48,6 +49,7 @@ import {
   type ClusterId,
 } from "@/lib/cluster-layout";
 import { colorForRelationship } from "@/lib/edge-tint";
+import { edgeDrawEndpoint, isEdgeDrawActive } from "@/lib/edge-animation";
 import { edgeOpacityForClusters } from "@/lib/edge-style";
 import { RollingFpsCounter } from "@/lib/fps";
 import { FpsGuard, type FpsGuardState } from "@/lib/fps-guard";
@@ -185,6 +187,7 @@ export function Brain() {
   const [sceneReady, setSceneReady] = useState(false);
 
   const setFps = useBrainStore((s) => s.setFps);
+  const setConnectionStatus = useBrainStore((s) => s.setConnectionStatus);
   const applyEvent = useBrainStore((s) => s.applyEvent);
   const bootstrap = useBrainStore((s) => s.bootstrap);
   const select = useBrainStore((s) => s.select);
@@ -215,16 +218,19 @@ export function Brain() {
   useEffect(() => {
     const url = `ws://${window.location.hostname}:8000/ws/brain`;
     const ws = new BrainSocket(url);
+    setConnectionStatus("syncing");
     const off = ws.on((e) => {
       liveEventsRef.current.push(e);
       applyEvent(e);
     });
+    const offStatus = ws.onStatus(setConnectionStatus);
     ws.start();
     return () => {
       off();
+      offStatus();
       ws.close();
     };
-  }, [applyEvent]);
+  }, [applyEvent, setConnectionStatus]);
 
   // -- Three.js scene + d3-force-3d simulation lifecycle --
   useEffect(() => {
@@ -679,9 +685,21 @@ export function Brain() {
         arr[idx++] = src.x ?? 0;
         arr[idx++] = src.y ?? 0;
         arr[idx++] = src.z ?? 0;
-        arr[idx++] = tgt.x ?? 0;
-        arr[idx++] = tgt.y ?? 0;
-        arr[idx++] = tgt.z ?? 0;
+        const drawStartedAt = edgeDrawStartedAt.get(link.id);
+        if (drawStartedAt !== undefined) {
+          const ageMs = performance.now() - drawStartedAt;
+          const source = new THREE.Vector3(src.x ?? 0, src.y ?? 0, src.z ?? 0);
+          const target = new THREE.Vector3(tgt.x ?? 0, tgt.y ?? 0, tgt.z ?? 0);
+          const end = edgeDrawEndpoint(source, target, ageMs);
+          arr[idx++] = end.x;
+          arr[idx++] = end.y;
+          arr[idx++] = end.z;
+          if (!isEdgeDrawActive(ageMs)) edgeDrawStartedAt.delete(link.id);
+        } else {
+          arr[idx++] = tgt.x ?? 0;
+          arr[idx++] = tgt.y ?? 0;
+          arr[idx++] = tgt.z ?? 0;
+        }
       }
       posAttr.needsUpdate = true;
     };
@@ -754,6 +772,7 @@ export function Brain() {
     const hoveredIdRef = { current: null as string | null };
     const flashByNode = new Map<string, number>();
     const flashByEdge = new Map<string, number>();
+    const edgeDrawStartedAt = new Map<string, number>();
     const autoOrbit = new AutoOrbitController();
     autoOrbit.notifyInteraction(0);
     let lastCameraInteractionMs = performance.now();
@@ -1022,7 +1041,7 @@ export function Brain() {
     const processLiveEvents = (nowMs: number) => {
       const deferred: BrainEvent[] = [];
       for (const event of liveEventsRef.current) {
-        if (event.type === "entity_added" && event.persisted_id) {
+        if ((event.type === "entity_added" || event.type === "entity_created") && event.persisted_id) {
           const payload = event.payload as Omit<Entity, "id"> & { nick?: unknown };
           const { nick: _nick, ...rest } = payload;
           void _nick;
@@ -1031,14 +1050,26 @@ export function Brain() {
           const material = mesh.material;
           const color =
             material instanceof THREE.MeshStandardMaterial ? material.color.clone() : new THREE.Color("#FFFFFF");
-          spawnEntityArrival(particleSystem, mesh.position, color);
-          particleSystem.ingestStream(mesh.position, `#${color.getHexString().toUpperCase()}`);
+          const clusterColor = arrivalColorForCluster(entity.cluster_id);
+          spawnEntityArrival(particleSystem, mesh.position, new THREE.Color(clusterColor));
+          particleSystem.ingestStream(mesh.position, clusterColor);
           flashByNode.set(event.persisted_id, nowMs + 600);
           continue;
         }
 
-        if (event.type === "edge_added" && event.persisted_id) {
-          const edge: Edge = { id: event.persisted_id, ...(event.payload as Omit<Edge, "id">) };
+        if ((event.type === "edge_added" || event.type === "entity_edge_created") && event.persisted_id) {
+          const payload = event.payload as Partial<Omit<Edge, "id">> & {
+            relation_type?: string;
+            relationship?: string;
+          };
+          const edge: Edge = {
+            id: event.persisted_id,
+            source_id: String(payload.source_id),
+            target_id: String(payload.target_id),
+            relationship: payload.relationship ?? payload.relation_type ?? "related",
+            data: (payload.data as Record<string, unknown> | undefined) ?? {},
+            created_at: typeof payload.created_at === "string" ? payload.created_at : new Date().toISOString(),
+          };
           const src = meshById.get(edge.source_id);
           const tgt = meshById.get(edge.target_id);
           if (!src || !tgt) {
@@ -1046,6 +1077,7 @@ export function Brain() {
             continue;
           }
           appendEdge(edge);
+          if (event.type === "entity_edge_created") edgeDrawStartedAt.set(edge.id, nowMs);
           spawnEdgeTrace(particleSystem, src.position, tgt.position, colorForRelationship(edge.relationship));
           flashByEdge.set(event.persisted_id, nowMs + 600);
           continue;

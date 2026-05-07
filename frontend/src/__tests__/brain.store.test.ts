@@ -141,6 +141,31 @@ describe("brain.store", () => {
     expect(useBrainStore.getState().lastSeq).toBe(5);
   });
 
+  it("increments edge count for organizer-created edge events", () => {
+    useBrainStore.setState({
+      entities: new Map(),
+      edges: new Map(),
+      lastSeq: 0,
+      fps: 0,
+      selectedId: null,
+      connectionStatus: "syncing",
+    });
+    useBrainStore.getState().applyEvent({
+      seq: 1,
+      type: "entity_edge_created",
+      timestamp: 0,
+      source_id: "a",
+      persisted_id: "e1",
+      payload: {
+        source_id: "a",
+        target_id: "b",
+        relation_type: "same_cluster_related",
+        cluster_id: "billing_payments",
+      },
+    });
+    expect(useBrainStore.getState().edges.size).toBe(1);
+  });
+
   it("ignores entity_classified for unknown entity ids", () => {
     useBrainStore.setState({
       entities: new Map(),
@@ -163,4 +188,3 @@ describe("brain.store", () => {
     expect(useBrainStore.getState().lastSeq).toBe(9);
   });
 });
-

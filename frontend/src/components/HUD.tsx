@@ -8,11 +8,16 @@ export function HUD() {
   const fps = useBrainStore((s) => s.fps);
   const selectedId = useBrainStore((s) => s.selectedId);
   const lastSeq = useBrainStore((s) => s.lastSeq);
+  const connectionStatus = useBrainStore((s) => s.connectionStatus);
   const [liveUntil, setLiveUntil] = useState(0);
   const selected = selectedId ? entities.get(selectedId) : null;
 
   const fpsColor = fps >= 55 ? "#50FA7B" : fps >= 30 ? "#F1FA8C" : "#FF5555";
-  const live = Date.now() < liveUntil;
+  const live = Date.now() < liveUntil || connectionStatus === "live";
+  const statusLabel =
+    connectionStatus === "syncing" ? "syncing" : connectionStatus === "offline" ? "offline · reconnecting" : "live";
+  const statusColor =
+    connectionStatus === "syncing" ? "#f59e0b" : connectionStatus === "offline" ? "#ef4444" : "#50FA7B";
   const data = selected?.data ?? {};
   const name =
     (typeof data["name"] === "string" && data["name"]) ||
@@ -36,9 +41,11 @@ export function HUD() {
         <div className="flex items-center gap-2 text-lg font-semibold tracking-wider text-white/90">
           <span>AXIOM</span>
           <span
-            className={`h-2 w-2 rounded-full bg-[#50FA7B] ${live ? "opacity-100 animate-pulse" : "opacity-25"}`}
+            className={`h-2 w-2 rounded-full ${live ? "opacity-100 animate-pulse" : "opacity-70"}`}
+            style={{ backgroundColor: statusColor }}
             aria-hidden="true"
           />
+          <span className="text-xs font-normal text-white/55">{statusLabel}</span>
         </div>
         <div>
           entities <span className="text-white">{entities.size}</span>
@@ -46,9 +53,13 @@ export function HUD() {
         <div>
           edges <span className="text-white">{edges.size}</span>
         </div>
-        <div>
-          fps <span style={{ color: fpsColor }}>{fps}</span>
-        </div>
+        {connectionStatus === "syncing" && fps === 0 ? (
+          <div className="text-[#f59e0b]">syncing renderer</div>
+        ) : (
+          <div>
+            fps <span style={{ color: fpsColor }}>{fps}</span>
+          </div>
+        )}
         {selected && (
           <div className="mt-3 pt-3 border-t border-white/10">
             <div className="text-white/40 text-xs uppercase tracking-wider">selected</div>
@@ -69,4 +80,3 @@ export function HUD() {
     </>
   );
 }
-

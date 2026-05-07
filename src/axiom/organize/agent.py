@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from axiom.organize.centrality import CentralityScorer
 from axiom.organize.classifier import HybridClassifier
 from axiom.organize.clusters import is_valid_cluster_id
+from axiom.organize.edge_proposer import EdgeProposer
 from axiom.schema.models import Entity
 
 logger = logging.getLogger("axiom.organize.agent")
@@ -36,6 +37,7 @@ logger = logging.getLogger("axiom.organize.agent")
 CLASSIFY_INTERVAL_SEC: Final[float] = 5.0
 CLASSIFY_BATCH_SIZE: Final[int] = 20
 CENTRALITY_INTERVAL_SEC: Final[float] = 30.0
+EDGE_PROPOSAL_INTERVAL_SEC: Final[float] = 15.0
 
 
 class _Broadcaster(Protocol):
@@ -60,8 +62,10 @@ class OrganizerAgent:
         broadcaster: _Broadcaster | None = None,
         classifier: HybridClassifier | None = None,
         scorer: CentralityScorer | None = None,
+        edge_proposer: EdgeProposer | None = None,
         classify_interval_sec: float = CLASSIFY_INTERVAL_SEC,
         centrality_interval_sec: float = CENTRALITY_INTERVAL_SEC,
+        edge_proposal_interval_sec: float = EDGE_PROPOSAL_INTERVAL_SEC,
         sleeper: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         self._session_factory: SessionFactory = (
@@ -70,8 +74,10 @@ class OrganizerAgent:
         self._broadcaster = broadcaster
         self.classifier: HybridClassifier = classifier or HybridClassifier()
         self.scorer: CentralityScorer = scorer or CentralityScorer()
+        self.edge_proposer: EdgeProposer = edge_proposer or EdgeProposer(broadcaster=broadcaster)
         self.classify_interval_sec = classify_interval_sec
         self.centrality_interval_sec = centrality_interval_sec
+        self.edge_proposal_interval_sec = edge_proposal_interval_sec
         self._sleep: Callable[[float], Awaitable[None]] = sleeper or asyncio.sleep
         self._tasks: list[asyncio.Task[None]] = []
         self._stop = False
@@ -153,6 +159,21 @@ class OrganizerAgent:
         finally:
             session.close()
 
+    async def propose_edges(self) -> int:
+        try:
+            session = self._session_factory()
+        except Exception:  # noqa: BLE001
+            logger.exception("organizer: failed to open db session for edge proposal")
+            return 0
+        try:
+            return await self.edge_proposer.propose_once(session)
+        except Exception:  # noqa: BLE001
+            logger.exception("organizer: edge proposal failed")
+            session.rollback()
+            return 0
+        finally:
+            session.close()
+
     async def backfill_once(self) -> int:
         """Drain every unclassified entity in batches. Used at app boot."""
 
@@ -182,6 +203,14 @@ class OrganizerAgent:
                 logger.exception("organizer: centrality_loop iteration failed")
             await self._sleep(self.centrality_interval_sec)
 
+    async def edge_proposal_loop(self) -> None:
+        while not self._stop:
+            try:
+                await self.propose_edges()
+            except Exception:  # noqa: BLE001
+                logger.exception("organizer: edge_proposal_loop iteration failed")
+            await self._sleep(self.edge_proposal_interval_sec)
+
     def start(self) -> list[asyncio.Task[None]]:
         if self._tasks:
             return self._tasks
@@ -189,6 +218,7 @@ class OrganizerAgent:
         self._tasks = [
             asyncio.create_task(self.classify_loop(), name="organizer.classify"),
             asyncio.create_task(self.centrality_loop(), name="organizer.centrality"),
+            asyncio.create_task(self.edge_proposal_loop(), name="organizer.edge_proposal"),
         ]
         return self._tasks
 

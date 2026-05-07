@@ -22,17 +22,21 @@ export type Edge = {
   created_at: string;
 };
 
+export type ConnectionStatus = "syncing" | "live" | "offline";
+
 type BrainState = {
   entities: Map<string, Entity>;
   edges: Map<string, Edge>;
   lastSeq: number;
   fps: number;
   selectedId: string | null;
+  connectionStatus: ConnectionStatus;
 
   bootstrap: (entities: Entity[], edges: Edge[]) => void;
   applyEvent: (event: BrainEvent) => void;
   setFps: (fps: number) => void;
   select: (id: string | null) => void;
+  setConnectionStatus: (status: ConnectionStatus) => void;
 };
 
 export const useBrainStore = create<BrainState>((set) => ({
@@ -41,6 +45,7 @@ export const useBrainStore = create<BrainState>((set) => ({
   lastSeq: 0,
   fps: 0,
   selectedId: null,
+  connectionStatus: "syncing",
 
   bootstrap: (entities, edges) =>
     set({
@@ -53,7 +58,7 @@ export const useBrainStore = create<BrainState>((set) => ({
       if (event.seq <= state.lastSeq) return {};
       const next: Partial<BrainState> = { lastSeq: event.seq };
 
-      if (event.type === "entity_added" && event.persisted_id) {
+      if ((event.type === "entity_added" || event.type === "entity_created") && event.persisted_id) {
         const entities = new Map(state.entities);
         const payload = event.payload as unknown as Omit<Entity, "id"> & {
           nick?: unknown;
@@ -64,10 +69,24 @@ export const useBrainStore = create<BrainState>((set) => ({
         next.entities = entities;
       }
 
-      if (event.type === "edge_added" && event.persisted_id) {
+      if ((event.type === "edge_added" || event.type === "entity_edge_created") && event.persisted_id) {
         const edges = new Map(state.edges);
-        const payload = event.payload as unknown as Omit<Edge, "id">;
-        edges.set(event.persisted_id, { id: event.persisted_id, ...payload });
+        const payload = event.payload as unknown as Partial<Omit<Edge, "id">> & {
+          source_id?: string;
+          target_id?: string;
+          relation_type?: string;
+          relationship?: string;
+        };
+        if (typeof payload.source_id === "string" && typeof payload.target_id === "string") {
+          edges.set(event.persisted_id, {
+            id: event.persisted_id,
+            source_id: payload.source_id,
+            target_id: payload.target_id,
+            relationship: payload.relationship ?? payload.relation_type ?? "related",
+            data: (payload.data as Record<string, unknown> | undefined) ?? {},
+            created_at: typeof payload.created_at === "string" ? payload.created_at : new Date().toISOString(),
+          });
+        }
         next.edges = edges;
       }
 
@@ -90,5 +109,5 @@ export const useBrainStore = create<BrainState>((set) => ({
 
   setFps: (fps) => set({ fps }),
   select: (id) => set({ selectedId: id }),
+  setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
 }));
-

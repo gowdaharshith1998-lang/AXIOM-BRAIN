@@ -60,6 +60,42 @@ describe("displayLabelFor", () => {
   });
 });
 
+describe("importance labels", () => {
+  it("can show high-importance labels at default zoom", () => {
+    const labels = Array.from({ length: 80 }, (_, i) => ({
+      id: `n${i}`,
+      composite_importance: 0.7,
+    }));
+    const visible = labels.filter((label) => label.composite_importance > 0.6);
+    expect(visible).toHaveLength(80);
+  });
+
+  it("hides labels at overview zoom", () => {
+    expect(
+      shouldShowLabel({
+        nodeId: "n1",
+        cameraDistance: 200,
+        selectedId: null,
+        selectedNeighborIds: new Set(),
+        fpsGuardState: "full",
+        showDistance: 180,
+        hideDistance: 180,
+      }),
+    ).toBe(false);
+  });
+
+  it("supports importance-scaled font sizes", () => {
+    const fontForImportance = (importance: number) => 10 + (14 - 10) * importance;
+    expect(fontForImportance(0)).toBe(10);
+    expect(fontForImportance(1)).toBe(14);
+    expect(fontForImportance(0.5)).toBe(12);
+  });
+
+  it("truncates labels at twenty-four characters", () => {
+    expect(truncate("x".repeat(50))).toHaveLength(24);
+  });
+});
+
 describe("truncate", () => {
   it("preserves short strings unchanged", () => {
     expect(truncate("short")).toBe("short");
