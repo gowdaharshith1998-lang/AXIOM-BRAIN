@@ -131,6 +131,8 @@ Next step: 5.11.3 (HubNode extraction from CompanyBrainGraph).
 Resume protocol: in fresh Cursor session, first action is `cat NOTES.md`,
 second action is `git log --oneline -10`, then begin 5.11.3.
 
+RuFlo note: `user-ruflo` MCP is installed, but `ruflo:plan/execute/verify/checkpoint` tools were not exposed in this session; used standard 5.11.x workflow for 5.11.3.
+
 DO NOT re-Recon. Paths and stack locked at top of NOTES.md.
 DO NOT re-cite the spec. EARS R1–R14 already locked.
 DO NOT chase Interaction or Data tests in 5.11.3 — that's 5.11.5+.

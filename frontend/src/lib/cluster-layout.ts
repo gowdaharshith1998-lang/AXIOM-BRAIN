@@ -14,6 +14,29 @@ export const CLUSTER_IDS = [
 
 export type ClusterId = (typeof CLUSTER_IDS)[number];
 
+// Tab order for the Company Brain SVG overlay clusters (Phase 5.11).
+// This is the canonical keyboard traversal order for focusable hit-regions.
+export const TAB_ORDER = [
+  "people",
+  "leadership",
+  "meetings",
+  "decisions",
+  "code",
+  "projects",
+  "tickets",
+  "incidents",
+  "systems",
+  "vendors",
+  "customers",
+  "policies",
+  "documents",
+  "teams",
+] as const;
+
+export const HUB_CENTROID_FRAC = { x: 0.474, y: 0.368 } as const;
+
+export const HUB_COLOR = "#53a6ff";
+
 export const CLUSTER_LABELS: Record<ClusterId, string> = {
   billing_payments: "Billing & Payments",
   incidents_ops: "Incidents & Ops",
