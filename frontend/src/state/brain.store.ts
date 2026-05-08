@@ -62,6 +62,15 @@ export type WardenInsight = {
   timestamp: string;
 };
 
+export type BrainFocusMode = "AMBIENT" | "FOCUS_CLUSTER" | "FOCUS_ENTITY";
+
+export type BrainFocusState = {
+  mode: BrainFocusMode;
+  clusterId: string | null;
+  entityId: string | null;
+  pendingEntityId: string | null;
+};
+
 type BrainState = {
   entities: Map<string, Entity>;
   edges: Map<string, Edge>;
@@ -69,6 +78,7 @@ type BrainState = {
   fps: number;
   selectedId: string | null;
   selectedClusterId: string | null;
+  focus: BrainFocusState;
   connectionStatus: ConnectionStatus;
   clusterHealth: Record<string, ClusterHealthSnapshot>;
   agentActions: AgentActionLog[];
@@ -80,12 +90,56 @@ type BrainState = {
   setFps: (fps: number) => void;
   select: (id: string | null) => void;
   selectCluster: (id: string | null) => void;
+  focusCluster: (clusterId: string) => void;
+  focusEntity: (entityId: string, parentClusterId: string) => void;
+  clearFocus: () => void;
+  hydrateFromUrl: () => void;
   setConnectionStatus: (status: ConnectionStatus) => void;
   setClusterHealth: (clusterHealth: Record<string, ClusterHealthSnapshot>) => void;
   addAgentAction: (action: AgentActionLog) => void;
   addReceipt: (receipt: LedgerReceipt) => void;
   addInsight: (insight: WardenInsight) => void;
 };
+
+function isSafeId(value: unknown): value is string {
+  return typeof value === "string" && /^[\w-]+$/.test(value);
+}
+
+function replaceHash(fragment: string) {
+  if (typeof window === "undefined") return;
+  window.history.replaceState(null, "", fragment);
+}
+
+function resolvePendingEntityFocus(entities: Map<string, Entity>, focus: BrainFocusState): BrainFocusState {
+  if (!focus.pendingEntityId) return focus;
+  const pending = entities.get(focus.pendingEntityId);
+  if (!pending || !isSafeId(pending.cluster_id)) return focus;
+  const entityId = focus.pendingEntityId;
+  return { mode: "FOCUS_ENTITY", clusterId: pending.cluster_id, entityId, pendingEntityId: null };
+}
+
+function focusReducer(prev: BrainFocusState, next: Partial<BrainFocusState>): BrainFocusState {
+  const merged: BrainFocusState = {
+    mode: next.mode ?? prev.mode,
+    clusterId: next.clusterId ?? prev.clusterId,
+    entityId: next.entityId ?? prev.entityId,
+    pendingEntityId: next.pendingEntityId ?? prev.pendingEntityId,
+  };
+
+  if (merged.pendingEntityId !== null) {
+    return { mode: "AMBIENT", clusterId: null, entityId: null, pendingEntityId: merged.pendingEntityId };
+  }
+
+  if (merged.mode === "AMBIENT") {
+    return { mode: "AMBIENT", clusterId: null, entityId: null, pendingEntityId: null };
+  }
+
+  if (merged.mode === "FOCUS_CLUSTER") {
+    return { mode: "FOCUS_CLUSTER", clusterId: merged.clusterId, entityId: null, pendingEntityId: null };
+  }
+
+  return { mode: "FOCUS_ENTITY", clusterId: merged.clusterId, entityId: merged.entityId, pendingEntityId: null };
+}
 
 export const useBrainStore = create<BrainState>((set) => ({
   entities: new Map(),
@@ -94,6 +148,7 @@ export const useBrainStore = create<BrainState>((set) => ({
   fps: 0,
   selectedId: null,
   selectedClusterId: null,
+  focus: { mode: "AMBIENT", clusterId: null, entityId: null, pendingEntityId: null },
   connectionStatus: "syncing",
   clusterHealth: {},
   agentActions: [],
@@ -101,9 +156,17 @@ export const useBrainStore = create<BrainState>((set) => ({
   insights: [],
 
   bootstrap: (entities, edges) =>
-    set({
-      entities: new Map(entities.map((e) => [e.id, e])),
-      edges: new Map(edges.map((e) => [e.id, e])),
+    set((state) => {
+      const nextEntities = new Map(entities.map((e) => [e.id, e]));
+      const nextFocus = resolvePendingEntityFocus(nextEntities, state.focus);
+      if (nextFocus !== state.focus && nextFocus.mode === "FOCUS_ENTITY" && nextFocus.entityId) {
+        replaceHash(`#entity=${nextFocus.entityId}`);
+      }
+      return {
+        entities: nextEntities,
+        edges: new Map(edges.map((e) => [e.id, e])),
+        focus: nextFocus,
+      };
     }),
 
   applyEvent: (event) =>
@@ -195,6 +258,71 @@ export const useBrainStore = create<BrainState>((set) => ({
   setFps: (fps) => set({ fps }),
   select: (id) => set({ selectedId: id, selectedClusterId: null }),
   selectCluster: (id) => set({ selectedClusterId: id, selectedId: null }),
+
+  focusCluster: (clusterId) =>
+    set((state) => {
+      if (!isSafeId(clusterId)) return {};
+      replaceHash(`#cluster=${clusterId}`);
+      return { focus: focusReducer(state.focus, { mode: "FOCUS_CLUSTER", clusterId, entityId: null, pendingEntityId: null }) };
+    }),
+
+  focusEntity: (entityId, parentClusterId) =>
+    set((state) => {
+      if (!isSafeId(entityId) || !isSafeId(parentClusterId)) return {};
+      replaceHash(`#entity=${entityId}`);
+      return {
+        focus: focusReducer(state.focus, {
+          mode: "FOCUS_ENTITY",
+          clusterId: parentClusterId,
+          entityId,
+          pendingEntityId: null,
+        }),
+      };
+    }),
+
+  clearFocus: () =>
+    set((state) => {
+      replaceHash("");
+      return { focus: focusReducer(state.focus, { mode: "AMBIENT", clusterId: null, entityId: null, pendingEntityId: null }) };
+    }),
+
+  hydrateFromUrl: () =>
+    set((state) => {
+      if (typeof window === "undefined") return {};
+      const hash = window.location.hash ?? "";
+
+      const clusterMatch = /^#cluster=([\w-]+)$/.exec(hash);
+      if (clusterMatch) {
+        const clusterId = clusterMatch[1];
+        if (!isSafeId(clusterId)) return {};
+        replaceHash(`#cluster=${clusterId}`);
+        return { focus: focusReducer(state.focus, { mode: "FOCUS_CLUSTER", clusterId, entityId: null, pendingEntityId: null }) };
+      }
+
+      const entityMatch = /^#entity=([\w-]+)$/.exec(hash);
+      if (entityMatch) {
+        const entityId = entityMatch[1];
+        if (!isSafeId(entityId)) return {};
+        const entity = state.entities.get(entityId);
+        if (entity && isSafeId(entity.cluster_id)) {
+          replaceHash(`#entity=${entityId}`);
+          return {
+            focus: focusReducer(state.focus, {
+              mode: "FOCUS_ENTITY",
+              clusterId: entity.cluster_id,
+              entityId,
+              pendingEntityId: null,
+            }),
+          };
+        }
+
+        // Clean URL already has #entity=<id>; do not rewrite history here.
+        return { focus: focusReducer(state.focus, { mode: "AMBIENT", pendingEntityId: entityId }) };
+      }
+
+      return {};
+    }),
+
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
   setClusterHealth: (clusterHealth) => set({ clusterHealth }),
   addAgentAction: (action) =>
