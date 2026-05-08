@@ -10,6 +10,8 @@ export type HexConstellationProps = {
   centroid: HexPoint;
   satelliteCount: number; // expected 5–7
   outerDotCount: number; // expected 4–8
+  ariaLabel?: string | null;
+  ariaHidden?: boolean;
 };
 
 const CENTRAL_RADIUS = 16; // 32px across
@@ -98,6 +100,8 @@ export function HexConstellation({
   centroid,
   satelliteCount,
   outerDotCount,
+  ariaLabel,
+  ariaHidden,
 }: HexConstellationProps) {
   const reduced = prefersReducedMotion();
   const seed = hashSeed(clusterId);
@@ -113,7 +117,8 @@ export function HexConstellation({
       data-cluster-id={clusterId}
       className="cluster"
       transform={`translate(${centroid.x} ${centroid.y})`}
-      aria-label={`${label} cluster, ${count} entities`}
+      aria-label={ariaLabel === null ? undefined : (ariaLabel ?? `${label} cluster, ${count} entities`)}
+      aria-hidden={ariaHidden ? "true" : undefined}
     >
       <circle data-role="aura" cx={0} cy={0} r={80} fill={color} opacity={0.08} />
 

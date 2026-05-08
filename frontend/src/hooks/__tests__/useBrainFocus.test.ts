@@ -131,5 +131,24 @@ describe("useBrainFocus (focus state machine)", () => {
     });
     expect(replaceSpy).toHaveBeenCalledWith(null, "", "#entity=E-1");
   });
+
+  it("setHoveredCluster updates hoveredClusterId in store", () => {
+    resetStore();
+    const { result } = renderHook(() => useBrainFocus());
+
+    act(() => result.current.setHoveredCluster("documents"));
+
+    expect(useBrainStore.getState().focus.hoveredClusterId).toBe("documents");
+  });
+
+  it("setHoveredCluster(null) clears hoveredClusterId", () => {
+    resetStore();
+    const { result } = renderHook(() => useBrainFocus());
+
+    act(() => result.current.setHoveredCluster("documents"));
+    act(() => result.current.setHoveredCluster(null));
+
+    expect(useBrainStore.getState().focus.hoveredClusterId).toBeNull();
+  });
 });
 

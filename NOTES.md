@@ -117,22 +117,32 @@ If context exceeds 80%:
 ## Reboot Checkpoint — after 5.11.2
 
 Date: 2026-05-08
-Last commit on phase-5-living-brain: 01383d7
-Last commit message: phase 5.11.2: Conduit primitive + tests (4/4 green)
-Test state: 12 / 26 new tests passing · 245 prior frontend tests still green
-Reflexion: ITER_COUNT was 0 throughout 5.11.1 and 5.11.2 (no Reflexion triggered)
+Last commit on phase-5-living-brain: 599e656
+Last commit message: phase 5.11.4: useBrainFocus state machine + tests (6/6 green, 24/38 total)
+Test state: 24 / 38 new tests passing · 245 prior frontend tests still green
+Reflexion: ITER_COUNT was 0 throughout 5.11.1–5.11.4 (no Reflexion triggered)
+Context budget: 27%
+REBOOT RECOMMENDED: no (well below 75% threshold)
+RuFlo MCP: installed, but `ruflo:*` plan/execute/verify/checkpoint tools still not exposed (carry-forward to 5.11.5)
 
-Files created so far (5.11.1 + 5.11.2):
+Files created so far (5.11.1–5.11.4):
 - frontend/src/components/company-brain/HexConstellation.tsx
 - frontend/src/components/company-brain/Conduit.tsx
+- frontend/src/components/company-brain/HubNode.tsx
+- frontend/src/hooks/useBrainFocus.ts
 - (plus matching test harness mods)
 
-Next step: 5.11.3 (HubNode extraction from CompanyBrainGraph).
+Next step: 5.11.5 (ClusterNode wired to HexConstellation + hover state).
 Resume protocol: in fresh Cursor session, first action is `cat NOTES.md`,
-second action is `git log --oneline -10`, then begin 5.11.3.
+second action is `git log --oneline -10`, then begin 5.11.5.
 
-RuFlo note: `user-ruflo` MCP is installed, but `ruflo:plan/execute/verify/checkpoint` tools were not exposed in this session; used standard 5.11.x workflow for 5.11.3.
+Phase 5.11.6 cleanup todo:
+- Remove onLegacyHover prop from ClusterNode
+- Remove hoveredCluster useState from CompanyBrainPage
+- Replace selectedId prop with focus.clusterId from store
+- Remove is-active className path in CompanyBrainGraph; cb-dimmed becomes the sole highlight system
+- Remove cb-cluster.is-active CSS rules (or merge into cb-cluster-node rules)
 
 DO NOT re-Recon. Paths and stack locked at top of NOTES.md.
 DO NOT re-cite the spec. EARS R1–R14 already locked.
-DO NOT chase Interaction or Data tests in 5.11.3 — that's 5.11.5+.
+DO NOT chase Data tests yet — that's 5.11.7+.

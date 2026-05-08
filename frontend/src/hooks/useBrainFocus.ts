@@ -5,7 +5,8 @@ export function useBrainFocus() {
   const focusCluster = useBrainStore((s) => s.focusCluster);
   const focusEntity = useBrainStore((s) => s.focusEntity);
   const clearFocus = useBrainStore((s) => s.clearFocus);
+  const setHoveredCluster = useBrainStore((s) => s.setHoveredCluster);
 
-  return { focus, focusCluster, focusEntity, clearFocus };
+  return { focus, focusCluster, focusEntity, clearFocus, setHoveredCluster };
 }
 

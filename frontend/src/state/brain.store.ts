@@ -69,6 +69,7 @@ export type BrainFocusState = {
   clusterId: string | null;
   entityId: string | null;
   pendingEntityId: string | null;
+  hoveredClusterId: string | null;
 };
 
 type BrainState = {
@@ -94,6 +95,7 @@ type BrainState = {
   focusEntity: (entityId: string, parentClusterId: string) => void;
   clearFocus: () => void;
   hydrateFromUrl: () => void;
+  setHoveredCluster: (id: string | null) => void;
   setConnectionStatus: (status: ConnectionStatus) => void;
   setClusterHealth: (clusterHealth: Record<string, ClusterHealthSnapshot>) => void;
   addAgentAction: (action: AgentActionLog) => void;
@@ -115,30 +117,35 @@ function resolvePendingEntityFocus(entities: Map<string, Entity>, focus: BrainFo
   const pending = entities.get(focus.pendingEntityId);
   if (!pending || !isSafeId(pending.cluster_id)) return focus;
   const entityId = focus.pendingEntityId;
-  return { mode: "FOCUS_ENTITY", clusterId: pending.cluster_id, entityId, pendingEntityId: null };
+  return { ...focus, mode: "FOCUS_ENTITY", clusterId: pending.cluster_id, entityId, pendingEntityId: null };
 }
 
 function focusReducer(prev: BrainFocusState, next: Partial<BrainFocusState>): BrainFocusState {
+  const hoveredClusterId = Object.prototype.hasOwnProperty.call(next, "hoveredClusterId")
+    ? next.hoveredClusterId
+    : prev.hoveredClusterId;
+
   const merged: BrainFocusState = {
     mode: next.mode ?? prev.mode,
     clusterId: next.clusterId ?? prev.clusterId,
     entityId: next.entityId ?? prev.entityId,
     pendingEntityId: next.pendingEntityId ?? prev.pendingEntityId,
+    hoveredClusterId,
   };
 
   if (merged.pendingEntityId !== null) {
-    return { mode: "AMBIENT", clusterId: null, entityId: null, pendingEntityId: merged.pendingEntityId };
+    return { mode: "AMBIENT", clusterId: null, entityId: null, pendingEntityId: merged.pendingEntityId, hoveredClusterId: merged.hoveredClusterId };
   }
 
   if (merged.mode === "AMBIENT") {
-    return { mode: "AMBIENT", clusterId: null, entityId: null, pendingEntityId: null };
+    return { mode: "AMBIENT", clusterId: null, entityId: null, pendingEntityId: null, hoveredClusterId: merged.hoveredClusterId };
   }
 
   if (merged.mode === "FOCUS_CLUSTER") {
-    return { mode: "FOCUS_CLUSTER", clusterId: merged.clusterId, entityId: null, pendingEntityId: null };
+    return { mode: "FOCUS_CLUSTER", clusterId: merged.clusterId, entityId: null, pendingEntityId: null, hoveredClusterId: merged.hoveredClusterId };
   }
 
-  return { mode: "FOCUS_ENTITY", clusterId: merged.clusterId, entityId: merged.entityId, pendingEntityId: null };
+  return { mode: "FOCUS_ENTITY", clusterId: merged.clusterId, entityId: merged.entityId, pendingEntityId: null, hoveredClusterId: merged.hoveredClusterId };
 }
 
 export const useBrainStore = create<BrainState>((set) => ({
@@ -148,7 +155,7 @@ export const useBrainStore = create<BrainState>((set) => ({
   fps: 0,
   selectedId: null,
   selectedClusterId: null,
-  focus: { mode: "AMBIENT", clusterId: null, entityId: null, pendingEntityId: null },
+  focus: { mode: "AMBIENT", clusterId: null, entityId: null, pendingEntityId: null, hoveredClusterId: null },
   connectionStatus: "syncing",
   clusterHealth: {},
   agentActions: [],
@@ -321,6 +328,12 @@ export const useBrainStore = create<BrainState>((set) => ({
       }
 
       return {};
+    }),
+
+  setHoveredCluster: (id) =>
+    set((state) => {
+      if (id !== null && !isSafeId(id)) return {};
+      return { focus: focusReducer(state.focus, { hoveredClusterId: id }) };
     }),
 
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
