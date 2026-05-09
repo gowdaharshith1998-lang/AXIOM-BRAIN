@@ -24,6 +24,7 @@ from axiom.schema.models import Edge, Entity
 from axiom.sources.base import IngestEvent
 from axiom.sources.live_synthetic import LiveSyntheticSource
 from axiom.studio.sources import synthetic_sources_snapshot
+from axiom.studio.vault_api import router as vault_router
 
 
 def datetime_now_ms() -> int:
@@ -156,6 +157,7 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.include_router(vault_router)
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
