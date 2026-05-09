@@ -5,7 +5,7 @@ import { CLUSTER_CENTROIDS, CLUSTER_IDS } from "@/lib/cluster-layout";
 describe("brain lobe integration", () => {
   it("hex constellation layout intentionally expands past the old envelope", () => {
     for (const cluster of CLUSTER_IDS) {
-      expect(CLUSTER_CENTROIDS[cluster].length()).toBeLessThanOrEqual(100);
+      expect(CLUSTER_CENTROIDS[cluster].length()).toBeLessThanOrEqual(220);
     }
   });
 
@@ -17,6 +17,6 @@ describe("brain lobe integration", () => {
   });
 
   it("overview has seven semantic lobe anchors", () => {
-    expect(CLUSTER_IDS.map((id) => CLUSTER_CENTROIDS[id])).toHaveLength(7);
+    expect(CLUSTER_IDS.map((id) => CLUSTER_CENTROIDS[id])).toHaveLength(9);
   });
 });

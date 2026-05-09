@@ -27,10 +27,10 @@ function entity(id: string, cluster_id: string, composite_importance: number): E
 }
 
 describe("hex cluster centroids", () => {
-  it("places seven hubs at distinct positions", () => {
-    expect(Object.keys(HEX_CLUSTER_CENTROIDS)).toHaveLength(7);
+  it("places super-cluster hubs at distinct positions", () => {
+    expect(Object.keys(HEX_CLUSTER_CENTROIDS)).toHaveLength(9);
     const unique = new Set(Object.values(HEX_CLUSTER_CENTROIDS).map((p) => p.toArray().join(",")));
-    expect(unique.size).toBe(7);
+    expect(unique.size).toBe(9);
   });
 
   it("keeps hub pairwise distance above seventy", () => {
@@ -60,7 +60,7 @@ describe("hex cluster centroids", () => {
 
 describe("computeStarburstPositions", () => {
   it("positions the top eighty entities per cluster", () => {
-    const entities = Array.from({ length: 96 }, (_, i) => entity(`e${i}`, "billing_payments", 1 - i / 100));
+    const entities = Array.from({ length: 96 }, (_, i) => entity(`e${i}`, "billing", 1 - i / 100));
     const positions = computeStarburstPositions(entities);
     expect(positions.size).toBe(MAX_VISIBLE_PER_CLUSTER);
     expect(positions.has("e0")).toBe(true);
@@ -68,13 +68,13 @@ describe("computeStarburstPositions", () => {
   });
 
   it("omits low-importance entities", () => {
-    const entities = Array.from({ length: 96 }, (_, i) => entity(`e${i}`, "billing_payments", 1 - i / 100));
+    const entities = Array.from({ length: 96 }, (_, i) => entity(`e${i}`, "billing", 1 - i / 100));
     const positions = computeStarburstPositions(entities);
     expect(positions.has("e95")).toBe(false);
   });
 
   it("is deterministic", () => {
-    const entities = Array.from({ length: 10 }, (_, i) => entity(`e${i}`, "growth_product", i / 10));
+    const entities = Array.from({ length: 10 }, (_, i) => entity(`e${i}`, "company_knowledge", i / 10));
     const first = Array.from(computeStarburstPositions(entities).entries()).map(([id, p]) => [id, p.toArray()]);
     const second = Array.from(computeStarburstPositions(entities).entries()).map(([id, p]) => [id, p.toArray()]);
     expect(second).toEqual(first);
@@ -97,7 +97,7 @@ describe("visible slots and inter-hub edges", () => {
   });
 
   it("honors a reduced visible node budget", () => {
-    const entities = Array.from({ length: 90 }, (_, i) => entity(`budget-${i}`, "billing_payments", 1 - i / 100));
+    const entities = Array.from({ length: 90 }, (_, i) => entity(`budget-${i}`, "billing", 1 - i / 100));
     const slots = computeVisibleEntitySlots(entities, CLUSTER_IDS, 40);
     expect(slots).toHaveLength(40);
     expect(slots.at(-1)?.entity.id).toBe("budget-39");
@@ -105,16 +105,16 @@ describe("visible slots and inter-hub edges", () => {
 
   it("creates cross-cluster hub edges only for connected pairs", () => {
     const entities = new Map<string, Entity>([
-      ["a", entity("a", "billing_payments", 1)],
-      ["b", entity("b", "incidents_ops", 1)],
-      ["c", entity("c", "incidents_ops", 1)],
+      ["a", entity("a", "billing", 1)],
+      ["b", entity("b", "execution_context", 1)],
+      ["c", entity("c", "execution_context", 1)],
     ]);
     const edges: Edge[] = [
       { id: "same", source_id: "b", target_id: "c", relationship: "mentions", data: {}, created_at: "t" },
       { id: "cross", source_id: "a", target_id: "b", relationship: "mentions", data: {}, created_at: "t" },
     ];
     expect(computeInterHubEdges(edges, entities)).toEqual([
-      { key: "billing_payments:incidents_ops", sourceCluster: "billing_payments", targetCluster: "incidents_ops" },
+      { key: "billing:execution_context", sourceCluster: "billing", targetCluster: "execution_context" },
     ]);
   });
 
@@ -128,6 +128,6 @@ describe("visible slots and inter-hub edges", () => {
         }
       }
     }
-    expect(computeInterHubEdges(edges, entities)).toHaveLength(21);
+    expect(computeInterHubEdges(edges, entities)).toHaveLength(36);
   });
 });

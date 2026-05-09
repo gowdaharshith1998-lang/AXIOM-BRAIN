@@ -9,9 +9,9 @@ import {
 } from "@/lib/particle-flow";
 
 const edge = {
-  key: "billing_payments:incidents_ops",
-  sourceCluster: "billing_payments" as const,
-  targetCluster: "incidents_ops" as const,
+  key: "billing:execution_context",
+  sourceCluster: "billing" as const,
+  targetCluster: "execution_context" as const,
 };
 
 describe("ParticleFlowController", () => {
@@ -38,9 +38,9 @@ describe("ParticleFlowController", () => {
   });
 
   it("lerps particle color between clusters", () => {
-    const color = particleColorForClusters("billing_payments", "incidents_ops");
-    expect(color.getHexString()).not.toBe(new THREE.Color("#ec4899").getHexString());
-    expect(color.getHexString()).not.toBe(new THREE.Color("#ef4444").getHexString());
+    const color = particleColorForClusters("billing", "execution_context");
+    expect(color.getHexString()).not.toBe(new THREE.Color("#4dd3b8").getHexString());
+    expect(color.getHexString()).not.toBe(new THREE.Color("#2b7fff").getHexString());
   });
 
   it("bursts three particles for a new edge event", () => {
@@ -60,9 +60,9 @@ describe("ParticleFlowController", () => {
 
   it("uses the faster inter-hub spawn cadence", () => {
     const edges = Array.from({ length: 7 }, (_, i) => ({
-      key: `billing_payments:incidents_ops:${i}`,
-      sourceCluster: "billing_payments" as const,
-      targetCluster: "incidents_ops" as const,
+      key: `billing:execution_context:${i}`,
+      sourceCluster: "billing" as const,
+      targetCluster: "execution_context" as const,
     }));
     const flow = new ParticleFlowController(edges);
     for (let t = 0; t <= 5000; t += 100) flow.update(t);

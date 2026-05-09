@@ -10,11 +10,11 @@ import {
 
 describe("arrival effect", () => {
   it("spawns with the entity cluster color", () => {
-    expect(arrivalColorForCluster("engineering_code")).toBe("#84cc16");
+    expect(arrivalColorForCluster("execution_context")).toBe("#2B7FFF");
   });
 
   it("falls back to purple for unknown clusters", () => {
-    expect(arrivalColorForCluster(null)).toBe("#a855f7");
+    expect(arrivalColorForCluster(null)).toBe("#E8F0FF");
   });
 
   it("expands and fades the pulse over six hundred ms", () => {

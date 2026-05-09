@@ -31,6 +31,7 @@ import {
   isClusterId,
   type ClusterId,
 } from "@/lib/cluster-layout";
+import { superClusterIdForBackendCluster, superClusterIdForEntity } from "@/lib/cluster-reframe";
 import { conduitPathsForEdges, createConduitLine, type ConduitPath } from "@/lib/curved-conduits";
 import { RollingFpsCounter } from "@/lib/fps";
 import { FpsGuard } from "@/lib/fps-guard";
@@ -78,7 +79,8 @@ function compositeImportance(entity: Entity | undefined): number {
 }
 
 function clusterIdFor(entity: Entity | undefined): ClusterId | null {
-  return isClusterId(entity?.cluster_id) ? entity.cluster_id : null;
+  const superId = superClusterIdForEntity(entity);
+  return isClusterId(superId) ? superId : null;
 }
 
 function clusterCounts(entities: Iterable<Entity>): Map<ClusterId, number> {
@@ -206,8 +208,15 @@ export function Brain() {
     const entities = new Map(state.entities);
     const edges = new Map(state.edges);
     let maxVisiblePerCluster = MAX_VISIBLE_PER_CLUSTER;
-    let slots = computeVisibleEntitySlots(entities.values(), CLUSTER_IDS, maxVisiblePerCluster);
-    let interHubEdges = computeInterHubEdges(edges.values(), entities);
+    const reframedEntities = (): Entity[] =>
+      Array.from(entities.values(), (entity) => ({
+        ...entity,
+        cluster_id: superClusterIdForEntity(entity) ?? null,
+      }));
+    const reframedById = (): Map<string, Entity> => new Map(reframedEntities().map((e) => [e.id, e]));
+
+    let slots = computeVisibleEntitySlots(reframedEntities(), CLUSTER_IDS, maxVisiblePerCluster);
+    let interHubEdges = computeInterHubEdges(edges.values(), reframedById());
     let conduitPaths = conduitPathsForEdges(interHubEdges);
     const positionsById = new Map(slots.map((slot) => [slot.entity.id, slot.position.clone()]));
     const idByInstanceIndex = slots.map((slot) => slot.entity.id);
@@ -597,7 +606,7 @@ export function Brain() {
           (obj.material as THREE.Material).dispose();
         }
       });
-      interHubEdges = computeInterHubEdges(edges.values(), entities);
+      interHubEdges = computeInterHubEdges(edges.values(), reframedById());
       conduitPaths = conduitPathsForEdges(interHubEdges);
       const conduitBuild = buildConduitLines(conduitPaths);
       interHubLines = conduitBuild.group;
@@ -609,8 +618,8 @@ export function Brain() {
     };
 
     const refreshClusterLabels = () => {
-      const counts = clusterCounts(entities.values());
-      const loc = clusterLocById(entities.values());
+      const counts = clusterCounts(reframedEntities());
+      const loc = clusterLocById(reframedEntities());
       const health = useBrainStore.getState().clusterHealth;
       for (const cluster of CLUSTER_IDS) {
         const div = bracketLabelDivs.get(cluster);
@@ -636,12 +645,12 @@ export function Brain() {
           const cluster = clusterIdFor(entity);
           const clusterVisible = slots.filter((slot) => slot.clusterId === cluster).length;
           if (cluster && clusterVisible < maxVisiblePerCluster) {
-            slots = computeVisibleEntitySlots(entities.values(), CLUSTER_IDS, maxVisiblePerCluster);
+            slots = computeVisibleEntitySlots(reframedEntities(), CLUSTER_IDS, maxVisiblePerCluster);
             syncSlotIndexes();
             rebuildEdges();
           }
           const position = findEntityPosition(entity, positionsById) ?? new THREE.Vector3();
-          const clusterColor = arrivalColorForCluster(entity.cluster_id);
+          const clusterColor = arrivalColorForCluster(superClusterIdForBackendCluster(entity.cluster_id) ?? null);
           spawnEntityArrival(particleSystem, position, new THREE.Color(clusterColor));
           particleSystem.ingestStream(position, clusterColor);
           flashByNode.set(entity.id, nowMs + FLASH_MS);
@@ -696,11 +705,11 @@ export function Brain() {
         if (event.type === "entity_classified") {
           const payload = event.payload as { entity_id?: string; cluster_id?: string };
           const entityId = payload.entity_id ?? event.persisted_id;
-          if (typeof entityId !== "string" || !isClusterId(payload.cluster_id)) continue;
+          if (typeof entityId !== "string") continue;
           const existing = entities.get(entityId);
           if (!existing) continue;
           entities.set(entityId, { ...existing, cluster_id: payload.cluster_id });
-          slots = computeVisibleEntitySlots(entities.values(), CLUSTER_IDS, maxVisiblePerCluster);
+          slots = computeVisibleEntitySlots(reframedEntities(), CLUSTER_IDS, maxVisiblePerCluster);
           syncSlotIndexes();
           rebuildEdges();
           refreshClusterLabels();

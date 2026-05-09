@@ -19,13 +19,13 @@ function slot(id: string): VisibleEntitySlot {
     source_id: null,
     created_at: "t",
     updated_at: "t",
-    cluster_id: "billing_payments",
+    cluster_id: "billing",
     composite_importance: 1,
   };
   return {
     entity,
-    clusterId: "billing_payments",
-    position: CLUSTER_CENTROIDS.billing_payments.clone().add(new THREE.Vector3(18, 0, 0)),
+    clusterId: "billing",
+    position: CLUSTER_CENTROIDS.billing.clone().add(new THREE.Vector3(18, 0, 0)),
     ring: 1,
     slot: 0,
   };
@@ -53,7 +53,7 @@ describe("RadialTrafficController", () => {
   });
 
   it("dot color matches cluster", () => {
-    expect(`#${radialTrafficColor(slot("a")).getHexString()}`).toBe(CLUSTER_COLORS.billing_payments);
+    expect(`#${radialTrafficColor(slot("a")).getHexString()}`).toBe(CLUSTER_COLORS.billing.toLowerCase());
   });
 
   it("disposes geometry and material", () => {

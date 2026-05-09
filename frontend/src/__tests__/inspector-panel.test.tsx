@@ -17,25 +17,25 @@ describe("InspectorPanel", () => {
   it("renders selected cluster detail", () => {
     useBrainStore.setState({
       selectedId: null,
-      selectedClusterId: "billing_payments",
+      selectedClusterId: "billing",
       agentActions: [
         {
           action_id: "act_1",
           agent_name: "claude",
-          cluster_id: "billing_payments",
+          cluster_id: "billing",
           skill_called: "skills.billing.refund_lookup",
           decision: "allow",
           timestamp: "t",
         },
       ],
-      clusterHealth: { billing_payments: { cluster_id: "billing_payments", status: "degraded", ingest_rate_per_min: 1, last_ingest_at: null, total_entities: 1 } },
+      clusterHealth: { billing: { cluster_id: "billing", status: "degraded", ingest_rate_per_min: 1, last_ingest_at: null, total_entities: 1 } },
       entities: new Map([
-        ["e1", { id: "e1", type: "doc", data: { title: "Refund Policy 2026" }, source_id: null, created_at: "t", updated_at: "t", cluster_id: "billing_payments", composite_importance: 0.94 }],
+        ["e1", { id: "e1", type: "doc", data: { title: "Refund Policy 2026" }, source_id: null, created_at: "t", updated_at: "t", cluster_id: "billing", composite_importance: 0.94 }],
       ]),
       edges: new Map(),
     });
     render(<InspectorPanel />);
-    expect(screen.getAllByText("Billing & Payments").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Billing").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/Refund Policy 2026/)).toBeInTheDocument();
     expect(screen.getByText("degraded")).toBeInTheDocument();
     expect(screen.getByText(/skills.billing.refund_lookup/)).toBeInTheDocument();
@@ -46,13 +46,13 @@ describe("InspectorPanel", () => {
       selectedId: "e1",
       selectedClusterId: null,
       entities: new Map([
-        ["e1", { id: "e1", type: "doc", data: { title: "Stripe webhook handler" }, source_id: null, created_at: "t", updated_at: "t", cluster_id: "engineering_code", composite_importance: 0.91 }],
+        ["e1", { id: "e1", type: "doc", data: { title: "Stripe webhook handler" }, source_id: null, created_at: "t", updated_at: "t", cluster_id: "execution_context", composite_importance: 0.91 }],
       ]),
       edges: new Map(),
     });
     render(<InspectorPanel />);
     expect(screen.getAllByText("Stripe webhook handler").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText(/engineering_code/)).toBeInTheDocument();
+    expect(screen.getByText(/execution_context/)).toBeInTheDocument();
   });
 
   it("embeds AI insight in the default inspector", () => {

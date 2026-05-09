@@ -10,22 +10,22 @@ import {
 
 describe("edge cluster styling", () => {
   it("uses solid full-opacity material inside a cluster", () => {
-    const mat = createEdgeMaterialForClusters("billing_payments", "billing_payments", "#fff");
+    const mat = createEdgeMaterialForClusters("billing", "billing", "#fff");
     expect(mat).toBeInstanceOf(THREE.LineBasicMaterial);
     expect(mat.opacity).toBe(1);
   });
 
   it("uses dashed low-opacity material across clusters", () => {
-    const mat = createEdgeMaterialForClusters("billing_payments", "incidents_ops", "#fff");
+    const mat = createEdgeMaterialForClusters("billing", "execution_context", "#fff");
     expect(mat).toBeInstanceOf(THREE.LineDashedMaterial);
     expect(mat.opacity).toBe(0.25);
   });
 
   it("swaps edge mode when cluster id changes", () => {
-    expect(isCrossClusterEdge("billing_payments", "billing_payments")).toBe(false);
-    expect(isCrossClusterEdge("billing_payments", "incidents_ops")).toBe(true);
-    expect(edgeOpacityForClusters("billing_payments", "incidents_ops")).toBeLessThan(
-      edgeOpacityForClusters("billing_payments", "billing_payments"),
+    expect(isCrossClusterEdge("billing", "billing")).toBe(false);
+    expect(isCrossClusterEdge("billing", "execution_context")).toBe(true);
+    expect(edgeOpacityForClusters("billing", "execution_context")).toBeLessThan(
+      edgeOpacityForClusters("billing", "billing"),
     );
   });
 

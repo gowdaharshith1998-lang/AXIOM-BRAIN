@@ -10,13 +10,19 @@ export const CLUSTER_VISIBLE_SLOTS = [8, 12, 16, 20, 24] as const;
 export const MAX_VISIBLE_PER_CLUSTER = CLUSTER_VISIBLE_SLOTS.reduce((total, next) => total + next, 0);
 
 export const HEX_CLUSTER_CENTROIDS: Record<ClusterId, THREE.Vector3> = {
-  billing_payments: new THREE.Vector3(-90, 0, 0),
-  incidents_ops: new THREE.Vector3(-45, 78, 0),
-  engineering_code: new THREE.Vector3(45, 78, 0),
-  people_teams: new THREE.Vector3(90, 0, 0),
-  decisions_policy: new THREE.Vector3(45, -78, 0),
-  customer_support: new THREE.Vector3(-45, -78, -8),
-  growth_product: new THREE.Vector3(0, 0, 6),
+  // 3-row “constellation” arrangement (kept Phase 1).
+  // Left-to-right placement preserves prior spacing while introducing 8–9 super-clusters.
+  customers: new THREE.Vector3(-180, 90, -6),
+  policies: new THREE.Vector3(-90, 90, 0),
+  agents: new THREE.Vector3(90, 90, 0),
+  billing: new THREE.Vector3(180, 90, -2),
+
+  company_knowledge: new THREE.Vector3(-90, 0, 6),
+  execution_context: new THREE.Vector3(90, 0, 6),
+
+  receipts: new THREE.Vector3(-180, -90, -8),
+  governance: new THREE.Vector3(90, -90, 0),
+  people_teams: new THREE.Vector3(180, -90, -2),
 };
 
 export type VisibleEntitySlot = {

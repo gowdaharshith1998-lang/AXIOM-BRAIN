@@ -21,14 +21,14 @@ function colorDistance(a: THREE.Color, b: THREE.Color): number {
 
 describe("cluster auras", () => {
   it("renders seven auras", () => {
-    expect(createClusterAuras()).toHaveLength(7);
+    expect(createClusterAuras()).toHaveLength(9);
   });
 
   it("matches aura color to cluster id", () => {
     const auras = createClusterAuras();
     for (const aura of auras) {
       const cluster = aura.userData.cluster as keyof typeof CLUSTER_COLORS;
-      expect(`#${aura.material.color.getHexString()}`).toBe(CLUSTER_COLORS[cluster]);
+      expect(`#${aura.material.color.getHexString()}`).toBe(CLUSTER_COLORS[cluster].toLowerCase());
     }
   });
 
@@ -79,7 +79,7 @@ describe("cluster auras", () => {
     const periods = CLUSTER_IDS.map((_, index) => clusterAuraPeriod(index));
     expect(new Set(periods).size).toBe(CLUSTER_IDS.length);
     expect(Math.min(...periods)).toBe(5000);
-    expect(Math.max(...periods)).toBe(8000);
+    expect(Math.max(...periods)).toBe(9000);
   });
 
   it("updates scale and opacity asynchronously by index", () => {
@@ -88,8 +88,8 @@ describe("cluster auras", () => {
   });
 
   it("tints critical auras toward governance red", () => {
-    const base = new THREE.Color(CLUSTER_COLORS.billing_payments);
-    const critical = auraColorForHealth("billing_payments", "critical");
+    const base = new THREE.Color(CLUSTER_COLORS.billing);
+    const critical = auraColorForHealth("billing", "critical");
     expect(colorDistance(critical, new THREE.Color("#ef4444"))).toBeLessThan(colorDistance(base, new THREE.Color("#ef4444")));
   });
 });

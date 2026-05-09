@@ -59,7 +59,7 @@ describe("CLUSTER_CENTROIDS", () => {
   });
 
   it("rejects non-cluster strings via isClusterId", () => {
-    expect(isClusterId("billing_payments")).toBe(true);
+    expect(isClusterId("company_knowledge")).toBe(true);
     expect(isClusterId("not_a_cluster")).toBe(false);
     expect(isClusterId(null)).toBe(false);
     expect(isClusterId(undefined)).toBe(false);
@@ -69,7 +69,7 @@ describe("CLUSTER_CENTROIDS", () => {
 describe("clusterGravityForce", () => {
   it("pulls a classified node toward its cluster centroid", () => {
     const node = {
-      cluster_id: "billing_payments",
+      cluster_id: "billing",
       x: 0,
       y: 0,
       z: 0,
@@ -81,7 +81,7 @@ describe("clusterGravityForce", () => {
     force.initialize([node]);
     force(1.0);
 
-    const centroid = CLUSTER_CENTROIDS.billing_payments;
+    const centroid = CLUSTER_CENTROIDS.billing;
     expect(Math.sign(node.vx!)).toBe(Math.sign(centroid.x) || 0);
     expect(Math.sign(node.vy!)).toBe(Math.sign(centroid.y) || 0);
     expect(Math.sign(node.vz!)).toBe(Math.sign(centroid.z) || 0);
@@ -93,7 +93,7 @@ describe("clusterGravityForce", () => {
 
   it("scales the velocity nudge by the simulation alpha", () => {
     const node = {
-      cluster_id: "growth_product",
+      cluster_id: "company_knowledge",
       x: 0,
       y: 0,
       z: 0,
@@ -104,7 +104,7 @@ describe("clusterGravityForce", () => {
     const force = clusterGravityForce(1.0);
     force.initialize([node]);
     force(0.1);
-    const centroid = CLUSTER_CENTROIDS.growth_product;
+    const centroid = CLUSTER_CENTROIDS.company_knowledge;
     expect(node.vx).toBeCloseTo(centroid.x * 0.1, 6);
   });
 
@@ -153,9 +153,9 @@ describe("clusterGravityForce", () => {
   });
 
   it("strong gravity pulls an entity more than five units toward its centroid", () => {
-    const centroid = CLUSTER_CENTROIDS.billing_payments;
+    const centroid = CLUSTER_CENTROIDS.billing;
     const node = {
-      cluster_id: "billing_payments",
+      cluster_id: "billing",
       x: centroid.x + 50,
       y: centroid.y,
       z: centroid.z,
@@ -174,9 +174,9 @@ describe("clusterGravityForce", () => {
   });
 
   it("does not overshoot badly near the centroid", () => {
-    const centroid = CLUSTER_CENTROIDS.incidents_ops;
+    const centroid = CLUSTER_CENTROIDS.execution_context;
     const node = {
-      cluster_id: "incidents_ops",
+      cluster_id: "execution_context",
       x: centroid.x + 4,
       y: centroid.y,
       z: centroid.z,

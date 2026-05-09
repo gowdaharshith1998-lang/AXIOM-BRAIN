@@ -74,7 +74,7 @@ describe("HUD", () => {
           source_id: null,
           created_at: "t",
           updated_at: "t",
-          cluster_id: "billing_payments",
+          cluster_id: "billing",
         },
       ],
       [
@@ -86,7 +86,7 @@ describe("HUD", () => {
           source_id: null,
           created_at: "t",
           updated_at: "t",
-          cluster_id: "incidents_ops",
+          cluster_id: "execution_context",
         },
       ],
     ]);

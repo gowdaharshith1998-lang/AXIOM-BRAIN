@@ -1,18 +1,12 @@
 import * as THREE from "three";
 
 import { HEX_CLUSTER_CENTROIDS } from "@/lib/hex-layout";
+import { SUPER_CLUSTER_IDS, type SuperClusterId } from "@/lib/cluster-reframe";
 
-export const CLUSTER_IDS = [
-  "billing_payments",
-  "incidents_ops",
-  "engineering_code",
-  "people_teams",
-  "decisions_policy",
-  "customer_support",
-  "growth_product",
-] as const;
+export const CLUSTER_IDS = SUPER_CLUSTER_IDS;
 
-export type ClusterId = (typeof CLUSTER_IDS)[number];
+// Phase 5.12: frontend-visible super-clusters. Kept as ClusterId to minimize ripple.
+export type ClusterId = SuperClusterId;
 
 // Tab order for the Company Brain SVG overlay clusters (Phase 5.11).
 // This is the canonical keyboard traversal order for focusable hit-regions.
@@ -38,23 +32,27 @@ export const HUB_CENTROID_FRAC = { x: 0.474, y: 0.368 } as const;
 export const HUB_COLOR = "#53a6ff";
 
 export const CLUSTER_LABELS: Record<ClusterId, string> = {
-  billing_payments: "Billing & Payments",
-  incidents_ops: "Incidents & Ops",
-  engineering_code: "Engineering & Code",
+  company_knowledge: "Company Knowledge",
+  execution_context: "Execution Context",
+  customers: "Customers",
+  policies: "Policies",
+  receipts: "Receipts",
+  agents: "Agents",
+  governance: "Governance",
   people_teams: "People & Teams",
-  decisions_policy: "Decisions & Policy",
-  customer_support: "Customer Support",
-  growth_product: "Growth & Product",
+  billing: "Billing",
 };
 
 export const CLUSTER_COLORS: Record<ClusterId, string> = {
-  billing_payments: "#ec4899",
-  incidents_ops: "#ef4444",
-  engineering_code: "#84cc16",
-  people_teams: "#eab308",
-  decisions_policy: "#a855f7",
-  customer_support: "#06b6d4",
-  growth_product: "#22c55e",
+  company_knowledge: "#00E5D8",
+  execution_context: "#2B7FFF",
+  customers: "#4DD3B8",
+  policies: "#4DD3B8",
+  receipts: "#4DD3B8",
+  agents: "#8B5CF6",
+  governance: "#6B4FE0",
+  people_teams: "#4DD3B8",
+  billing: "#4DD3B8",
 };
 
 export const CLUSTER_CENTROID_RADIUS = 90;

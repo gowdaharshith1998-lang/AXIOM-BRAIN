@@ -12,7 +12,7 @@ export type ArrivalParticle = {
 };
 
 export function arrivalColorForCluster(clusterId?: string | null): string {
-  return isClusterId(clusterId) ? CLUSTER_COLORS[clusterId] : "#a855f7";
+  return isClusterId(clusterId) ? CLUSTER_COLORS[clusterId] : "#E8F0FF";
 }
 
 export function arrivalPulseState(ageMs: number): { radius: number; opacity: number; alive: boolean } {

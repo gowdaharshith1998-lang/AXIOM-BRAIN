@@ -3,13 +3,15 @@ import * as THREE from "three";
 import { type ClusterId } from "@/lib/cluster-layout";
 
 const ICONS: Record<ClusterId, string> = {
-  billing_payments: "$",
-  incidents_ops: "!",
-  engineering_code: "{}",
+  company_knowledge: "CK",
+  execution_context: "EX",
+  customers: "CU",
+  policies: "PO",
+  receipts: "RC",
+  agents: "AG",
+  governance: "GV",
   people_teams: "::",
-  decisions_policy: "OK",
-  customer_support: "?",
-  growth_product: "UP",
+  billing: "$",
 };
 
 export function iconTextForCluster(cluster: ClusterId): string {
@@ -31,7 +33,7 @@ export function createClusterHubIconSprite(cluster: ClusterId): THREE.Sprite {
   if (ctx) {
     ctx.clearRect(0, 0, 128, 128);
     ctx.fillStyle = "rgba(255,255,255,0.95)";
-    ctx.font = cluster === "engineering_code" ? "700 42px ui-monospace" : "700 58px ui-monospace";
+    ctx.font = cluster === "execution_context" ? "700 42px ui-monospace" : "700 58px ui-monospace";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(iconTextForCluster(cluster), 64, 66);

@@ -4,18 +4,18 @@ import { createClusterHubIconSprite, iconTextForCluster } from "@/components/Clu
 
 describe("ClusterHubIcon", () => {
   it("maps service identity icons to each cluster", () => {
-    expect(iconTextForCluster("billing_payments")).toBe("$");
-    expect(iconTextForCluster("incidents_ops")).toBe("!");
-    expect(iconTextForCluster("engineering_code")).toBe("{}");
+    expect(iconTextForCluster("billing")).toBe("$");
+    expect(iconTextForCluster("execution_context")).toBe("EX");
+    expect(iconTextForCluster("company_knowledge")).toBe("CK");
   });
 
   it("creates a four world unit icon sprite", () => {
-    const sprite = createClusterHubIconSprite("customer_support");
+    const sprite = createClusterHubIconSprite("customers");
     expect(sprite.scale.x).toBe(4);
     expect(sprite.userData.kind).toBe("cluster-hub-icon");
   });
 
   it("maps growth to an ASCII trend label", () => {
-    expect(iconTextForCluster("growth_product")).toBe("UP");
+    expect(iconTextForCluster("governance")).toBe("GV");
   });
 });

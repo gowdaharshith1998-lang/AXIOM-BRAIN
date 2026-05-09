@@ -14,14 +14,14 @@ import { CLUSTER_CENTROIDS } from "@/lib/cluster-layout";
 
 describe("ClusterBracketLabel", () => {
   it("renders the cluster label and count", () => {
-    render(<ClusterBracketLabel cluster="billing_payments" count={961} />);
-    expect(screen.getByText("BILLING & PAYMENTS")).toBeInTheDocument();
+    render(<ClusterBracketLabel cluster="company_knowledge" count={961} />);
+    expect(screen.getByText("COMPANY KNOWLEDGE")).toBeInTheDocument();
     expect(screen.getByText("961 entities · 0.0K LOC")).toBeInTheDocument();
   });
 
   it("colors labels by cluster", () => {
-    const div = createClusterBracketElement("incidents_ops", 4);
-    expect(div.style.color).toBe("rgb(239, 68, 68)");
+    const div = createClusterBracketElement("execution_context", 4);
+    expect(div.style.color).toBe("rgb(43, 127, 255)");
   });
 
   it("positions labels outside the constellation", () => {
@@ -40,11 +40,11 @@ describe("ClusterBracketLabel", () => {
   });
 
   it("formats labels in uppercase", () => {
-    expect(clusterLabelText("customer_support")).toBe("CUSTOMER SUPPORT");
+    expect(clusterLabelText("customers")).toBe("CUSTOMERS");
   });
 
   it("renders count, loc, and health pill metadata", () => {
-    const div = createClusterBracketElement("billing_payments", 4, {
+    const div = createClusterBracketElement("billing", 4, {
       entities: 412,
       loc: "24.8K",
       health: "degraded",
@@ -54,8 +54,8 @@ describe("ClusterBracketLabel", () => {
   });
 
   it("flashes when health status transitions", () => {
-    const div = createClusterBracketElement("billing_payments", 4, { health: "healthy" });
-    updateClusterBracketElement(div, "billing_payments", 4, { health: "critical" });
+    const div = createClusterBracketElement("billing", 4, { health: "healthy" });
+    updateClusterBracketElement(div, "billing", 4, { health: "critical" });
     expect(div.classList.contains("health-flash")).toBe(true);
     expect(div.querySelector(".health-critical")?.textContent).toBe("critical");
   });

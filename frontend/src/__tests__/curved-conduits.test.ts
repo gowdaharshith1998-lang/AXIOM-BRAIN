@@ -11,9 +11,9 @@ import {
 import { ParticleFlowController } from "@/lib/particle-flow";
 
 const edge = {
-  key: "billing_payments:incidents_ops",
-  sourceCluster: "billing_payments" as const,
-  targetCluster: "incidents_ops" as const,
+  key: "billing:execution_context",
+  sourceCluster: "billing" as const,
+  targetCluster: "execution_context" as const,
 };
 
 describe("curved conduits", () => {

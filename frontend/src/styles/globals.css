@@ -17,8 +17,12 @@ body {
   overflow: hidden;
 }
 
+.axiom-labels {
+  padding: 16px;
+}
+
 .axiom-value-flash {
-  color: #ec4899;
+  color: #00e5d8;
   transition: color 200ms ease-out;
 }
 
