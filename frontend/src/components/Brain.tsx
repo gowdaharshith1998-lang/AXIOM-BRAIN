@@ -24,6 +24,7 @@ import { easeInOutCubic, RESET_CAMERA_MS, shouldResetCameraFromKey } from "@/lib
 import { AegisGate, createAegisRing } from "@/lib/aegis-gate";
 import { AegisParticleController } from "@/lib/aegis-particles";
 import { flyToEntity } from "@/lib/camera-flyto";
+import { computeClusterForceCentroids, type ClusterCentroids } from "@/lib/cluster-force-layout";
 import {
   CLUSTER_CENTROIDS,
   CLUSTER_COLORS,
@@ -40,6 +41,7 @@ import {
   computeInterHubEdges,
   computeVisibleEntitySlots,
   entityImportance,
+  HEX_CLUSTER_CENTROIDS,
   findEntityPosition,
   MAX_VISIBLE_PER_CLUSTER,
   type InterHubEdge,
@@ -150,6 +152,7 @@ export function Brain() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const focusTargetRef = useRef<THREE.Vector3 | null>(null);
   const liveEventsRef = useRef<BrainEvent[]>([]);
+  const centroidsRef = useRef<ClusterCentroids | null>(null);
   const [sceneReady, setSceneReady] = useState(false);
 
   const setFps = useBrainStore((s) => s.setFps);
@@ -215,8 +218,20 @@ export function Brain() {
       }));
     const reframedById = (): Map<string, Entity> => new Map(reframedEntities().map((e) => [e.id, e]));
 
-    let slots = computeVisibleEntitySlots(reframedEntities(), CLUSTER_IDS, maxVisiblePerCluster);
-    let interHubEdges = computeInterHubEdges(edges.values(), reframedById());
+    if (!centroidsRef.current) {
+      const { centroids } = computeClusterForceCentroids({
+        clusterIds: CLUSTER_IDS,
+        entitiesById: reframedById(),
+        edges: edges.values(),
+        initialCentroids: HEX_CLUSTER_CENTROIDS,
+        seed: 1337,
+      });
+      centroidsRef.current = centroids;
+    }
+    const centroids = centroidsRef.current ?? CLUSTER_CENTROIDS;
+
+    let slots = computeVisibleEntitySlots(reframedEntities(), CLUSTER_IDS, maxVisiblePerCluster, centroids);
+    let interHubEdges = computeInterHubEdges(edges.values(), reframedById(), centroids);
     let conduitPaths = conduitPathsForEdges(interHubEdges);
     const positionsById = new Map(slots.map((slot) => [slot.entity.id, slot.position.clone()]));
     const idByInstanceIndex = slots.map((slot) => slot.entity.id);
@@ -289,7 +304,7 @@ export function Brain() {
     const initialLoc = clusterLocById(entities.values());
     const initialHealth = useBrainStore.getState().clusterHealth;
     for (const cluster of CLUSTER_IDS) {
-      const hub = CLUSTER_CENTROIDS[cluster];
+      const hub = centroids[cluster];
       const anchor = clusterLabelAnchor(hub);
       const div = createClusterBracketElement(cluster, initialCounts.get(cluster) ?? 0, {
         entities: initialCounts.get(cluster) ?? 0,
@@ -305,7 +320,7 @@ export function Brain() {
 
     const bracketLines = new THREE.Group();
     for (const cluster of CLUSTER_IDS) {
-      const hub = CLUSTER_CENTROIDS[cluster];
+      const hub = centroids[cluster];
       const anchor = clusterLabelAnchor(hub);
       const points = bracketLinePoints(hub, anchor);
       const geometry = new THREE.BufferGeometry().setFromPoints(points);
@@ -359,17 +374,17 @@ export function Brain() {
           roughness: 0.35,
         }),
       );
-      mesh.position.copy(CLUSTER_CENTROIDS[cluster]);
+      mesh.position.copy(centroids[cluster]);
       mesh.scale.setScalar(1.3);
       mesh.userData = { cluster };
       hubMeshes.set(cluster, mesh);
       scene.add(mesh);
       const icon = createClusterHubIconSprite(cluster);
-      icon.position.copy(CLUSTER_CENTROIDS[cluster]).add(new THREE.Vector3(0, 0, 0.5));
+      icon.position.copy(centroids[cluster]).add(new THREE.Vector3(0, 0, 0.5));
       hubIconSprites.push(icon);
       scene.add(icon);
       const gateRing = createAegisRing(cluster);
-      gateRing.position.copy(CLUSTER_CENTROIDS[cluster]);
+      gateRing.position.copy(centroids[cluster]);
       gateRing.rotation.x = Math.PI / 2;
       scene.add(gateRing);
       aegisGates.set(cluster, new AegisGate(cluster, gateRing, CLUSTER_COLORS[cluster]));
@@ -462,7 +477,7 @@ export function Brain() {
         return;
       }
       const selected = entities.get(selectedId);
-      const position = findEntityPosition(selected, positionsById);
+      const position = findEntityPosition(selected, positionsById, centroids);
       if (!position) {
         ring.visible = false;
         return;
@@ -525,7 +540,7 @@ export function Brain() {
         const cluster = hitHubCluster();
         if (cluster) {
           selectCluster(cluster);
-          focusTargetRef.current = CLUSTER_CENTROIDS[cluster].clone();
+          focusTargetRef.current = centroids[cluster].clone();
           return;
         }
         select(null);
@@ -558,7 +573,7 @@ export function Brain() {
       const id = (ev as CustomEvent<{ id?: string }>).detail?.id;
       if (!id) return;
       const entity = entities.get(id);
-      const position = findEntityPosition(entity, positionsById);
+      const position = findEntityPosition(entity, positionsById, centroids);
       if (!position) return;
       select(id);
       focusTargetRef.current = null;
@@ -606,7 +621,7 @@ export function Brain() {
           (obj.material as THREE.Material).dispose();
         }
       });
-      interHubEdges = computeInterHubEdges(edges.values(), reframedById());
+      interHubEdges = computeInterHubEdges(edges.values(), reframedById(), centroids);
       conduitPaths = conduitPathsForEdges(interHubEdges);
       const conduitBuild = buildConduitLines(conduitPaths);
       interHubLines = conduitBuild.group;
@@ -645,11 +660,11 @@ export function Brain() {
           const cluster = clusterIdFor(entity);
           const clusterVisible = slots.filter((slot) => slot.clusterId === cluster).length;
           if (cluster && clusterVisible < maxVisiblePerCluster) {
-            slots = computeVisibleEntitySlots(reframedEntities(), CLUSTER_IDS, maxVisiblePerCluster);
+            slots = computeVisibleEntitySlots(reframedEntities(), CLUSTER_IDS, maxVisiblePerCluster, centroids);
             syncSlotIndexes();
             rebuildEdges();
           }
-          const position = findEntityPosition(entity, positionsById) ?? new THREE.Vector3();
+          const position = findEntityPosition(entity, positionsById, centroids) ?? new THREE.Vector3();
           const clusterColor = arrivalColorForCluster(superClusterIdForBackendCluster(entity.cluster_id) ?? null);
           spawnEntityArrival(particleSystem, position, new THREE.Color(clusterColor));
           particleSystem.ingestStream(position, clusterColor);
@@ -678,8 +693,8 @@ export function Brain() {
           edges.set(edge.id, edge);
           const previousPairCount = interHubEdges.length;
           rebuildEdges();
-          const src = findEntityPosition(entities.get(edge.source_id), positionsById);
-          const tgt = findEntityPosition(entities.get(edge.target_id), positionsById);
+          const src = findEntityPosition(entities.get(edge.source_id), positionsById, centroids);
+          const tgt = findEntityPosition(entities.get(edge.target_id), positionsById, centroids);
           if (src && tgt) {
             spawnEdgeTrace(particleSystem, src, tgt, "#ffffff");
             flashByEdge.set(edge.id, nowMs + FLASH_MS);
@@ -709,7 +724,7 @@ export function Brain() {
           const existing = entities.get(entityId);
           if (!existing) continue;
           entities.set(entityId, { ...existing, cluster_id: payload.cluster_id });
-          slots = computeVisibleEntitySlots(reframedEntities(), CLUSTER_IDS, maxVisiblePerCluster);
+          slots = computeVisibleEntitySlots(reframedEntities(), CLUSTER_IDS, maxVisiblePerCluster, centroids);
           syncSlotIndexes();
           rebuildEdges();
           refreshClusterLabels();
@@ -764,7 +779,7 @@ export function Brain() {
     const fpsGuard = new FpsGuard();
     const offBudgetChange = fpsGuard.onBudgetChange((nextBudget) => {
       maxVisiblePerCluster = nextBudget;
-      slots = computeVisibleEntitySlots(entities.values(), CLUSTER_IDS, maxVisiblePerCluster);
+      slots = computeVisibleEntitySlots(reframedEntities(), CLUSTER_IDS, maxVisiblePerCluster, centroids);
       syncSlotIndexes();
       rebuildEdges();
     });
@@ -809,7 +824,7 @@ export function Brain() {
       aegisParticles.update(t);
       const selectedId = useBrainStore.getState().selectedId;
       if (selectedId) {
-        const target = findEntityPosition(entities.get(selectedId), positionsById);
+        const target = findEntityPosition(entities.get(selectedId), positionsById, centroids);
         if (target) {
           const desired = target.clone().add(new THREE.Vector3(0, 18, 55));
           if (focusTargetRef.current) {

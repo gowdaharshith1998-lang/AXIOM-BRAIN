@@ -52,12 +52,15 @@ export function sortedVisibleEntities(entities: Entity[], maxVisible = MAX_VISIB
     .slice(0, maxVisible);
 }
 
-export function computeStarburstPositions(entities: Entity[]): Map<string, THREE.Vector3> {
+export function computeStarburstPositions(
+  entities: Entity[],
+  centroids: Record<ClusterId, THREE.Vector3> = HEX_CLUSTER_CENTROIDS,
+): Map<string, THREE.Vector3> {
   const positioned = new Map<string, THREE.Vector3>();
   const visible = sortedVisibleEntities(entities);
   const cluster = visible.find((entity) => entity.cluster_id)?.cluster_id;
-  if (!cluster || !(cluster in HEX_CLUSTER_CENTROIDS)) return positioned;
-  const centroid = HEX_CLUSTER_CENTROIDS[cluster as ClusterId];
+  if (!cluster || !(cluster in centroids)) return positioned;
+  const centroid = centroids[cluster as ClusterId];
 
   let index = 0;
   for (let ring = 0; ring < CLUSTER_VISIBLE_SLOTS.length; ring++) {
@@ -85,6 +88,7 @@ export function computeVisibleEntitySlots(
   entities: Iterable<Entity>,
   clusterIds: readonly ClusterId[],
   maxVisiblePerCluster = MAX_VISIBLE_PER_CLUSTER,
+  centroids: Record<ClusterId, THREE.Vector3> = HEX_CLUSTER_CENTROIDS,
 ): VisibleEntitySlot[] {
   const byCluster = new Map<ClusterId, Entity[]>();
   for (const id of clusterIds) byCluster.set(id, []);
@@ -98,7 +102,7 @@ export function computeVisibleEntitySlots(
   const slotsOut: VisibleEntitySlot[] = [];
   for (const clusterId of clusterIds) {
     const visible = sortedVisibleEntities(byCluster.get(clusterId) ?? [], maxVisiblePerCluster);
-    const centroid = HEX_CLUSTER_CENTROIDS[clusterId];
+    const centroid = centroids[clusterId];
     let index = 0;
     for (let ring = 0; ring < CLUSTER_VISIBLE_SLOTS.length; ring++) {
       const slots = CLUSTER_VISIBLE_SLOTS[ring];
@@ -129,13 +133,14 @@ export function countEntitiesByCluster(entities: Iterable<Entity>, clusterId: Cl
 export function computeInterHubEdges(
   edges: Iterable<Edge>,
   entitiesById: Map<string, Entity>,
+  centroids: Record<ClusterId, THREE.Vector3> = HEX_CLUSTER_CENTROIDS,
 ): InterHubEdge[] {
   const pairs = new Map<string, InterHubEdge>();
   for (const edge of edges) {
     const sourceCluster = entitiesById.get(edge.source_id)?.cluster_id as ClusterId | undefined;
     const targetCluster = entitiesById.get(edge.target_id)?.cluster_id as ClusterId | undefined;
     if (!sourceCluster || !targetCluster || sourceCluster === targetCluster) continue;
-    if (!(sourceCluster in HEX_CLUSTER_CENTROIDS) || !(targetCluster in HEX_CLUSTER_CENTROIDS)) continue;
+    if (!(sourceCluster in centroids) || !(targetCluster in centroids)) continue;
     const sorted = [sourceCluster, targetCluster].sort() as [ClusterId, ClusterId];
     const key = `${sorted[0]}:${sorted[1]}`;
     if (!pairs.has(key)) pairs.set(key, { key, sourceCluster: sorted[0], targetCluster: sorted[1] });
@@ -146,11 +151,12 @@ export function computeInterHubEdges(
 export function findEntityPosition(
   entity: Entity | undefined,
   positionsById: Map<string, THREE.Vector3>,
+  centroids: Record<ClusterId, THREE.Vector3> = HEX_CLUSTER_CENTROIDS,
 ): THREE.Vector3 | null {
   if (!entity) return null;
   const visible = positionsById.get(entity.id);
   if (visible) return visible.clone();
   const cluster = entity.cluster_id as ClusterId | undefined;
-  if (cluster && cluster in HEX_CLUSTER_CENTROIDS) return HEX_CLUSTER_CENTROIDS[cluster].clone();
+  if (cluster && cluster in centroids) return centroids[cluster].clone();
   return null;
 }

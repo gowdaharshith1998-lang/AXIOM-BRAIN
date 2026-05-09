@@ -127,6 +127,7 @@ export function clusterGravityDampingFactor(distance: number): number {
  */
 export function clusterGravityForce(
   strength: number = CLUSTER_GRAVITY_DEFAULT,
+  centroids: Record<ClusterId, THREE.Vector3> = CLUSTER_CENTROIDS,
 ): ClusterGravityForce {
   let nodes: ClusterGravityNode[] = [];
   let s = strength;
@@ -135,7 +136,7 @@ export function clusterGravityForce(
     if (s === 0) return;
     for (const node of nodes) {
       if (!isClusterId(node.cluster_id)) continue;
-      const centroid = CLUSTER_CENTROIDS[node.cluster_id];
+      const centroid = centroids[node.cluster_id];
       if (!centroid) continue;
       const x = node.x ?? 0;
       const y = node.y ?? 0;
