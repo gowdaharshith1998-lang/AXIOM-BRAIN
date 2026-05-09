@@ -5,8 +5,8 @@ import random
 from datetime import datetime
 from uuid import uuid4
 
-from axiom.govern.ledger import synthetic_receipt
-from axiom.govern.policy_evaluator import SyntheticPolicyEvaluator
+from axiom.govern.ledger import demo_receipt
+from axiom.govern.policy_evaluator import DemoPolicyEvaluator
 from axiom.ingest.broadcaster import EventBroadcaster
 from axiom.organize.clusters import CLUSTER_IDS
 
@@ -18,7 +18,7 @@ def _now() -> str:
     return datetime.utcnow().isoformat()
 
 
-def synthetic_action_payload(rng: random.Random | None = None) -> dict[str, object]:
+def demo_action_payload(rng: random.Random | None = None) -> dict[str, object]:
     source = rng or random.Random()
     cluster = source.choice(CLUSTER_IDS)
     intent = source.choice(INTENTS)
@@ -29,21 +29,22 @@ def synthetic_action_payload(rng: random.Random | None = None) -> dict[str, obje
         "intent": intent,
         "skill_called": f"skills.{cluster}.lookup",
         "timestamp": _now(),
+        "demo": True,
     }
 
 
-async def emit_agent_actions(
+async def emit_demo_agent_actions(
     broadcaster: EventBroadcaster,
     *,
-    evaluator: SyntheticPolicyEvaluator | None = None,
+    evaluator: DemoPolicyEvaluator | None = None,
     rng: random.Random | None = None,
 ) -> None:
     source = rng or random.Random()
-    policy = evaluator or SyntheticPolicyEvaluator(rng=source)
+    policy = evaluator or DemoPolicyEvaluator(rng=source)
     receipt_index = 0
     while True:
         await asyncio.sleep(source.uniform(4, 8))
-        payload = synthetic_action_payload(source)
+        payload = demo_action_payload(source)
         await broadcaster.publish(
             {
                 "type": "agent_action",
@@ -76,7 +77,7 @@ async def emit_agent_actions(
                 "type": "receipt_added",
                 "source_id": None,
                 "persisted_id": payload["action_id"],
-                "payload": synthetic_receipt(
+                "payload": demo_receipt(
                     action_id=str(payload["action_id"]),
                     decision=decision.decision,
                     agent_name=str(payload["agent_name"]),

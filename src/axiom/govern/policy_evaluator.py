@@ -18,7 +18,7 @@ class PolicyDecision:
     policy_id: str
 
 
-class SyntheticPolicyEvaluator:
+class DemoPolicyEvaluator:
     def __init__(self, deny_rate: float = 0.15, rng: random.Random | None = None) -> None:
         self.deny_rate = deny_rate
         self.rng = rng or random.Random()

@@ -4,7 +4,7 @@ import hashlib
 from datetime import datetime
 
 
-def synthetic_receipt(
+def demo_receipt(
     *,
     action_id: str,
     decision: str,
@@ -22,4 +22,5 @@ def synthetic_receipt(
         "agent_name": agent_name,
         "merkle_root": merkle_root,
         "timestamp": datetime.utcnow().isoformat(),
+        "demo": True,
     }

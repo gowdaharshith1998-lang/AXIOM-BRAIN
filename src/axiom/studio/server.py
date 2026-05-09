@@ -13,8 +13,8 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from axiom.api.search import EntitySearchResult, search_entities
-from axiom.govern.agent_actions import emit_agent_actions
-from axiom.govern.warden import emit_warden_insights
+from axiom.govern.agent_actions import emit_demo_agent_actions
+from axiom.govern.warden import emit_demo_warden_insights
 from axiom.ingest.broadcaster import EventBroadcaster
 from axiom.ingest.pipeline import IngestPipeline
 from axiom.organize.agent import OrganizerAgent
@@ -80,8 +80,8 @@ def create_app(
                 await asyncio.sleep(15)
 
         health_task = asyncio.create_task(cluster_health_loop())
-        agent_action_task = asyncio.create_task(emit_agent_actions(broadcaster))
-        warden_task = asyncio.create_task(emit_warden_insights(broadcaster, session_local))
+        agent_action_task = asyncio.create_task(emit_demo_agent_actions(broadcaster))
+        warden_task = asyncio.create_task(emit_demo_warden_insights(broadcaster, session_local))
         app.state.cluster_health_task = health_task
         app.state.agent_action_task = agent_action_task
         app.state.warden_task = warden_task

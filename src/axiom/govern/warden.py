@@ -21,7 +21,7 @@ MESSAGES = (
 )
 
 
-def build_insight_payload(
+def build_demo_insight_payload(
     entity_ids: list[str],
     rng: random.Random | None = None,
 ) -> dict[str, object]:
@@ -34,10 +34,11 @@ def build_insight_payload(
         "related_entity_ids": entity_ids[:3],
         "recommended_actions": ["Open RFC", "Compare incident history", "Notify service owner"],
         "timestamp": datetime.utcnow().isoformat(),
+        "demo": True,
     }
 
 
-async def emit_warden_insights(
+async def emit_demo_warden_insights(
     broadcaster: EventBroadcaster,
     session_factory: sessionmaker[Any],
     *,
@@ -48,7 +49,7 @@ async def emit_warden_insights(
         await asyncio.sleep(source.uniform(30, 90))
         with session_factory() as session:
             ids = list(session.execute(select(Entity.id).limit(12)).scalars())
-        payload = build_insight_payload(ids, source)
+        payload = build_demo_insight_payload(ids, source)
         await broadcaster.publish(
             {
                 "type": "insight_flagged",

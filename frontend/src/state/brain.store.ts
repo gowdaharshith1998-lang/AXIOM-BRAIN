@@ -41,6 +41,7 @@ export type AgentActionLog = {
   decision?: "allow" | "deny";
   reason?: string;
   timestamp: string;
+  demo?: boolean;
 };
 
 export type LedgerReceipt = {
@@ -50,6 +51,7 @@ export type LedgerReceipt = {
   agent_name: string;
   merkle_root: string;
   timestamp: string;
+  demo?: boolean;
 };
 
 export type WardenInsight = {
@@ -60,6 +62,7 @@ export type WardenInsight = {
   related_entity_ids: string[];
   recommended_actions: string[];
   timestamp: string;
+  demo?: boolean;
 };
 
 export type BrainFocusMode = "AMBIENT" | "FOCUS_CLUSTER" | "FOCUS_ENTITY";
