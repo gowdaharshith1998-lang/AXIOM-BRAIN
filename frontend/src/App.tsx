@@ -1,11 +1,15 @@
-import { BottomToolbar } from "@/components/BottomToolbar";
-import { Brain } from "@/components/Brain";
-import { CommandPalette } from "@/components/CommandPalette";
-import { InspectorPanel } from "@/components/InspectorPanel";
-import { LedgerRibbon } from "@/components/LedgerRibbon";
-import { SourcesRail } from "@/components/SourcesRail";
-import { useBrainStore } from "@/state/brain.store";
 import { useEffect } from "react";
+
+import { Brain } from "@/components/Brain";
+import { BrainHealthCard } from "@/components/BrainHealthCard";
+import { CommandPalette } from "@/components/CommandPalette";
+import { EdgeLegend } from "@/components/EdgeLegend";
+import { EntityInspector } from "@/components/EntityInspector";
+import { NavRail } from "@/components/NavRail";
+import { QueryBar } from "@/components/QueryBar";
+import { StatusFooter } from "@/components/StatusFooter";
+import { TopHeader } from "@/components/TopHeader";
+import { useBrainStore } from "@/state/brain.store";
 
 export function App() {
   const entityCount = useBrainStore((s) => s.entities.size);
@@ -17,16 +21,17 @@ export function App() {
   }, [entityCount, titleStatus]);
 
   return (
-    <div
-      className={`relative h-full w-full ${connectionStatus === "syncing" ? "bg-[#12081f]" : "bg-[#05050a]"}`}
-    >
-      <SourcesRail />
-      <div className="fixed inset-y-0 left-[220px] right-[320px]">
+    <div className="relative h-screen w-screen overflow-hidden bg-[#05050A]">
+      <NavRail />
+      <TopHeader />
+      <BrainHealthCard />
+      <div className="fixed inset-0 left-[56px] right-0">
         <Brain />
       </div>
-      <InspectorPanel />
-      <LedgerRibbon />
-      <BottomToolbar />
+      <QueryBar />
+      <EdgeLegend />
+      <EntityInspector />
+      <StatusFooter />
       <CommandPalette />
     </div>
   );

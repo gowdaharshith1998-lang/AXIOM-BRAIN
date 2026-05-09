@@ -10,7 +10,7 @@ body,
 
 body {
   margin: 0;
-  background: #0a0a14;
+  background: #05050a;
   color: rgba(255, 255, 255, 0.85);
   font-family: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
@@ -19,6 +19,17 @@ body {
 
 .axiom-labels {
   padding: 16px;
+}
+
+.axiom-labels .axiom-cluster-bracket-label {
+  filter: drop-shadow(0 0 14px currentColor);
+}
+
+.axiom-labels .cluster-name {
+  color: rgba(232, 240, 255, 0.85);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
 }
 
 .axiom-value-flash {
@@ -39,42 +50,10 @@ body {
 
 .axiom-cluster-bracket-label .cluster-meta {
   margin-top: 2px;
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-}
-
-.health-pill {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 9999px;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  margin-top: 4px;
-}
-
-.health-healthy {
-  background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
-  border: 1px solid rgba(34, 197, 94, 0.4);
-}
-
-.health-degraded {
-  background: rgba(234, 179, 8, 0.15);
-  color: #eab308;
-  border: 1px solid rgba(234, 179, 8, 0.4);
-}
-
-.health-critical {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.4);
-}
-
-.health-flash {
-  animation: axiom-health-flash 650ms ease-out;
+  color: rgba(232, 240, 255, 0.55);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
 }
 
 @keyframes axiom-health-shimmer {

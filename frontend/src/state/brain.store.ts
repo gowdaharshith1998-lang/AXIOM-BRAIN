@@ -122,7 +122,7 @@ function resolvePendingEntityFocus(entities: Map<string, Entity>, focus: BrainFo
 
 function focusReducer(prev: BrainFocusState, next: Partial<BrainFocusState>): BrainFocusState {
   const hoveredClusterId = Object.prototype.hasOwnProperty.call(next, "hoveredClusterId")
-    ? next.hoveredClusterId
+    ? (next.hoveredClusterId ?? null)
     : prev.hoveredClusterId;
 
   const merged: BrainFocusState = {

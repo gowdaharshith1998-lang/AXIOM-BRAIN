@@ -16,7 +16,7 @@ describe("brain lobe integration", () => {
     }
   });
 
-  it("overview has seven semantic lobe anchors", () => {
-    expect(CLUSTER_IDS.map((id) => CLUSTER_CENTROIDS[id])).toHaveLength(9);
+  it("overview has ten semantic super-cluster anchors", () => {
+    expect(CLUSTER_IDS.map((id) => CLUSTER_CENTROIDS[id])).toHaveLength(10);
   });
 });

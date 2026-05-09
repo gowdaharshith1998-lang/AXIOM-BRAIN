@@ -58,7 +58,7 @@ describe("ParticleFlowController", () => {
     flow.dispose();
   });
 
-  it("uses the faster inter-hub spawn cadence", () => {
+  it("keeps persistent dotted streams active across conduits", () => {
     const edges = Array.from({ length: 7 }, (_, i) => ({
       key: `billing:execution_context:${i}`,
       sourceCluster: "billing" as const,
@@ -66,7 +66,7 @@ describe("ParticleFlowController", () => {
     }));
     const flow = new ParticleFlowController(edges);
     for (let t = 0; t <= 5000; t += 100) flow.update(t);
-    expect(flow.activeCount()).toBeGreaterThan(30);
+    expect(flow.activeCount()).toBeGreaterThan(20);
     flow.dispose();
   });
 
@@ -82,7 +82,7 @@ describe("ParticleFlowController", () => {
   it("pulse doubles conduit activity window", () => {
     const flow = new ParticleFlowController([edge]);
     flow.pulse(edge, 0);
-    expect(flow.activeCount()).toBe(6);
+    expect(flow.activeCount()).toBeGreaterThan(6);
     flow.dispose();
   });
 });

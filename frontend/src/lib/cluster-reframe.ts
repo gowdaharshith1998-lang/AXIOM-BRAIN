@@ -7,6 +7,7 @@ export const SUPER_CLUSTER_IDS = [
   "policies",
   "receipts",
   "agents",
+  "incidents",
   "governance",
   "people_teams",
   "billing",
@@ -39,9 +40,12 @@ export function superClusterIdForBackendCluster(clusterId?: string | null): Supe
 export function superClusterIdForEntity(entity: Entity | undefined): SuperClusterId | null {
   if (!entity) return null;
 
-  if (entity.cluster_id === "customer_support" && entity.type === "customer") return "customers";
-  if (entity.cluster_id === "decisions_policy" && entity.type === "policy") return "policies";
+  if (entity.type === "customer") return "customers";
+  if (entity.type === "policy") return "policies";
+  if (entity.type === "incident") return "incidents";
+  if (entity.type === "agent") return "agents";
+  if (entity.type === "receipt") return "receipts";
+  if (entity.type === "governance" || entity.type === "merkle_proof") return "governance";
 
   return superClusterIdForBackendCluster(entity.cluster_id);
 }
-

@@ -1,5 +1,5 @@
-import { act, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 
 import { EntityInspector } from "@/components/EntityInspector";
 import { prettyMetadata } from "@/lib/inspector";
@@ -14,8 +14,6 @@ const entity = {
 };
 
 describe("inspector metadata", () => {
-  afterEach(() => vi.useRealTimers());
-
   it("hides null Calibra fields", () => {
     expect(prettyMetadata({ calibra: null, name: "Invoice" })).toBe('{\n  "name": "Invoice"\n}');
   });
@@ -33,17 +31,14 @@ describe("inspector metadata", () => {
     expect(prettyMetadata({ nested: { id: "c1" } })).toBe('{\n  "nested": {\n    "id": "c1"\n  }\n}');
   });
 
-  it("fades out for three hundred ms before unmounting", () => {
-    vi.useFakeTimers();
+  it("renders selected entity overview", () => {
     useBrainStore.setState({
       entities: new Map([["e1", { ...entity, data: { title: "A" } }]]),
       selectedId: "e1",
     });
     render(<EntityInspector />);
-    expect(screen.getByText("e1")).toBeInTheDocument();
-    act(() => useBrainStore.setState({ selectedId: null }));
-    expect(screen.getByText("e1").closest("div[style]")).toHaveStyle({ opacity: "0" });
-    act(() => vi.advanceTimersByTime(300));
-    expect(screen.queryByText("e1")).not.toBeInTheDocument();
+    expect(screen.getAllByText((content) => content.includes("e1")).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Overview").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Trust & Governance")).toBeInTheDocument();
   });
 });

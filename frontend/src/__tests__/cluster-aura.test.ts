@@ -20,8 +20,8 @@ function colorDistance(a: THREE.Color, b: THREE.Color): number {
 }
 
 describe("cluster auras", () => {
-  it("renders seven auras", () => {
-    expect(createClusterAuras()).toHaveLength(9);
+  it("renders one aura per visible super-cluster", () => {
+    expect(createClusterAuras()).toHaveLength(10);
   });
 
   it("matches aura color to cluster id", () => {
@@ -62,7 +62,7 @@ describe("cluster auras", () => {
     expect(aura.material.opacity).toBeLessThanOrEqual(0.06);
   });
 
-  it("toggles visibility for all seven auras", () => {
+  it("toggles visibility for all auras", () => {
     const auras = createClusterAuras();
     setAurasVisible(auras, false);
     expect(auras.every((aura) => aura.visible === false)).toBe(true);
@@ -79,7 +79,7 @@ describe("cluster auras", () => {
     const periods = CLUSTER_IDS.map((_, index) => clusterAuraPeriod(index));
     expect(new Set(periods).size).toBe(CLUSTER_IDS.length);
     expect(Math.min(...periods)).toBe(5000);
-    expect(Math.max(...periods)).toBe(9000);
+    expect(Math.max(...periods)).toBe(9500);
   });
 
   it("updates scale and opacity asynchronously by index", () => {

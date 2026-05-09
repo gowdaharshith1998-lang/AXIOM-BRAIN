@@ -56,6 +56,7 @@ export const TEST_CENTROIDS: ClusterCentroids = {
   customers: new THREE.Vector3(-90, 48, -4),
   policies: new THREE.Vector3(-18, 58, -6),
   agents: new THREE.Vector3(12, 56, -2),
+  incidents: new THREE.Vector3(78, -8, -4),
   billing: new THREE.Vector3(92, 46, -8),
   receipts: new THREE.Vector3(-78, -52, 6),
   governance: new THREE.Vector3(26, -56, 10),
@@ -258,4 +259,3 @@ export function computeClusterForceCentroids(params: ClusterForceLayoutParams): 
 
   return { centroids: normalizeToBounds(pos, bounds), edgeCounts };
 }
-

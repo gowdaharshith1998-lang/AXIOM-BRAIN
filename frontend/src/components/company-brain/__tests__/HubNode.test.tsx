@@ -62,7 +62,7 @@ describe("HubNode (spec R4) structure", () => {
 
   it("hub ring-pulse element is present with the pulse class in normal motion mode", () => {
     const matchMedia = vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() });
-    // @ts-expect-error test shim
+    // @ts-ignore test shim
     window.matchMedia = matchMedia;
     const { container } = render(<Harness />);
     const ring = container.querySelector('[data-role="hub-ring-pulse"]');
@@ -72,7 +72,7 @@ describe("HubNode (spec R4) structure", () => {
 
   it("prefers-reduced-motion disables the hub ring-pulse class", () => {
     const matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() });
-    // @ts-expect-error test shim
+    // @ts-ignore test shim
     window.matchMedia = matchMedia;
     const { container } = render(<Harness />);
     const ring = container.querySelector('[data-role="hub-ring-pulse"]');
@@ -87,4 +87,3 @@ describe("HubNode (spec R4) structure", () => {
     expect(glyph?.getAttribute("stroke")).toBe(HUB_COLOR);
   });
 });
-

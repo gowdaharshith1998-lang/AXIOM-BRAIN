@@ -13,31 +13,32 @@ function slot(id: string, x: number, y = 0): VisibleEntitySlot {
     source_id: null,
     created_at: "t",
     updated_at: "t",
-    cluster_id: "billing_payments",
+    cluster_id: "billing",
     composite_importance: 1,
   };
   return {
     entity,
-    clusterId: "billing_payments",
+    clusterId: "billing",
     position: new THREE.Vector3(x, y, 0),
     ring: 1,
     slot: 0,
+    hexRadius: 1.6,
   };
 }
 
 describe("computeIntraClusterEdges", () => {
   it("connects each node to nearest same-cluster neighbors", () => {
-    const edges = computeIntraClusterEdges([slot("a", 0), slot("b", 1), slot("c", 5)], "billing_payments", 1);
-    expect(edges).toContainEqual({ sourceId: "a", targetId: "b", cluster: "billing_payments" });
+    const edges = computeIntraClusterEdges([slot("a", 0), slot("b", 1), slot("c", 5)], "billing", 1);
+    expect(edges).toContainEqual({ sourceId: "a", targetId: "b", cluster: "billing" });
   });
 
   it("deduplicates reciprocal nearest-neighbor edges", () => {
-    const edges = computeIntraClusterEdges([slot("a", 0), slot("b", 1)], "billing_payments", 4);
+    const edges = computeIntraClusterEdges([slot("a", 0), slot("b", 1)], "billing", 4);
     expect(edges).toHaveLength(1);
   });
 
   it("respects max edges per node", () => {
-    const edges = computeIntraClusterEdges([slot("a", 0), slot("b", 1), slot("c", 2), slot("d", 3)], "billing_payments", 1);
+    const edges = computeIntraClusterEdges([slot("a", 0), slot("b", 1), slot("c", 2), slot("d", 3)], "billing", 1);
     expect(edges.length).toBeLessThanOrEqual(3);
   });
 

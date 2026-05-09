@@ -28,6 +28,7 @@ function slot(id: string): VisibleEntitySlot {
     position: CLUSTER_CENTROIDS.billing.clone().add(new THREE.Vector3(18, 0, 0)),
     ring: 1,
     slot: 0,
+    hexRadius: 1.6,
   };
 }
 

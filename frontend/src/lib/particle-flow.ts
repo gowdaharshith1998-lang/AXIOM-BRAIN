@@ -1,7 +1,7 @@
 import * as THREE from "three";
 
 import { CLUSTER_COLORS, CLUSTER_CENTROIDS, type ClusterId } from "@/lib/cluster-layout";
-import { conduitPathsForEdges, pointAtPathT, tangentAngleAtPathT, type ConduitPath } from "@/lib/curved-conduits";
+import { conduitPathsForEdges, pointAtPathT, type ConduitPath } from "@/lib/curved-conduits";
 import type { InterHubEdge } from "@/lib/hex-layout";
 
 export type FlowParticle = {
@@ -14,14 +14,18 @@ export type FlowParticle = {
   durationMs: number;
   burst: boolean;
   trail: boolean;
+  phase?: number;
+  sourceCluster?: ClusterId;
+  targetCluster?: ClusterId;
 };
 
-export function particleColorForClusters(sourceCluster: ClusterId, targetCluster: ClusterId): THREE.Color {
-  return new THREE.Color(CLUSTER_COLORS[sourceCluster]).lerp(new THREE.Color(CLUSTER_COLORS[targetCluster]), 0.5);
+export function particleColorForClusters(sourceCluster: ClusterId, targetCluster: ClusterId, t = 0.5): THREE.Color {
+  return new THREE.Color(CLUSTER_COLORS[sourceCluster]).lerp(new THREE.Color(CLUSTER_COLORS[targetCluster]), t);
 }
 
 export function particlePositionAt(particle: FlowParticle, nowMs: number): THREE.Vector3 {
-  const t = THREE.MathUtils.clamp((nowMs - particle.startedAt) / particle.durationMs, 0, 1);
+  const raw = (nowMs - particle.startedAt) / particle.durationMs + (particle.phase ?? 0);
+  const t = particle.phase === undefined || particle.burst ? THREE.MathUtils.clamp(raw, 0, 1) : raw - Math.floor(raw);
   if (particle.path) return pointAtPathT(particle.path, t);
   return particle.source.clone().lerp(particle.target, t);
 }
@@ -31,25 +35,27 @@ export class ParticleFlowController {
   private readonly maxParticles: number;
   private readonly sprites: THREE.Sprite[] = [];
   private particles: FlowParticle[] = [];
+  private readonly materialMap = new WeakMap<THREE.Sprite, THREE.SpriteMaterial>();
   private edges: ConduitPath[] = [];
-  private nextSpawnByEdge = new Map<string, number>();
   private pulseUntilByEdge = new Map<string, number>();
-  private readonly chevronMaterial: THREE.SpriteMaterial;
 
   constructor(edges: InterHubEdge[] | ConduitPath[], maxParticles = 384) {
     this.maxParticles = maxParticles;
     this.points = new THREE.Group();
-    this.chevronMaterial = new THREE.SpriteMaterial({
-      map: createChevronTexture(),
-      color: "#ffffff",
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
+    const texture = createDotTexture();
     for (let i = 0; i < maxParticles; i++) {
-      const sprite = new THREE.Sprite(this.chevronMaterial.clone());
+      const material = new THREE.SpriteMaterial({
+        map: texture,
+        color: "#ffffff",
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const sprite = new THREE.Sprite(material);
       sprite.visible = false;
-      sprite.scale.set(1.5, 1.5, 1);
+      sprite.scale.set(0.55, 0.55, 1);
+      this.materialMap.set(sprite, material);
       this.sprites.push(sprite);
       this.points.add(sprite);
     }
@@ -58,17 +64,32 @@ export class ParticleFlowController {
 
   setEdges(edges: InterHubEdge[] | ConduitPath[], nowMs: number): void {
     this.edges = edges.length > 0 && "points" in edges[0] ? (edges as ConduitPath[]) : conduitPathsForEdges(edges as InterHubEdge[]);
-    for (const edge of edges) {
-      if (!this.nextSpawnByEdge.has(edge.key)) {
-        this.nextSpawnByEdge.set(edge.key, nowMs + spawnDelay(edge.key));
+    const persistent: FlowParticle[] = [];
+    for (const edge of this.edges.slice(0, 15)) {
+      const particleCount = Math.min(8, Math.max(4, Math.round(4 + Math.min(edge.weight ?? 1, 16) / 4)));
+      for (let i = 0; i < particleCount; i++) {
+        persistent.push({
+          edgeKey: edge.key,
+          source: CLUSTER_CENTROIDS[edge.sourceCluster].clone(),
+          target: CLUSTER_CENTROIDS[edge.targetCluster].clone(),
+          path: edge.points,
+          color: particleColorForClusters(edge.sourceCluster, edge.targetCluster),
+          startedAt: nowMs - i * 260,
+          durationMs: traversalMs(edge.key),
+          burst: false,
+          trail: false,
+          phase: i / particleCount,
+          sourceCluster: edge.sourceCluster,
+          targetCluster: edge.targetCluster,
+        });
       }
     }
+    this.particles = persistent.slice(0, this.maxParticles);
   }
 
   burst(edge: InterHubEdge, nowMs: number): void {
-    for (let i = 0; i < 3; i++) {
-      this.spawn(this.edgePath(edge), nowMs + i * 120, true);
-    }
+    const path = this.edgePath(edge);
+    for (let i = 0; i < 3; i++) this.spawnBurst(path, nowMs + i * 120, false);
   }
 
   pulse(edge: InterHubEdge, nowMs: number): void {
@@ -77,25 +98,27 @@ export class ParticleFlowController {
   }
 
   update(nowMs: number): void {
-    for (const edge of this.edges) {
-      const next = this.nextSpawnByEdge.get(edge.key) ?? nowMs;
-      if (nowMs >= next) {
-        this.spawn(edge, nowMs, false);
-        const pulsing = (this.pulseUntilByEdge.get(edge.key) ?? 0) > nowMs;
-        this.nextSpawnByEdge.set(edge.key, nowMs + spawnDelay(edge.key, nowMs) / (pulsing ? 2 : 1));
-      }
-    }
-
-    this.particles = this.particles.filter((particle) => nowMs - particle.startedAt <= particle.durationMs);
+    this.particles = this.particles.filter((particle) => !particle.burst || nowMs - particle.startedAt <= particle.durationMs);
     const count = Math.min(this.particles.length, this.maxParticles);
     for (let i = 0; i < count; i++) {
       const particle = this.particles[i];
       const position = particlePositionAt(particle, nowMs);
       const sprite = this.sprites[i];
+      const raw = (nowMs - particle.startedAt) / particle.durationMs + (particle.phase ?? 0);
+      const t = particle.burst ? THREE.MathUtils.clamp(raw, 0, 1) : raw - Math.floor(raw);
       sprite.position.copy(position);
-      sprite.material.color.copy(particle.color);
-      sprite.material.opacity = particle.trail ? 0.45 : 0.95;
-      sprite.material.rotation = particle.path ? tangentAngleAtPathT(particle.path, (nowMs - particle.startedAt) / particle.durationMs) : 0;
+      const material = this.materialMap.get(sprite);
+      if (material) {
+        if (particle.sourceCluster && particle.targetCluster) {
+          material.color.copy(particleColorForClusters(particle.sourceCluster, particle.targetCluster, t));
+        } else {
+          material.color.copy(particle.color);
+        }
+        const pulseBoost = (this.pulseUntilByEdge.get(particle.edgeKey) ?? 0) > nowMs ? 1.35 : 1;
+        material.opacity = (particle.trail ? 0.45 : 0.95) * pulseBoost;
+      }
+      const scale = particle.burst ? 0.7 : THREE.MathUtils.lerp(0.42, 0.62, Math.sin(t * Math.PI));
+      sprite.scale.set(scale, scale, 1);
       sprite.visible = true;
     }
     for (let i = count; i < this.sprites.length; i++) this.sprites[i].visible = false;
@@ -106,32 +129,35 @@ export class ParticleFlowController {
   }
 
   dispose(): void {
-    this.sprites.forEach((sprite) => sprite.material.dispose());
-    this.chevronMaterial.map?.dispose();
-    this.chevronMaterial.dispose();
+    const disposed = new Set<THREE.Texture>();
+    this.sprites.forEach((sprite) => {
+      const material = this.materialMap.get(sprite);
+      if (!material) return;
+      if (material.map && !disposed.has(material.map)) {
+        disposed.add(material.map);
+        material.map.dispose();
+      }
+      material.dispose();
+    });
   }
 
-  private spawn(edge: ConduitPath, nowMs: number, burst: boolean): void {
+  private spawnBurst(edge: ConduitPath, nowMs: number, trail: boolean): void {
     if (this.particles.length >= this.maxParticles) this.particles.shift();
-    const particle = {
+    const particle: FlowParticle = {
       edgeKey: edge.key,
       source: CLUSTER_CENTROIDS[edge.sourceCluster].clone(),
       target: CLUSTER_CENTROIDS[edge.targetCluster].clone(),
       path: edge.points,
       color: particleColorForClusters(edge.sourceCluster, edge.targetCluster),
       startedAt: nowMs,
-      durationMs: traversalMs(edge.key),
-      burst,
-      trail: false,
+      durationMs: Math.max(1800, traversalMs(edge.key) * 0.45),
+      burst: true,
+      trail,
+      sourceCluster: edge.sourceCluster,
+      targetCluster: edge.targetCluster,
     };
     this.particles.push(particle);
-    if (this.particles.length >= this.maxParticles) this.particles.shift();
-    this.particles.push({
-      ...particle,
-      color: particle.color.clone().multiplyScalar(0.55),
-      startedAt: nowMs + 80,
-      trail: true,
-    });
+    if (!trail) this.spawnBurst(edge, nowMs + 80, true);
   }
 
   private edgePath(edge: InterHubEdge): ConduitPath {
@@ -139,28 +165,29 @@ export class ParticleFlowController {
   }
 }
 
-export function createChevronTexture(): THREE.CanvasTexture {
+export function createDotTexture(): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
-  canvas.width = 32;
-  canvas.height = 32;
-  if (typeof navigator === "undefined" || !navigator.userAgent.includes("jsdom")) {
-    const ctx = canvas.getContext("2d");
-    if (ctx) {
-      ctx.fillStyle = "#ffffff";
-      ctx.beginPath();
-      ctx.moveTo(25, 16);
-      ctx.lineTo(8, 6);
-      ctx.lineTo(12, 16);
-      ctx.lineTo(8, 26);
-      ctx.closePath();
-      ctx.fill();
-    }
+  canvas.width = 64;
+  canvas.height = 64;
+  const isJsdom = typeof navigator !== "undefined" && navigator.userAgent.includes("jsdom");
+  const ctx = isJsdom ? null : canvas.getContext("2d");
+  if (ctx) {
+    const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 30);
+    gradient.addColorStop(0, "rgba(255,255,255,1)");
+    gradient.addColorStop(0.35, "rgba(255,255,255,0.95)");
+    gradient.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
   return new THREE.CanvasTexture(canvas);
 }
 
+export function createChevronTexture(): THREE.CanvasTexture {
+  return createDotTexture();
+}
+
 export function traversalMs(key: string): number {
-  return 1100 + (hash(key) % 400);
+  return 8000 + (hash(key) % 4000);
 }
 
 export function spawnDelay(key: string, salt = 0): number {

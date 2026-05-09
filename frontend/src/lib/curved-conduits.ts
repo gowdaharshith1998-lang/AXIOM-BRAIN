@@ -11,13 +11,15 @@ export function buildCurvedConduit(
   source: THREE.Vector3,
   target: THREE.Vector3,
   arcHeight = 0.35,
+  bendSign = 1,
 ): THREE.Vector3[] {
   const midpoint = source.clone().lerp(target, 0.5);
   const distance = source.distanceTo(target);
-  const control = midpoint.clone();
-  control.z += distance * arcHeight;
+  const direction = target.clone().sub(source).normalize();
+  const perpendicular = new THREE.Vector3(-direction.y, direction.x, 0.35 * bendSign).normalize();
+  const control = midpoint.clone().addScaledVector(perpendicular, distance * arcHeight * bendSign);
   const points: THREE.Vector3[] = [];
-  const segments = 32;
+  const segments = 56;
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
     const u = 1 - t;
@@ -48,10 +50,18 @@ export function tangentAngleAtPathT(path: THREE.Vector3[], t: number): number {
   return Math.atan2(tangent.y, tangent.x);
 }
 
-export function conduitPathsForEdges(edges: InterHubEdge[]): ConduitPath[] {
-  return edges.map((edge) => ({
+export function conduitPathsForEdges(
+  edges: InterHubEdge[],
+  centroids: Record<ClusterId, THREE.Vector3> = CLUSTER_CENTROIDS,
+): ConduitPath[] {
+  return edges.map((edge, index) => ({
     ...edge,
-    points: buildCurvedConduit(CLUSTER_CENTROIDS[edge.sourceCluster], CLUSTER_CENTROIDS[edge.targetCluster]),
+    points: buildCurvedConduit(
+      centroids[edge.sourceCluster],
+      centroids[edge.targetCluster],
+      0.3,
+      index % 2 === 0 ? 1 : -1,
+    ),
   }));
 }
 
@@ -70,8 +80,9 @@ export function createConduitLine(edge: ConduitPath): THREE.Line {
   const material = new THREE.LineBasicMaterial({
     vertexColors: true,
     transparent: true,
-    opacity: 0.45,
+    opacity: 0.08,
     depthWrite: false,
+    blending: THREE.AdditiveBlending,
   });
   const line = new THREE.Line(geometry, material);
   line.userData = { key: edge.key, sourceCluster: edge.sourceCluster, targetCluster: edge.targetCluster };

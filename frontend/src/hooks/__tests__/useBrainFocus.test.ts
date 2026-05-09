@@ -17,7 +17,7 @@ function resetStore() {
     agentActions: [],
     receipts: [],
     insights: [],
-    focus: { mode: "AMBIENT", clusterId: null, entityId: null, pendingEntityId: null },
+    focus: { mode: "AMBIENT", clusterId: null, entityId: null, pendingEntityId: null, hoveredClusterId: null },
   });
 }
 
@@ -103,6 +103,7 @@ describe("useBrainFocus (focus state machine)", () => {
       clusterId: null,
       entityId: null,
       pendingEntityId: "E-1",
+      hoveredClusterId: null,
     });
     expect(replaceSpy).not.toHaveBeenCalled();
 
@@ -128,6 +129,7 @@ describe("useBrainFocus (focus state machine)", () => {
       clusterId: "documents",
       entityId: "E-1",
       pendingEntityId: null,
+      hoveredClusterId: null,
     });
     expect(replaceSpy).toHaveBeenCalledWith(null, "", "#entity=E-1");
   });
@@ -151,4 +153,3 @@ describe("useBrainFocus (focus state machine)", () => {
     expect(useBrainStore.getState().focus.hoveredClusterId).toBeNull();
   });
 });
-

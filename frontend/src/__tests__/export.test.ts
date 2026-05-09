@@ -26,7 +26,7 @@ describe("visibleExportData", () => {
     expect(data.version).toBe("0.1");
     expect(data.entities).toHaveLength(80);
     expect(data.edges).toHaveLength(1);
-    expect(data.clusters).toHaveLength(9);
+    expect(data.clusters).toHaveLength(10);
   });
 
   it("downloads json through a Blob URL", () => {

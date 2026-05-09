@@ -1,6 +1,5 @@
 import * as THREE from "three";
 
-import { HEX_CLUSTER_CENTROIDS } from "@/lib/hex-layout";
 import { SUPER_CLUSTER_IDS, type SuperClusterId } from "@/lib/cluster-reframe";
 
 export const CLUSTER_IDS = SUPER_CLUSTER_IDS;
@@ -38,6 +37,7 @@ export const CLUSTER_LABELS: Record<ClusterId, string> = {
   policies: "Policies",
   receipts: "Receipts",
   agents: "Agents",
+  incidents: "Incidents",
   governance: "Governance",
   people_teams: "People & Teams",
   billing: "Billing",
@@ -50,6 +50,7 @@ export const CLUSTER_COLORS: Record<ClusterId, string> = {
   policies: "#4DD3B8",
   receipts: "#4DD3B8",
   agents: "#8B5CF6",
+  incidents: "#2B7FFF",
   governance: "#6B4FE0",
   people_teams: "#4DD3B8",
   billing: "#4DD3B8",
@@ -63,6 +64,20 @@ export const CROSS_CLUSTER_EDGE_OPACITY = 0.25;
 export const SAME_CLUSTER_EDGE_OPACITY = 1.0;
 export const CROSS_CLUSTER_EDGE_WIDTH = 0.5;
 export const SAME_CLUSTER_EDGE_WIDTH = 0.7;
+
+// Phase 5.12.4: per-cluster satellite packing radius (world units)
+export const CLUSTER_RADIUS: Record<ClusterId, number> = {
+  company_knowledge: 22,
+  execution_context: 20,
+  customers: 8,
+  policies: 7,
+  receipts: 7,
+  agents: 8,
+  incidents: 8,
+  governance: 8,
+  people_teams: 9,
+  billing: 10,
+};
 
 export function isClusterId(value: unknown): value is ClusterId {
   return typeof value === "string" && (CLUSTER_IDS as readonly string[]).includes(value);
@@ -94,7 +109,18 @@ export function fibonacciSpherePoints(n: number, radius: number): THREE.Vector3[
   return points;
 }
 
-export const CLUSTER_CENTROIDS: Record<ClusterId, THREE.Vector3> = HEX_CLUSTER_CENTROIDS;
+export const CLUSTER_CENTROIDS: Record<ClusterId, THREE.Vector3> = {
+  company_knowledge: new THREE.Vector3(-30, 18, 0),
+  execution_context: new THREE.Vector3(35, 23, -5),
+  policies: new THREE.Vector3(-50, 53, 10),
+  customers: new THREE.Vector3(-80, 13, 5),
+  receipts: new THREE.Vector3(-30, -22, 0),
+  agents: new THREE.Vector3(60, 53, -10),
+  incidents: new THREE.Vector3(75, 13, 0),
+  governance: new THREE.Vector3(60, -17, -5),
+  people_teams: new THREE.Vector3(0, 43, 15),
+  billing: new THREE.Vector3(10, -7, 10),
+};
 
 export type ClusterGravityNode = {
   cluster_id?: string | null;

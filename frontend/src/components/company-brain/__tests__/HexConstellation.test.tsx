@@ -88,7 +88,7 @@ describe("Hex constellation structure (spec, via CompanyBrainGraph)", () => {
 
   it("respects prefers-reduced-motion by disabling ambient breathing markers", () => {
     const matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() });
-    // @ts-expect-error test shim
+    // @ts-ignore test shim
     window.matchMedia = matchMedia;
     const { container } = render(<Harness />);
     const central = container.querySelector('[data-role="central-hex"]');
@@ -99,7 +99,7 @@ describe("Hex constellation structure (spec, via CompanyBrainGraph)", () => {
 
   it("central hex has the breathe animation hook applied in normal motion mode", () => {
     const matchMedia = vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() });
-    // @ts-expect-error test shim
+    // @ts-ignore test shim
     window.matchMedia = matchMedia;
     const { container } = render(<Harness />);
     const central = container.querySelector('[data-role="central-hex"]');
@@ -128,4 +128,3 @@ describe("Hex constellation structure (spec, via CompanyBrainGraph)", () => {
     }
   });
 });
-

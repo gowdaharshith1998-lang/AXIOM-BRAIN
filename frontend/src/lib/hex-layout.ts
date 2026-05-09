@@ -1,7 +1,16 @@
 import * as THREE from "three";
 
+import { CLUSTER_CENTROIDS, CLUSTER_RADIUS } from "@/lib/cluster-layout";
+import { packSatellites, type SatelliteRing } from "@/lib/satellite-pack";
 import type { ClusterId } from "@/lib/cluster-layout";
+import { HEX_NODE_RADIUS } from "@/lib/hex-geometry";
 import type { Edge, Entity } from "@/state/brain.store";
+
+function hashSeed(value: string): number {
+  let out = 0;
+  for (let i = 0; i < value.length; i++) out = (out * 31 + value.charCodeAt(i)) >>> 0;
+  return out;
+}
 
 export const CLUSTER_HUB_SPACING = 90;
 export const CLUSTER_RING_RADIUS = 18;
@@ -9,34 +18,22 @@ export const CLUSTER_RING_STEP = 6;
 export const CLUSTER_VISIBLE_SLOTS = [8, 12, 16, 20, 24] as const;
 export const MAX_VISIBLE_PER_CLUSTER = CLUSTER_VISIBLE_SLOTS.reduce((total, next) => total + next, 0);
 
-export const HEX_CLUSTER_CENTROIDS: Record<ClusterId, THREE.Vector3> = {
-  // 3-row “constellation” arrangement (kept Phase 1).
-  // Left-to-right placement preserves prior spacing while introducing 8–9 super-clusters.
-  customers: new THREE.Vector3(-180, 90, -6),
-  policies: new THREE.Vector3(-90, 90, 0),
-  agents: new THREE.Vector3(90, 90, 0),
-  billing: new THREE.Vector3(180, 90, -2),
-
-  company_knowledge: new THREE.Vector3(-90, 0, 6),
-  execution_context: new THREE.Vector3(90, 0, 6),
-
-  receipts: new THREE.Vector3(-180, -90, -8),
-  governance: new THREE.Vector3(90, -90, 0),
-  people_teams: new THREE.Vector3(180, -90, -2),
-};
+export const HEX_CLUSTER_CENTROIDS: Record<ClusterId, THREE.Vector3> = CLUSTER_CENTROIDS;
 
 export type VisibleEntitySlot = {
   entity: Entity;
   clusterId: ClusterId;
   position: THREE.Vector3;
-  ring: number;
+  ring: SatelliteRing;
   slot: number;
+  hexRadius: number;
 };
 
 export type InterHubEdge = {
   key: string;
   sourceCluster: ClusterId;
   targetCluster: ClusterId;
+  weight?: number;
 };
 
 export function entityImportance(entity: Entity): number {
@@ -103,20 +100,24 @@ export function computeVisibleEntitySlots(
   for (const clusterId of clusterIds) {
     const visible = sortedVisibleEntities(byCluster.get(clusterId) ?? [], maxVisiblePerCluster);
     const centroid = centroids[clusterId];
-    let index = 0;
-    for (let ring = 0; ring < CLUSTER_VISIBLE_SLOTS.length; ring++) {
-      const slots = CLUSTER_VISIBLE_SLOTS[ring];
-      const radius = CLUSTER_RING_RADIUS + ring * CLUSTER_RING_STEP;
-      for (let slot = 0; slot < slots && index < visible.length; slot++) {
-        const angle = (slot / slots) * Math.PI * 2;
-        const position = new THREE.Vector3(
-          centroid.x + Math.cos(angle) * radius,
-          centroid.y + Math.sin(angle) * radius,
-          centroid.z + (ring - 1) * 1.8,
-        );
-        slotsOut.push({ entity: visible[index], clusterId, position, ring: ring + 1, slot });
-        index++;
-      }
+    const packed = packSatellites({
+      centroid,
+      count: visible.length,
+      clusterRadius: CLUSTER_RADIUS[clusterId],
+      seed: (hashSeed(clusterId) ^ 1337) >>> 0,
+      baseHexRadius: HEX_NODE_RADIUS,
+    });
+    for (let i = 0; i < visible.length; i++) {
+      const sat = packed[i];
+      if (!sat) break;
+      slotsOut.push({
+        entity: visible[i],
+        clusterId,
+        position: sat.position,
+        ring: sat.ring,
+        slot: i,
+        hexRadius: sat.hexRadius,
+      });
     }
   }
   return slotsOut;
@@ -143,9 +144,14 @@ export function computeInterHubEdges(
     if (!(sourceCluster in centroids) || !(targetCluster in centroids)) continue;
     const sorted = [sourceCluster, targetCluster].sort() as [ClusterId, ClusterId];
     const key = `${sorted[0]}:${sorted[1]}`;
-    if (!pairs.has(key)) pairs.set(key, { key, sourceCluster: sorted[0], targetCluster: sorted[1] });
+    const existing = pairs.get(key);
+    if (existing) {
+      existing.weight = (existing.weight ?? 1) + 1;
+    } else {
+      pairs.set(key, { key, sourceCluster: sorted[0], targetCluster: sorted[1], weight: 1 });
+    }
   }
-  return Array.from(pairs.values()).sort((a, b) => a.key.localeCompare(b.key));
+  return Array.from(pairs.values()).sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0) || a.key.localeCompare(b.key));
 }
 
 export function findEntityPosition(

@@ -194,11 +194,11 @@ describe("clusterGravityForce", () => {
     expect(node.x).toBeGreaterThanOrEqual(centroid.x - 1);
   });
 
-  it("keeps centroid pairwise distance above seventy", () => {
+  it("keeps centroid pairwise distance above the compact reference minimum", () => {
     const points = CLUSTER_IDS.map((id) => CLUSTER_CENTROIDS[id]);
     for (let i = 0; i < points.length; i++) {
       for (let j = i + 1; j < points.length; j++) {
-        expect(points[i].distanceTo(points[j])).toBeGreaterThan(70);
+        expect(points[i].distanceTo(points[j])).toBeGreaterThan(24);
       }
     }
   });

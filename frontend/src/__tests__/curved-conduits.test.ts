@@ -44,7 +44,7 @@ describe("curved conduits", () => {
     const [path] = conduitPathsForEdges([edge]);
     const line = createConduitLine(path);
     expect(line.geometry.getAttribute("color").count).toBe(path.points.length);
-    expect((line.material as THREE.LineBasicMaterial).opacity).toBe(0.45);
+    expect((line.material as THREE.LineBasicMaterial).opacity).toBe(0.08);
   });
 
   it("keeps chevron count within max particles", () => {
@@ -57,7 +57,7 @@ describe("curved conduits", () => {
   it("conduit pulse spawns immediate chevrons", () => {
     const flow = new ParticleFlowController(conduitPathsForEdges([edge]));
     flow.pulse(edge, 0);
-    expect(flow.activeCount()).toBe(6);
+    expect(flow.activeCount()).toBeGreaterThan(6);
     flow.dispose();
   });
 });

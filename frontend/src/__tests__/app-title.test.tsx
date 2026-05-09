@@ -5,9 +5,14 @@ import { App } from "@/App";
 import { useBrainStore } from "@/state/brain.store";
 
 vi.mock("@/components/Brain", () => ({ Brain: () => <div /> }));
-vi.mock("@/components/SourcesRail", () => ({ SourcesRail: () => <div /> }));
-vi.mock("@/components/InspectorPanel", () => ({ InspectorPanel: () => <div /> }));
-vi.mock("@/components/LedgerRibbon", () => ({ LedgerRibbon: () => <div /> }));
+vi.mock("@/components/NavRail", () => ({ NavRail: () => <div /> }));
+vi.mock("@/components/TopHeader", () => ({ TopHeader: () => <div /> }));
+vi.mock("@/components/BrainHealthCard", () => ({ BrainHealthCard: () => <div /> }));
+vi.mock("@/components/QueryBar", () => ({ QueryBar: () => <div /> }));
+vi.mock("@/components/EdgeLegend", () => ({ EdgeLegend: () => <div /> }));
+vi.mock("@/components/EntityInspector", () => ({ EntityInspector: () => <div /> }));
+vi.mock("@/components/StatusFooter", () => ({ StatusFooter: () => <div /> }));
+vi.mock("@/components/CommandPalette", () => ({ CommandPalette: () => <div /> }));
 
 describe("browser title", () => {
   it("includes entity count when live", () => {

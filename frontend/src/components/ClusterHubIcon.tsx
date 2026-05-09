@@ -9,6 +9,7 @@ const ICONS: Record<ClusterId, string> = {
   policies: "PO",
   receipts: "RC",
   agents: "AG",
+  incidents: "IN",
   governance: "GV",
   people_teams: "::",
   billing: "$",

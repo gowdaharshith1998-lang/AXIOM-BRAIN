@@ -1,19 +1,16 @@
 import * as THREE from "three";
 
 import { CLUSTER_COLORS, CLUSTER_LABELS, type ClusterId } from "@/lib/cluster-layout";
-import type { ClusterHealthStatus } from "@/state/brain.store";
-
 export type ClusterLabelMeta = {
   entities: number;
-  loc: string;
-  health: ClusterHealthStatus;
+  relationships: number;
 };
 
 export function clusterLabelText(cluster: ClusterId): string {
   return CLUSTER_LABELS[cluster].toUpperCase();
 }
 
-export function clusterLabelAnchor(hub: THREE.Vector3, offset = 68): THREE.Vector3 {
+export function clusterLabelAnchor(hub: THREE.Vector3, offset = 12): THREE.Vector3 {
   const dir = new THREE.Vector2(hub.x, hub.y);
   if (dir.lengthSq() < 0.001) dir.set(0, 1);
   dir.normalize().multiplyScalar(offset);
@@ -26,11 +23,12 @@ export function bracketLinePoints(hub: THREE.Vector3, anchor: THREE.Vector3): [T
 }
 
 function metaText(meta: ClusterLabelMeta): string {
-  return `${meta.entities} entities · ${meta.loc} LOC`;
+  return `${meta.entities.toLocaleString()} entities · ${compactNumber(meta.relationships)} relationships`;
 }
 
-function pillClass(status: ClusterHealthStatus): string {
-  return `health-pill health-${status}`;
+function compactNumber(value: number): string {
+  if (value >= 1000) return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k`;
+  return value.toLocaleString();
 }
 
 export function createClusterBracketElement(
@@ -40,15 +38,14 @@ export function createClusterBracketElement(
 ): HTMLDivElement {
   const resolved = {
     entities: meta.entities ?? count,
-    loc: meta.loc ?? "0.0K",
-    health: meta.health ?? "healthy",
+    relationships: meta.relationships ?? 0,
   } satisfies ClusterLabelMeta;
   const div = document.createElement("div");
   div.className = "axiom-cluster-bracket-label";
   div.dataset.cluster = cluster;
   div.style.color = CLUSTER_COLORS[cluster];
-  div.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-  div.style.fontSize = "11px";
+  div.style.fontFamily = "JetBrains Mono, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+  div.style.fontSize = "14px";
   div.style.fontWeight = "600";
   div.style.letterSpacing = "0.18em";
   div.style.textTransform = "uppercase";
@@ -57,7 +54,7 @@ export function createClusterBracketElement(
   div.style.userSelect = "none";
   div.style.whiteSpace = "nowrap";
   div.style.textShadow = "0 0 8px rgba(0,0,0,0.95), 0 1px 2px rgba(0,0,0,0.85)";
-  div.innerHTML = `<div class="cluster-name">${clusterLabelText(cluster)}</div><div class="cluster-meta">${metaText(resolved)}</div><span class="${pillClass(resolved.health)}">${resolved.health}</span>`;
+  div.innerHTML = `<div class="cluster-name">${clusterLabelText(cluster)}</div><div class="cluster-meta">${metaText(resolved)}</div>`;
   return div;
 }
 
@@ -67,15 +64,11 @@ export function updateClusterBracketElement(
   count: number,
   meta: Partial<ClusterLabelMeta> = {},
 ): void {
-  const previous = div.querySelector(".health-pill")?.textContent;
   const resolved = {
     entities: meta.entities ?? count,
-    loc: meta.loc ?? "0.0K",
-    health: meta.health ?? "healthy",
+    relationships: meta.relationships ?? 0,
   } satisfies ClusterLabelMeta;
-  div.innerHTML = `<div class="cluster-name">${clusterLabelText(cluster)}</div><div class="cluster-meta">${metaText(resolved)}</div><span class="${pillClass(resolved.health)}">${resolved.health}</span>`;
-  if (previous && previous !== resolved.health) div.classList.add("health-flash");
-  window.setTimeout(() => div.classList.remove("health-flash"), 650);
+  div.innerHTML = `<div class="cluster-name">${clusterLabelText(cluster)}</div><div class="cluster-meta">${metaText(resolved)}</div>`;
 }
 
 export function ClusterBracketLabel({ cluster, count }: { cluster: ClusterId; count: number }) {
@@ -86,8 +79,7 @@ export function ClusterBracketLabel({ cluster, count }: { cluster: ClusterId; co
       style={{ color: CLUSTER_COLORS[cluster], opacity: 0.85 }}
     >
       <div className="cluster-name">{clusterLabelText(cluster)}</div>
-      <div className="cluster-meta">{count} entities · 0.0K LOC</div>
-      <span className="health-pill health-healthy">healthy</span>
+      <div className="cluster-meta">{count.toLocaleString()} entities · 0 relationships</div>
     </div>
   );
 }

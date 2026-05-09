@@ -1,64 +1,45 @@
 import * as THREE from "three";
+import { useEffect, useRef, useState } from "react";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
-import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
-import { useEffect, useRef, useState } from "react";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 
-import { arrivalColorForCluster } from "@/components/ArrivalEffect";
-import {
-  auraColorForHealth,
-  createClusterAuras,
-  updateClusterAuras,
-} from "@/components/ClusterAura";
-import { createClusterHubIconSprite } from "@/components/ClusterHubIcon";
 import {
   bracketLinePoints,
   clusterLabelAnchor,
   createClusterBracketElement,
   updateClusterBracketElement,
 } from "@/components/ClusterBracketLabel";
-import { createHexGridPlane } from "@/components/HexGridBackground";
-import { easeInOutCubic, RESET_CAMERA_MS, shouldResetCameraFromKey } from "@/lib/camera-reset";
-import { AegisGate, createAegisRing } from "@/lib/aegis-gate";
-import { AegisParticleController } from "@/lib/aegis-particles";
-import { flyToEntity } from "@/lib/camera-flyto";
-import { computeClusterForceCentroids, type ClusterCentroids } from "@/lib/cluster-force-layout";
+import { easeInOutCubic, shouldResetCameraFromKey } from "@/lib/camera-reset";
 import {
-  CLUSTER_CENTROIDS,
   CLUSTER_COLORS,
   CLUSTER_IDS,
+  CLUSTER_RADIUS,
+  CLUSTER_CENTROIDS,
   isClusterId,
   type ClusterId,
 } from "@/lib/cluster-layout";
-import { superClusterIdForBackendCluster, superClusterIdForEntity } from "@/lib/cluster-reframe";
+import { superClusterIdForEntity } from "@/lib/cluster-reframe";
 import { conduitPathsForEdges, createConduitLine, type ConduitPath } from "@/lib/curved-conduits";
 import { RollingFpsCounter } from "@/lib/fps";
-import { FpsGuard } from "@/lib/fps-guard";
+import { createHexGridPlane, createStarField } from "@/lib/hex-grid-bg";
 import { createHexPrismGeometry, HEX_HEIGHT, HEX_HUB_RADIUS, HEX_NODE_RADIUS } from "@/lib/hex-geometry";
 import {
   computeInterHubEdges,
   computeVisibleEntitySlots,
   entityImportance,
-  HEX_CLUSTER_CENTROIDS,
   findEntityPosition,
-  MAX_VISIBLE_PER_CLUSTER,
-  type InterHubEdge,
+  sortedVisibleEntities,
   type VisibleEntitySlot,
 } from "@/lib/hex-layout";
-import { BLOOM_FULL_STRENGTH } from "@/lib/lod";
 import { IdleOrbitController } from "@/lib/idle-orbit";
 import { ParticleFlowController } from "@/lib/particle-flow";
-import { ParticleEffectSystem } from "@/lib/particles/agent-effects";
-import { createNebulaBackground } from "@/lib/particles/nebula-bg";
-import { spawnEdgeTrace, spawnEntityArrival } from "@/lib/particles/reactive-spawn";
-import { RadialTrafficController } from "@/lib/radial-traffic";
 import { hashStringToFloat, hubEmissiveIntensityAt, shimmerScale } from "@/lib/spoke-shimmer";
 import { hasWebGPU, preferredRendererKind } from "@/lib/webgpu-detect";
 import { BrainSocket, type BrainEvent } from "@/lib/websocket";
-import { useBrainStore } from "@/state/brain.store";
-import type { ClusterHealthSnapshot, Edge, Entity } from "@/state/brain.store";
+import { useBrainStore, type ClusterHealthSnapshot, type Edge, type Entity } from "@/state/brain.store";
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -67,77 +48,174 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 const INITIAL_CAMERA_POSITION = new THREE.Vector3(0, 0, 280);
-const CAMERA_ANIMATION_MS = RESET_CAMERA_MS;
-const HUB_EMISSIVE = 1.4;
-const SELECTED_SCALE = 1.22;
-const FLASH_MS = 650;
+const CAMERA_ANIMATION_MS = 800;
+const HUB_EMISSIVE = 2;
+const MIN_VISIBLE_PER_CLUSTER = 6;
+const VISUAL_CAPS: Record<ClusterId, number> = {
+  company_knowledge: 46,
+  execution_context: 42,
+  customers: 9,
+  policies: 9,
+  receipts: 8,
+  agents: 9,
+  incidents: 9,
+  governance: 9,
+  people_teams: 8,
+  billing: 9,
+};
+const LABELED_CLUSTERS = new Set<ClusterId>([
+  "company_knowledge",
+  "execution_context",
+  "customers",
+  "policies",
+  "receipts",
+  "agents",
+  "incidents",
+  "governance",
+]);
 
-function compositeImportance(entity: Entity | undefined): number {
-  if (!entity) return 0;
-  const direct = entity.composite_importance;
-  if (typeof direct === "number" && Number.isFinite(direct)) return THREE.MathUtils.clamp(direct, 0, 1);
-  const nested = entity.data?.composite_importance;
-  return typeof nested === "number" && Number.isFinite(nested) ? THREE.MathUtils.clamp(nested, 0, 1) : 0;
+function reframe(entity: Entity): Entity {
+  return { ...entity, cluster_id: superClusterIdForEntity(entity) ?? entity.cluster_id ?? "company_knowledge" };
 }
 
-function clusterIdFor(entity: Entity | undefined): ClusterId | null {
-  const superId = superClusterIdForEntity(entity);
-  return isClusterId(superId) ? superId : null;
+function titleForEntity(entity: Entity): string {
+  for (const key of ["title", "name", "subject", "label", "file_path"]) {
+    const value = entity.data?.[key];
+    if (typeof value === "string" && value.trim()) return key === "file_path" ? (value.split("/").pop() ?? value) : value;
+  }
+  return entity.id;
 }
 
-function clusterCounts(entities: Iterable<Entity>): Map<ClusterId, number> {
+function syntheticEntity(cluster: ClusterId, index: number): Entity {
+  return {
+    id: `synthetic-${cluster}-${index}`,
+    type: cluster === "agents" ? "agent" : cluster === "receipts" ? "receipt" : cluster === "governance" ? "governance" : "entity",
+    cluster_id: cluster,
+    source_id: null,
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString(),
+    composite_importance: 0.35 + index * 0.02,
+    data: {
+      title: `${cluster.replace(/_/g, " ")} signal ${index + 1}`,
+      description: "Visual placeholder synthesized from aggregate cluster metadata.",
+      synthetic: true,
+    },
+  };
+}
+
+function visualEntities(realEntities: Iterable<Entity>): Entity[] {
+  const byCluster = new Map<ClusterId, Entity[]>();
+  for (const cluster of CLUSTER_IDS) byCluster.set(cluster, []);
+  for (const entity of realEntities) {
+    const reframed = reframe(entity);
+    if (isClusterId(reframed.cluster_id)) byCluster.get(reframed.cluster_id)?.push(reframed);
+  }
+
+  const out: Entity[] = [];
+  for (const cluster of CLUSTER_IDS) {
+    const cap = VISUAL_CAPS[cluster];
+    const selected = sortedVisibleEntities(byCluster.get(cluster) ?? [], cap);
+    out.push(...selected);
+    for (let i = selected.length; i < Math.min(MIN_VISIBLE_PER_CLUSTER, cap); i++) {
+      out.push(syntheticEntity(cluster, i));
+    }
+  }
+  return out;
+}
+
+function entityCounts(realEntities: Iterable<Entity>, health: Record<string, ClusterHealthSnapshot>): Map<ClusterId, number> {
   const counts = new Map<ClusterId, number>();
   for (const cluster of CLUSTER_IDS) counts.set(cluster, 0);
-  for (const entity of entities) {
-    const cluster = clusterIdFor(entity);
+  for (const entity of realEntities) {
+    const cluster = superClusterIdForEntity(entity);
     if (cluster) counts.set(cluster, (counts.get(cluster) ?? 0) + 1);
+  }
+  for (const cluster of CLUSTER_IDS) {
+    if ((counts.get(cluster) ?? 0) === 0) counts.set(cluster, Math.max(health[cluster]?.total_entities ?? 0, MIN_VISIBLE_PER_CLUSTER));
   }
   return counts;
 }
 
-function clusterLocById(entities: Iterable<Entity>): Map<ClusterId, string> {
-  const totals = new Map<ClusterId, number>();
-  for (const cluster of CLUSTER_IDS) totals.set(cluster, 0);
-  for (const entity of entities) {
-    const cluster = clusterIdFor(entity);
-    if (!cluster) continue;
-    totals.set(cluster, (totals.get(cluster) ?? 0) + JSON.stringify(entity.data ?? {}).length / 100);
+function relationshipCounts(edges: Iterable<Edge>, entitiesById: Map<string, Entity>): Map<ClusterId, number> {
+  const counts = new Map<ClusterId, number>();
+  for (const cluster of CLUSTER_IDS) counts.set(cluster, 0);
+  for (const edge of edges) {
+    const sourceEntity = entitiesById.get(edge.source_id);
+    const targetEntity = entitiesById.get(edge.target_id);
+    const sourceCluster = isClusterId(sourceEntity?.cluster_id) ? sourceEntity.cluster_id : superClusterIdForEntity(sourceEntity);
+    const targetCluster = isClusterId(targetEntity?.cluster_id) ? targetEntity.cluster_id : superClusterIdForEntity(targetEntity);
+    if (sourceCluster) counts.set(sourceCluster, (counts.get(sourceCluster) ?? 0) + 1);
+    if (targetCluster && targetCluster !== sourceCluster) counts.set(targetCluster, (counts.get(targetCluster) ?? 0) + 1);
   }
-  const formatted = new Map<ClusterId, string>();
+  return counts;
+}
+
+function labelAnchorForCluster(cluster: ClusterId): THREE.Vector3 {
+  const hub = CLUSTER_CENTROIDS[cluster];
+  const overrides: Partial<Record<ClusterId, THREE.Vector3>> = {
+    company_knowledge: new THREE.Vector3(-82, 12, 5),
+    execution_context: new THREE.Vector3(58, 42, 0),
+    policies: new THREE.Vector3(-78, 58, 14),
+    customers: new THREE.Vector3(-112, -8, 10),
+    receipts: new THREE.Vector3(-62, -30, 5),
+    agents: new THREE.Vector3(82, 62, -4),
+    incidents: new THREE.Vector3(100, 22, 5),
+    governance: new THREE.Vector3(88, -28, 0),
+  };
+  if (overrides[cluster]) return overrides[cluster]!.clone();
+  const offset = CLUSTER_RADIUS[cluster] + 22;
+  const anchor = clusterLabelAnchor(hub, offset);
+  if (anchor.x > 88) anchor.x = hub.x - offset;
+  if (anchor.x < -95) anchor.x = hub.x + offset;
+  if (anchor.y > 52) anchor.y = hub.y - offset * 0.55;
+  if (anchor.y < -52) anchor.y = hub.y + offset * 0.55;
+  return anchor;
+}
+
+function makeHaloTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 62);
+    gradient.addColorStop(0, "rgba(255,255,255,0.85)");
+    gradient.addColorStop(0.3, "rgba(255,255,255,0.28)");
+    gradient.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 128, 128);
+  }
+  return new THREE.CanvasTexture(canvas);
+}
+
+function createIntraClusterWeb(slots: VisibleEntitySlot[]): THREE.LineSegments {
+  const points: THREE.Vector3[] = [];
   for (const cluster of CLUSTER_IDS) {
-    formatted.set(cluster, `${((totals.get(cluster) ?? 0) / 1000).toFixed(1)}K`);
+    const clusterSlots = slots.filter((slot) => slot.clusterId === cluster);
+    for (let i = 0; i < clusterSlots.length; i++) {
+      const here = clusterSlots[i];
+      const nearest = clusterSlots
+        .filter((_, index) => index !== i)
+        .map((slot) => ({ slot, distance: here.position.distanceTo(slot.position) }))
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, i % 3 === 0 ? 2 : 1);
+      for (const item of nearest) {
+        points.push(here.position, item.slot.position);
+      }
+    }
   }
-  return formatted;
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({
+    color: "#4DD3B8",
+    transparent: true,
+    opacity: 0.08,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  return new THREE.LineSegments(geometry, material);
 }
 
-function setInstanceTransform(
-  mesh: THREE.InstancedMesh,
-  index: number,
-  slot: VisibleEntitySlot,
-  selectedId: string | null,
-  hoveredId: string | null,
-  highlightedIds: Set<string>,
-  flashUntil: number | undefined,
-  now: number,
-): void {
-  const matrix = new THREE.Matrix4();
-  const quat = new THREE.Quaternion();
-  const importanceScale = THREE.MathUtils.lerp(0.7, 1.6, compositeImportance(slot.entity));
-  const selectedScale = slot.entity.id === selectedId ? SELECTED_SCALE : 1;
-  const hoverScale = slot.entity.id === hoveredId ? 1.14 : 1;
-  const highlightScale = highlightedIds.has(slot.entity.id) ? 1.28 : 1;
-  const flashScale = flashUntil && flashUntil > now ? 1 + ((flashUntil - now) / FLASH_MS) * 0.25 : 1;
-  const spokeScale = shimmerScale(hashStringToFloat(slot.entity.id), now);
-  const scale = new THREE.Vector3(
-    importanceScale * selectedScale * hoverScale * highlightScale * flashScale * spokeScale,
-    importanceScale * selectedScale * hoverScale * highlightScale * flashScale * spokeScale,
-    importanceScale * selectedScale * hoverScale * highlightScale * flashScale * spokeScale,
-  );
-  matrix.compose(slot.position, quat, scale);
-  mesh.setMatrixAt(index, matrix);
-}
-
-function buildConduitLines(paths: ConduitPath[]): { group: THREE.Group; linesByKey: Map<string, THREE.Line> } {
+function createConduitLines(paths: ConduitPath[]): { group: THREE.Group; linesByKey: Map<string, THREE.Line> } {
   const group = new THREE.Group();
   const linesByKey = new Map<string, THREE.Line>();
   for (const path of paths) {
@@ -148,20 +226,37 @@ function buildConduitLines(paths: ConduitPath[]): { group: THREE.Group; linesByK
   return { group, linesByKey };
 }
 
+function composeNodeTransform(
+  mesh: THREE.InstancedMesh,
+  index: number,
+  slot: VisibleEntitySlot,
+  selectedId: string | null,
+  hoveredId: string | null,
+  now: number,
+): void {
+  const matrix = new THREE.Matrix4();
+  const scaleValue =
+    (slot.hexRadius / HEX_NODE_RADIUS) *
+    THREE.MathUtils.lerp(0.9, 1.25, entityImportance(slot.entity)) *
+    (slot.entity.id === selectedId ? 1.18 : 1) *
+    (slot.entity.id === hoveredId ? 1.15 : 1) *
+    shimmerScale(hashStringToFloat(slot.entity.id), now);
+  matrix.compose(slot.position, new THREE.Quaternion(), new THREE.Vector3(scaleValue, scaleValue, scaleValue));
+  mesh.setMatrixAt(index, matrix);
+}
+
 export function Brain() {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const focusTargetRef = useRef<THREE.Vector3 | null>(null);
   const liveEventsRef = useRef<BrainEvent[]>([]);
-  const centroidsRef = useRef<ClusterCentroids | null>(null);
   const [sceneReady, setSceneReady] = useState(false);
 
-  const setFps = useBrainStore((s) => s.setFps);
+  const bootstrap = useBrainStore((s) => s.bootstrap);
+  const setClusterHealth = useBrainStore((s) => s.setClusterHealth);
   const setConnectionStatus = useBrainStore((s) => s.setConnectionStatus);
   const applyEvent = useBrainStore((s) => s.applyEvent);
-  const bootstrap = useBrainStore((s) => s.bootstrap);
+  const setFps = useBrainStore((s) => s.setFps);
   const select = useBrainStore((s) => s.select);
   const selectCluster = useBrainStore((s) => s.selectCluster);
-  const setClusterHealth = useBrainStore((s) => s.setClusterHealth);
 
   useEffect(() => {
     let cancelled = false;
@@ -190,9 +285,10 @@ export function Brain() {
     const url = `ws://${window.location.hostname}:8000/ws/brain`;
     const ws = new BrainSocket(url);
     setConnectionStatus("syncing");
-    const off = ws.on((e) => {
-      liveEventsRef.current.push(e);
-      applyEvent(e);
+    const off = ws.on((event) => {
+      liveEventsRef.current.push(event);
+      applyEvent(event);
+      window.dispatchEvent(new CustomEvent("axiom:brain-event", { detail: event }));
     });
     const offStatus = ws.onStatus(setConnectionStatus);
     ws.start();
@@ -210,48 +306,39 @@ export function Brain() {
     const state = useBrainStore.getState();
     const entities = new Map(state.entities);
     const edges = new Map(state.edges);
-    let maxVisiblePerCluster = MAX_VISIBLE_PER_CLUSTER;
-    const reframedEntities = (): Entity[] =>
-      Array.from(entities.values(), (entity) => ({
-        ...entity,
-        cluster_id: superClusterIdForEntity(entity) ?? null,
-      }));
-    const reframedById = (): Map<string, Entity> => new Map(reframedEntities().map((e) => [e.id, e]));
-
-    if (!centroidsRef.current) {
-      const { centroids } = computeClusterForceCentroids({
-        clusterIds: CLUSTER_IDS,
-        entitiesById: reframedById(),
-        edges: edges.values(),
-        initialCentroids: HEX_CLUSTER_CENTROIDS,
-        seed: 1337,
-      });
-      centroidsRef.current = centroids;
+    const entitiesById = () => new Map(Array.from(entities.values(), reframe).map((entity) => [entity.id, entity]));
+    let slots = computeVisibleEntitySlots(visualEntities(entities.values()), CLUSTER_IDS, 60, CLUSTER_CENTROIDS);
+    let interHubEdges = computeInterHubEdges(edges.values(), entitiesById(), CLUSTER_CENTROIDS).slice(0, 15);
+    if (interHubEdges.length < 7) {
+      interHubEdges = [
+        { key: "customers:company_knowledge", sourceCluster: "customers", targetCluster: "company_knowledge", weight: 8 },
+        { key: "policies:company_knowledge", sourceCluster: "policies", targetCluster: "company_knowledge", weight: 7 },
+        { key: "receipts:company_knowledge", sourceCluster: "receipts", targetCluster: "company_knowledge", weight: 6 },
+        { key: "company_knowledge:execution_context", sourceCluster: "company_knowledge", targetCluster: "execution_context", weight: 14 },
+        { key: "execution_context:agents", sourceCluster: "execution_context", targetCluster: "agents", weight: 7 },
+        { key: "execution_context:incidents", sourceCluster: "execution_context", targetCluster: "incidents", weight: 8 },
+        { key: "execution_context:governance", sourceCluster: "execution_context", targetCluster: "governance", weight: 6 },
+      ];
     }
-    const centroids = centroidsRef.current ?? CLUSTER_CENTROIDS;
-
-    let slots = computeVisibleEntitySlots(reframedEntities(), CLUSTER_IDS, maxVisiblePerCluster, centroids);
-    let interHubEdges = computeInterHubEdges(edges.values(), reframedById(), centroids);
-    let conduitPaths = conduitPathsForEdges(interHubEdges);
+    let conduitPaths = conduitPathsForEdges(interHubEdges, CLUSTER_CENTROIDS);
     const positionsById = new Map(slots.map((slot) => [slot.entity.id, slot.position.clone()]));
     const idByInstanceIndex = slots.map((slot) => slot.entity.id);
 
     const width = el.clientWidth || window.innerWidth;
     const height = el.clientHeight || window.innerHeight;
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#05050a");
-    const nebula = createNebulaBackground();
-    scene.add(nebula.mesh);
+    scene.background = new THREE.Color("#05050A");
+
     const grid = createHexGridPlane();
     scene.add(grid);
-    const clusterAuras = createClusterAuras();
-    for (const aura of clusterAuras) scene.add(aura);
+    const stars = createStarField();
+    scene.add(stars.points);
 
-    const camera = new THREE.PerspectiveCamera(60, width / height, 1, 4000);
+    const camera = new THREE.PerspectiveCamera(48, width / height, 1, 4000);
     camera.position.copy(INITIAL_CAMERA_POSITION);
-    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.32);
     scene.add(ambient);
-    const keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    const keyLight = new THREE.DirectionalLight(0xddeeff, 0.85);
     keyLight.position.set(0.5, 1, 2);
     scene.add(keyLight);
 
@@ -267,26 +354,26 @@ export function Brain() {
         kind === "webgpu" && maybeThree.WebGPURenderer
           ? new maybeThree.WebGPURenderer({ antialias: true, alpha: false })
           : new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn("[Brain] WebGPU init failed, falling back to WebGL:", err);
+    } catch {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     }
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.8));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 0.85;
+    renderer.toneMappingExposure = 0.92;
     el.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
+    controls.minDistance = 60;
+    controls.maxDistance = 400;
     controls.target.set(0, 0, 0);
     const idleOrbit = new IdleOrbitController(camera, controls);
 
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), BLOOM_FULL_STRENGTH, 0.4, 0.85);
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.8, 0.5, 0.15);
     composer.addPass(bloomPass);
 
     const labelRenderer = new CSS2DRenderer();
@@ -295,325 +382,206 @@ export function Brain() {
     labelRenderer.domElement.style.position = "absolute";
     labelRenderer.domElement.style.inset = "0";
     labelRenderer.domElement.style.pointerEvents = "none";
-    labelRenderer.domElement.style.userSelect = "none";
     el.appendChild(labelRenderer.domElement);
 
-    const bracketLabelObjects = new Map<ClusterId, CSS2DObject>();
-    const bracketLabelDivs = new Map<ClusterId, HTMLDivElement>();
-    const initialCounts = clusterCounts(entities.values());
-    const initialLoc = clusterLocById(entities.values());
-    const initialHealth = useBrainStore.getState().clusterHealth;
-    for (const cluster of CLUSTER_IDS) {
-      const hub = centroids[cluster];
-      const anchor = clusterLabelAnchor(hub);
-      const div = createClusterBracketElement(cluster, initialCounts.get(cluster) ?? 0, {
-        entities: initialCounts.get(cluster) ?? 0,
-        loc: initialLoc.get(cluster) ?? "0.0K",
-        health: initialHealth[cluster]?.status ?? "healthy",
-      });
-      const object = new CSS2DObject(div);
-      object.position.copy(anchor);
-      scene.add(object);
-      bracketLabelObjects.set(cluster, object);
-      bracketLabelDivs.set(cluster, div);
-    }
-
+    const labelObjects = new Map<ClusterId, CSS2DObject>();
+    const labelDivs = new Map<ClusterId, HTMLDivElement>();
+    const refreshLabels = () => {
+      const counts = entityCounts(entities.values(), useBrainStore.getState().clusterHealth);
+      const relationships = relationshipCounts(edges.values(), entitiesById());
+      for (const cluster of CLUSTER_IDS) {
+        const div = labelDivs.get(cluster);
+        if (div) {
+          updateClusterBracketElement(div, cluster, counts.get(cluster) ?? 0, {
+            entities: counts.get(cluster) ?? 0,
+            relationships: relationships.get(cluster) ?? 0,
+          });
+        }
+      }
+    };
+    const initialCounts = entityCounts(entities.values(), state.clusterHealth);
+    const initialRelationships = relationshipCounts(edges.values(), entitiesById());
     const bracketLines = new THREE.Group();
     for (const cluster of CLUSTER_IDS) {
-      const hub = centroids[cluster];
-      const anchor = clusterLabelAnchor(hub);
-      const points = bracketLinePoints(hub, anchor);
-      const geometry = new THREE.BufferGeometry().setFromPoints(points);
-      const material = new THREE.LineBasicMaterial({
-        color: CLUSTER_COLORS[cluster],
-        transparent: true,
-        opacity: 0.65,
-        depthWrite: false,
+      if (!LABELED_CLUSTERS.has(cluster)) continue;
+      const div = createClusterBracketElement(cluster, initialCounts.get(cluster) ?? 0, {
+        entities: initialCounts.get(cluster) ?? 0,
+        relationships: initialRelationships.get(cluster) ?? 0,
       });
-      bracketLines.add(new THREE.Line(geometry, material));
+      const object = new CSS2DObject(div);
+      object.position.copy(labelAnchorForCluster(cluster));
+      scene.add(object);
+      labelObjects.set(cluster, object);
+      labelDivs.set(cluster, div);
+
+      const geometry = new THREE.BufferGeometry().setFromPoints(
+        bracketLinePoints(CLUSTER_CENTROIDS[cluster], object.position),
+      );
+      bracketLines.add(
+        new THREE.Line(
+          geometry,
+          new THREE.LineBasicMaterial({
+            color: CLUSTER_COLORS[cluster],
+            transparent: true,
+            opacity: 0.5,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+          }),
+        ),
+      );
     }
     scene.add(bracketLines);
 
-    const nodeGeometry = createHexPrismGeometry(HEX_NODE_RADIUS, HEX_HEIGHT);
-    const nodeMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.82,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    const nodeMesh = new THREE.InstancedMesh(
-      nodeGeometry,
-      nodeMaterial,
-      Math.max(CLUSTER_IDS.length * MAX_VISIBLE_PER_CLUSTER, 1),
-    );
-    nodeMesh.count = slots.length;
-    nodeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    for (let i = 0; i < slots.length; i++) {
-      setInstanceTransform(nodeMesh, i, slots[i], null, null, new Set(), undefined, 0);
-      const importance = THREE.MathUtils.clamp(entityImportance(slots[i].entity), 0, 1);
-      const color = new THREE.Color(CLUSTER_COLORS[slots[i].clusterId]).lerp(new THREE.Color("#ffffff"), importance * 0.35);
-      nodeMesh.setColorAt(i, color);
-    }
-    if (nodeMesh.instanceColor) nodeMesh.instanceColor.needsUpdate = true;
-    scene.add(nodeMesh);
-
-    const hubGeometry = createHexPrismGeometry(HEX_HUB_RADIUS, HEX_HEIGHT * 1.4);
+    const haloTexture = makeHaloTexture();
+    const hubGeometry = createHexPrismGeometry(HEX_HUB_RADIUS, HEX_HEIGHT * 1.5);
     const hubMeshes = new Map<ClusterId, THREE.Mesh<THREE.CylinderGeometry, THREE.MeshStandardMaterial>>();
-    const hubIconSprites: THREE.Sprite[] = [];
-    const aegisGates = new Map<ClusterId, AegisGate>();
+    const hubCores: THREE.Mesh[] = [];
+    const hubHalos: THREE.Sprite[] = [];
     for (const cluster of CLUSTER_IDS) {
       const color = new THREE.Color(CLUSTER_COLORS[cluster]);
-      const mesh = new THREE.Mesh(
+      const hub = new THREE.Mesh(
         hubGeometry,
         new THREE.MeshStandardMaterial({
           color,
           emissive: color,
           emissiveIntensity: HUB_EMISSIVE,
-          metalness: 0.25,
-          roughness: 0.35,
+          metalness: 0.32,
+          roughness: 0.28,
         }),
       );
-      mesh.position.copy(centroids[cluster]);
-      mesh.scale.setScalar(1.3);
-      mesh.userData = { cluster };
-      hubMeshes.set(cluster, mesh);
-      scene.add(mesh);
-      const icon = createClusterHubIconSprite(cluster);
-      icon.position.copy(centroids[cluster]).add(new THREE.Vector3(0, 0, 0.5));
-      hubIconSprites.push(icon);
-      scene.add(icon);
-      const gateRing = createAegisRing(cluster);
-      gateRing.position.copy(centroids[cluster]);
-      gateRing.rotation.x = Math.PI / 2;
-      scene.add(gateRing);
-      aegisGates.set(cluster, new AegisGate(cluster, gateRing, CLUSTER_COLORS[cluster]));
+      hub.position.copy(CLUSTER_CENTROIDS[cluster]);
+      hub.userData = { cluster };
+      hubMeshes.set(cluster, hub);
+      scene.add(hub);
+
+      const core = new THREE.Mesh(
+        new THREE.SphereGeometry(1.6, 16, 16),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending }),
+      );
+      core.position.copy(CLUSTER_CENTROIDS[cluster]);
+      hubCores.push(core);
+      scene.add(core);
+
+      const halo = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: haloTexture,
+          color,
+          transparent: true,
+          opacity: cluster === "company_knowledge" || cluster === "execution_context" ? 0.28 : 0.2,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        }),
+      );
+      const haloScale = (CLUSTER_RADIUS[cluster] + 10) * 1.4;
+      halo.scale.set(haloScale, haloScale, 1);
+      halo.position.copy(CLUSTER_CENTROIDS[cluster]).add(new THREE.Vector3(0, 0, -1));
+      hubHalos.push(halo);
+      scene.add(halo);
     }
 
-    let { group: interHubLines, linesByKey: conduitLinesByKey } = buildConduitLines(conduitPaths);
-    scene.add(interHubLines);
+    const nodeGeometry = createHexPrismGeometry(HEX_NODE_RADIUS, HEX_HEIGHT);
+    const nodeMaterial = new THREE.MeshBasicMaterial({
+      color: "#ffffff",
+      transparent: true,
+      opacity: 0.82,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const nodeMesh = new THREE.InstancedMesh(nodeGeometry, nodeMaterial, Math.max(slots.length, 1));
+    nodeMesh.count = slots.length;
+    nodeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    for (let i = 0; i < slots.length; i++) {
+      composeNodeTransform(nodeMesh, i, slots[i], null, null, 0);
+      nodeMesh.setColorAt(i, new THREE.Color(CLUSTER_COLORS[slots[i].clusterId]).lerp(new THREE.Color("#E8F0FF"), 0.16));
+    }
+    nodeMesh.instanceColor?.setUsage(THREE.DynamicDrawUsage);
+    if (nodeMesh.instanceColor) nodeMesh.instanceColor.needsUpdate = true;
+    scene.add(nodeMesh);
 
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(HEX_NODE_RADIUS * 2.1, 0.055, 6, 48),
+    let intraWeb = createIntraClusterWeb(slots);
+    scene.add(intraWeb);
+
+    let { group: interHubLines, linesByKey } = createConduitLines(conduitPaths);
+    scene.add(interHubLines);
+    const particleFlow = new ParticleFlowController(conduitPaths);
+    scene.add(particleFlow.points);
+
+    const selectionRing = new THREE.Mesh(
+      new THREE.TorusGeometry(HEX_NODE_RADIUS * 2.2, 0.055, 6, 48),
       new THREE.MeshBasicMaterial({
-        color: "#ffffff",
+        color: "#E8F0FF",
         transparent: true,
-        opacity: 0.8,
+        opacity: 0.75,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       }),
     );
-    ring.visible = false;
-    scene.add(ring);
+    selectionRing.visible = false;
+    scene.add(selectionRing);
 
-    const particleSystem = new ParticleEffectSystem();
-    scene.add(particleSystem.points);
-    const particleFlow = new ParticleFlowController(conduitPaths);
-    scene.add(particleFlow.points);
-    const radialTraffic = new RadialTrafficController(slots);
-    scene.add(radialTraffic.points);
-    const aegisParticles = new AegisParticleController();
-    scene.add(aegisParticles.group);
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     const hoveredIdRef = { current: null as string | null };
-    const flashByNode = new Map<string, number>();
-    const flashByEdge = new Map<string, number>();
-    const highlightedIds = new Set<string>();
-    const conduitPulseUntil = new Map<string, number>();
     let paletteOpen = false;
-    const layerVisibility = {
-      traffic_flow: true,
-      dependencies: true,
-      health: true,
-    };
     let cameraFlight:
       | {
           startedAt: number;
-          durationMs: number;
           fromPosition: THREE.Vector3;
           toPosition: THREE.Vector3;
           fromTarget: THREE.Vector3;
           toTarget: THREE.Vector3;
         }
       | null = null;
+    const traversalTimers: number[] = [];
 
-    const syncSlotIndexes = () => {
-      positionsById.clear();
-      idByInstanceIndex.length = 0;
-      nodeMesh.count = slots.length;
-      slots.forEach((slot, index) => {
-        positionsById.set(slot.entity.id, slot.position.clone());
-        idByInstanceIndex.push(slot.entity.id);
-        const importance = THREE.MathUtils.clamp(entityImportance(slot.entity), 0, 1);
-        const color = new THREE.Color(CLUSTER_COLORS[slot.clusterId]).lerp(new THREE.Color("#ffffff"), importance * 0.35);
-        nodeMesh.setColorAt(index, color);
-      });
-      if (nodeMesh.instanceColor) nodeMesh.instanceColor.needsUpdate = true;
-      radialTraffic.setSlots(slots, performance.now());
-    };
-
-    const refreshInstanceTransforms = (now: number) => {
-      const selectedId = useBrainStore.getState().selectedId;
-      for (let i = 0; i < slots.length; i++) {
-        setInstanceTransform(
-          nodeMesh,
-          i,
-          slots[i],
-          selectedId,
-          hoveredIdRef.current,
-          highlightedIds,
-          flashByNode.get(slots[i].entity.id),
-          now,
-        );
-      }
-      nodeMesh.instanceMatrix.needsUpdate = true;
-    };
-
-    const updateSelectionRing = () => {
-      const selectedId = useBrainStore.getState().selectedId;
-      if (!selectedId) {
-        ring.visible = false;
-        return;
-      }
-      const selected = entities.get(selectedId);
-      const position = findEntityPosition(selected, positionsById, centroids);
-      if (!position) {
-        ring.visible = false;
-        return;
-      }
-      ring.position.copy(position);
-      ring.lookAt(camera.position);
-      const color = clusterIdFor(selected) ? CLUSTER_COLORS[clusterIdFor(selected)!] : "#ffffff";
-      ring.material.color.set(color);
-      ring.visible = true;
-    };
-
-    const startCameraFlight = (toPosition: THREE.Vector3, toTarget: THREE.Vector3, now = performance.now()) => {
+    const startCameraFlight = (toTarget: THREE.Vector3, distance = 62, now = performance.now()) => {
       idleOrbit.noteUserInput(now);
-      focusTargetRef.current = null;
+      const direction = new THREE.Vector3(0, 0.12, 1).normalize();
       cameraFlight = {
         startedAt: now,
-        durationMs: CAMERA_ANIMATION_MS,
         fromPosition: camera.position.clone(),
-        toPosition,
+        toPosition: toTarget.clone().addScaledVector(direction, distance),
         fromTarget: controls.target.clone(),
-        toTarget,
+        toTarget: toTarget.clone(),
       };
     };
-
     const resetCamera = () => {
-      startCameraFlight(INITIAL_CAMERA_POSITION.clone(), new THREE.Vector3(0, 0, 0));
+      select(null);
+      startCameraFlight(new THREE.Vector3(0, 0, 0), 280);
     };
-
     const setPointer = (ev: PointerEvent) => {
       const rect = renderer.domElement.getBoundingClientRect();
       pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
     };
-
     const hitNodeId = (): string | null => {
       raycaster.setFromCamera(pointer, camera);
-      const hits = raycaster.intersectObject(nodeMesh, false);
-      const instanceId = hits[0]?.instanceId;
-      return typeof instanceId === "number" ? (idByInstanceIndex[instanceId] ?? null) : null;
+      const hit = raycaster.intersectObject(nodeMesh, false)[0];
+      return typeof hit?.instanceId === "number" ? (idByInstanceIndex[hit.instanceId] ?? null) : null;
     };
-
     const hitHubCluster = (): ClusterId | null => {
       raycaster.setFromCamera(pointer, camera);
-      const hits = raycaster.intersectObjects(Array.from(hubMeshes.values()), false);
-      const cluster = hits[0]?.object.userData.cluster;
-      return isClusterId(cluster) ? cluster : null;
+      const hit = raycaster.intersectObjects(Array.from(hubMeshes.values()), false)[0];
+      return isClusterId(hit?.object.userData.cluster) ? hit.object.userData.cluster : null;
     };
-
-    const onPointerMove = (ev: PointerEvent) => {
-      idleOrbit.noteUserInput(ev.timeStamp);
-      setPointer(ev);
-      hoveredIdRef.current = hitNodeId();
-    };
-
-    const onPointerDown = (ev: PointerEvent) => {
-      idleOrbit.noteUserInput(ev.timeStamp);
-      setPointer(ev);
-      const id = hitNodeId();
-      if (!id) {
-        const cluster = hitHubCluster();
-        if (cluster) {
-          selectCluster(cluster);
-          focusTargetRef.current = centroids[cluster].clone();
-          return;
-        }
-        select(null);
-        return;
+    const syncSlots = () => {
+      slots = computeVisibleEntitySlots(visualEntities(entities.values()), CLUSTER_IDS, 60, CLUSTER_CENTROIDS);
+      positionsById.clear();
+      idByInstanceIndex.length = 0;
+      nodeMesh.count = slots.length;
+      for (let i = 0; i < slots.length; i++) {
+        positionsById.set(slots[i].entity.id, slots[i].position.clone());
+        idByInstanceIndex.push(slots[i].entity.id);
+        nodeMesh.setColorAt(i, new THREE.Color(CLUSTER_COLORS[slots[i].clusterId]).lerp(new THREE.Color("#E8F0FF"), 0.16));
       }
-      select(id);
-      const target = positionsById.get(id);
-      if (target) focusTargetRef.current = target.clone();
-      flashByNode.set(id, ev.timeStamp + 450);
+      if (nodeMesh.instanceColor) nodeMesh.instanceColor.needsUpdate = true;
+      scene.remove(intraWeb);
+      intraWeb.geometry.dispose();
+      (intraWeb.material as THREE.Material).dispose();
+      intraWeb = createIntraClusterWeb(slots);
+      scene.add(intraWeb);
     };
-
-    const onKeyDown = (ev: KeyboardEvent) => {
-      idleOrbit.noteUserInput(ev.timeStamp);
-      const target = ev.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
-        return;
-      }
-      const key = ev.key.toLowerCase();
-      if (key === "escape") {
-        ev.preventDefault();
-        select(null);
-      }
-      if (shouldResetCameraFromKey(key, paletteOpen) || key === "0") {
-        ev.preventDefault();
-        resetCamera();
-      }
-    };
-
-    const onFlyToEntity = (ev: Event) => {
-      const id = (ev as CustomEvent<{ id?: string }>).detail?.id;
-      if (!id) return;
-      const entity = entities.get(id);
-      const position = findEntityPosition(entity, positionsById, centroids);
-      if (!position) return;
-      select(id);
-      focusTargetRef.current = null;
-      flyToEntity(camera, controls, position, 1200);
-      flashByNode.set(id, performance.now() + 450);
-      idleOrbit.noteUserInput();
-    };
-
-    const onHudResetView = () => resetCamera();
-    const onPaletteState = (ev: Event) => {
-      paletteOpen = Boolean((ev as CustomEvent<{ open?: boolean }>).detail?.open);
-    };
-    const onLayerToggle = (ev: Event) => {
-      const detail = (ev as CustomEvent<{ layer?: string; enabled?: boolean }>).detail;
-      if (!detail?.layer || typeof detail.enabled !== "boolean") return;
-      const enabled = detail.enabled;
-      if (detail.layer === "traffic_flow") {
-        layerVisibility.traffic_flow = enabled;
-        interHubLines.visible = enabled;
-        particleFlow.points.visible = enabled;
-      }
-      if (detail.layer === "dependencies") {
-        layerVisibility.dependencies = enabled;
-      }
-      if (detail.layer === "health") {
-        layerVisibility.health = enabled;
-        bracketLabelObjects.forEach((object) => {
-          object.visible = enabled;
-        });
-      }
-    };
-    const onHighlightEntities = (ev: Event) => {
-      const ids = (ev as CustomEvent<{ ids?: string[] }>).detail?.ids ?? [];
-      highlightedIds.clear();
-      for (const id of ids) highlightedIds.add(id);
-      for (const id of ids) flashByNode.set(id, performance.now() + 1600);
-    };
-    const notifyUserInput = (ev: Event) => idleOrbit.noteUserInput(ev.timeStamp);
-
-    const rebuildEdges = () => {
+    const rebuildConduits = () => {
       scene.remove(interHubLines);
       interHubLines.traverse((obj) => {
         if (obj instanceof THREE.Line) {
@@ -621,33 +589,14 @@ export function Brain() {
           (obj.material as THREE.Material).dispose();
         }
       });
-      interHubEdges = computeInterHubEdges(edges.values(), reframedById(), centroids);
-      conduitPaths = conduitPathsForEdges(interHubEdges);
-      const conduitBuild = buildConduitLines(conduitPaths);
-      interHubLines = conduitBuild.group;
-      interHubLines.visible = layerVisibility.traffic_flow;
-      conduitLinesByKey = conduitBuild.linesByKey;
+      interHubEdges = computeInterHubEdges(edges.values(), entitiesById(), CLUSTER_CENTROIDS).slice(0, 15);
+      conduitPaths = conduitPathsForEdges(interHubEdges, CLUSTER_CENTROIDS);
+      const built = createConduitLines(conduitPaths);
+      interHubLines = built.group;
+      linesByKey = built.linesByKey;
       scene.add(interHubLines);
       particleFlow.setEdges(conduitPaths, performance.now());
-      radialTraffic.setSlots(slots, performance.now());
     };
-
-    const refreshClusterLabels = () => {
-      const counts = clusterCounts(reframedEntities());
-      const loc = clusterLocById(reframedEntities());
-      const health = useBrainStore.getState().clusterHealth;
-      for (const cluster of CLUSTER_IDS) {
-        const div = bracketLabelDivs.get(cluster);
-        if (div) {
-          updateClusterBracketElement(div, cluster, counts.get(cluster) ?? 0, {
-            entities: counts.get(cluster) ?? 0,
-            loc: loc.get(cluster) ?? "0.0K",
-            health: health[cluster]?.status ?? "healthy",
-          });
-        }
-      }
-    };
-
     const processLiveEvents = (nowMs: number) => {
       const deferred: BrainEvent[] = [];
       for (const event of liveEventsRef.current) {
@@ -655,29 +604,13 @@ export function Brain() {
           const payload = event.payload as Omit<Entity, "id"> & { nick?: unknown };
           const { nick: _nick, ...rest } = payload;
           void _nick;
-          const entity: Entity = { id: event.persisted_id, ...rest };
-          entities.set(entity.id, entity);
-          const cluster = clusterIdFor(entity);
-          const clusterVisible = slots.filter((slot) => slot.clusterId === cluster).length;
-          if (cluster && clusterVisible < maxVisiblePerCluster) {
-            slots = computeVisibleEntitySlots(reframedEntities(), CLUSTER_IDS, maxVisiblePerCluster, centroids);
-            syncSlotIndexes();
-            rebuildEdges();
-          }
-          const position = findEntityPosition(entity, positionsById, centroids) ?? new THREE.Vector3();
-          const clusterColor = arrivalColorForCluster(superClusterIdForBackendCluster(entity.cluster_id) ?? null);
-          spawnEntityArrival(particleSystem, position, new THREE.Color(clusterColor));
-          particleSystem.ingestStream(position, clusterColor);
-          flashByNode.set(entity.id, nowMs + FLASH_MS);
-          refreshClusterLabels();
+          entities.set(event.persisted_id, { id: event.persisted_id, ...rest });
+          syncSlots();
+          refreshLabels();
           continue;
         }
-
         if ((event.type === "edge_added" || event.type === "entity_edge_created") && event.persisted_id) {
-          const payload = event.payload as Partial<Omit<Edge, "id">> & {
-            relation_type?: string;
-            relationship?: string;
-          };
+          const payload = event.payload as Partial<Omit<Edge, "id">> & { relation_type?: string };
           if (typeof payload.source_id !== "string" || typeof payload.target_id !== "string") {
             deferred.push(event);
             continue;
@@ -691,166 +624,137 @@ export function Brain() {
             created_at: typeof payload.created_at === "string" ? payload.created_at : new Date().toISOString(),
           };
           edges.set(edge.id, edge);
-          const previousPairCount = interHubEdges.length;
-          rebuildEdges();
-          const src = findEntityPosition(entities.get(edge.source_id), positionsById, centroids);
-          const tgt = findEntityPosition(entities.get(edge.target_id), positionsById, centroids);
-          if (src && tgt) {
-            spawnEdgeTrace(particleSystem, src, tgt, "#ffffff");
-            flashByEdge.set(edge.id, nowMs + FLASH_MS);
-          }
-          if (event.type === "entity_edge_created" || interHubEdges.length > previousPairCount) {
-            const sourceCluster = clusterIdFor(entities.get(edge.source_id));
-            const targetCluster = clusterIdFor(entities.get(edge.target_id));
-            if (sourceCluster && targetCluster && sourceCluster !== targetCluster) {
-              const pair = interHubEdges.find(
-                (item) =>
-                  (item.sourceCluster === sourceCluster && item.targetCluster === targetCluster) ||
-                  (item.sourceCluster === targetCluster && item.targetCluster === sourceCluster),
-              );
-              if (pair) {
-                particleFlow.pulse(pair, nowMs);
-                conduitPulseUntil.set(pair.key, nowMs + 600);
-              }
-            }
-          }
+          rebuildConduits();
+          refreshLabels();
           continue;
         }
-
         if (event.type === "entity_classified") {
           const payload = event.payload as { entity_id?: string; cluster_id?: string };
-          const entityId = payload.entity_id ?? event.persisted_id;
-          if (typeof entityId !== "string") continue;
-          const existing = entities.get(entityId);
-          if (!existing) continue;
-          entities.set(entityId, { ...existing, cluster_id: payload.cluster_id });
-          slots = computeVisibleEntitySlots(reframedEntities(), CLUSTER_IDS, maxVisiblePerCluster, centroids);
-          syncSlotIndexes();
-          rebuildEdges();
-          refreshClusterLabels();
-          continue;
-        }
-
-        if (event.type === "entity_modified") {
-          const id = event.persisted_id ?? event.source_id;
-          if (typeof id !== "string") continue;
-          flashByNode.set(id, nowMs + 500);
-        }
-
-        if (event.type === "cluster_health_changed") {
-          refreshClusterLabels();
-          continue;
-        }
-
-        if (event.type === "agent_action") {
-          const payload = event.payload as { action_id?: string; cluster_id?: string };
-          if (typeof payload.action_id === "string" && isClusterId(payload.cluster_id)) {
-            aegisParticles.spawn(payload.action_id, payload.cluster_id, nowMs);
-            aegisGates.get(payload.cluster_id)?.setState("evaluating", nowMs);
+          const id = payload.entity_id ?? event.persisted_id;
+          if (typeof id === "string" && entities.has(id)) {
+            const existing = entities.get(id)!;
+            entities.set(id, { ...existing, cluster_id: payload.cluster_id });
+            syncSlots();
+            rebuildConduits();
+            refreshLabels();
           }
           continue;
         }
-
-        if (event.type === "agent_action_evaluated") {
-          const payload = event.payload as { action_id?: string; cluster_id?: string; decision?: string };
-          if (typeof payload.action_id === "string" && isClusterId(payload.cluster_id)) {
-            const decision = payload.decision === "deny" ? "deny" : "allow";
-            aegisParticles.evaluate(payload.action_id, decision);
-            aegisGates.get(payload.cluster_id)?.setState(decision, nowMs);
-          }
-          continue;
-        }
+        if (event.type === "cluster_health_changed") refreshLabels();
+        void nowMs;
       }
       liveEventsRef.current = deferred.slice(-20);
     };
 
+    const onPointerMove = (ev: PointerEvent) => {
+      idleOrbit.noteUserInput(ev.timeStamp);
+      setPointer(ev);
+      hoveredIdRef.current = hitNodeId();
+    };
+    const onPointerDown = (ev: PointerEvent) => {
+      idleOrbit.noteUserInput(ev.timeStamp);
+      setPointer(ev);
+      const nodeId = hitNodeId();
+      if (nodeId) {
+        select(nodeId);
+        const target = positionsById.get(nodeId);
+        if (target) startCameraFlight(target, 54, ev.timeStamp);
+        return;
+      }
+      const cluster = hitHubCluster();
+      if (cluster) {
+        selectCluster(cluster);
+        startCameraFlight(CLUSTER_CENTROIDS[cluster], 72, ev.timeStamp);
+        return;
+      }
+      resetCamera();
+    };
+    const onKeyDown = (ev: KeyboardEvent) => {
+      idleOrbit.noteUserInput(ev.timeStamp);
+      const target = ev.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
+      const key = ev.key.toLowerCase();
+      if (key === "escape") {
+        ev.preventDefault();
+        resetCamera();
+      }
+      if (shouldResetCameraFromKey(key, paletteOpen) || key === "0") {
+        ev.preventDefault();
+        resetCamera();
+      }
+    };
+    const onFlyToEntity = (ev: Event) => {
+      const id = (ev as CustomEvent<{ id?: string }>).detail?.id;
+      if (!id) return;
+      const position = findEntityPosition(entities.get(id), positionsById, CLUSTER_CENTROIDS);
+      if (!position) return;
+      select(id);
+      startCameraFlight(position, 54);
+    };
+    const onPaletteState = (ev: Event) => {
+      paletteOpen = Boolean((ev as CustomEvent<{ open?: boolean }>).detail?.open);
+    };
+    const onTraverseClusters = () => {
+      const route: ClusterId[] = ["company_knowledge", "execution_context", "agents"];
+      route.forEach((cluster, index) => {
+        traversalTimers.push(window.setTimeout(() => startCameraFlight(CLUSTER_CENTROIDS[cluster], 86), index * 850));
+      });
+    };
+
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
-    renderer.domElement.addEventListener("wheel", notifyUserInput, { passive: true });
-    renderer.domElement.addEventListener("touchstart", notifyUserInput, { passive: true });
+    renderer.domElement.addEventListener("wheel", (event) => idleOrbit.noteUserInput(event.timeStamp), { passive: true });
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("axiom:reset-view", onHudResetView);
     window.addEventListener("axiom:fly-to-entity", onFlyToEntity);
     window.addEventListener("axiom:palette-state", onPaletteState);
-    window.addEventListener("axiom:layer-toggle", onLayerToggle);
-    window.addEventListener("axiom:highlight-entities", onHighlightEntities);
+    window.addEventListener("axiom:traverse-clusters", onTraverseClusters);
 
     const fps = new RollingFpsCounter(60);
-    const fpsGuard = new FpsGuard();
-    const offBudgetChange = fpsGuard.onBudgetChange((nextBudget) => {
-      maxVisiblePerCluster = nextBudget;
-      slots = computeVisibleEntitySlots(reframedEntities(), CLUSTER_IDS, maxVisiblePerCluster, centroids);
-      syncSlotIndexes();
-      rebuildEdges();
-    });
     let raf = 0;
     let lastFrameMs = 0;
-
     const tick = (t: number) => {
-      const dtMs = lastFrameMs === 0 ? 16.7 : t - lastFrameMs;
+      const dt = lastFrameMs === 0 ? 16.7 : t - lastFrameMs;
       lastFrameMs = t;
-      void dtMs;
+      void dt;
       processLiveEvents(t);
-      nebula.update(t);
-      nebula.mesh.rotation.z += 0.00012;
-      nebula.mesh.rotation.y += 0.00007;
-      updateClusterAuras(clusterAuras, t);
-      const health = useBrainStore.getState().clusterHealth;
-      for (const aura of clusterAuras) {
-        const cluster = aura.userData.cluster as ClusterId | undefined;
-        if (cluster) aura.material.color.copy(auraColorForHealth(cluster, health[cluster]?.status));
-      }
+      stars.update(t);
       for (const [index, cluster] of CLUSTER_IDS.entries()) {
         const hub = hubMeshes.get(cluster);
         if (hub) hub.material.emissiveIntensity = hubEmissiveIntensityAt(HUB_EMISSIVE, index, t);
-        aegisGates.get(cluster)?.update(t);
+        const core = hubCores[index];
+        if (core) core.scale.setScalar(0.9 + Math.sin(t * 0.0015 + index) * 0.05);
+        const halo = hubHalos[index];
+        if (halo) halo.material.opacity = (cluster === "company_knowledge" || cluster === "execution_context" ? 0.28 : 0.18) + Math.sin(t * 0.0012 + index) * 0.025;
       }
-      refreshInstanceTransforms(t);
-      updateSelectionRing();
-      particleSystem.setParticleMultiplier(fpsGuard.particleMultiplier());
-      particleSystem.update(t);
-      particleFlow.update(t);
-      for (const [key, line] of conduitLinesByKey) {
-        const material = line.material as THREE.LineBasicMaterial;
-        const until = conduitPulseUntil.get(key) ?? 0;
-        if (until > t) {
-          const remaining = (until - t) / 600;
-          material.opacity = THREE.MathUtils.lerp(0.45, 0.75, remaining);
-        } else {
-          material.opacity = 0.45;
-        }
-      }
-      radialTraffic.update(t);
-      aegisParticles.update(t);
       const selectedId = useBrainStore.getState().selectedId;
-      if (selectedId) {
-        const target = findEntityPosition(entities.get(selectedId), positionsById, centroids);
-        if (target) {
-          const desired = target.clone().add(new THREE.Vector3(0, 18, 55));
-          if (focusTargetRef.current) {
-            camera.position.lerp(desired, 0.08);
-            controls.target.lerp(target, 0.12);
-            if (camera.position.distanceTo(desired) < 0.1) focusTargetRef.current = null;
-          }
-        }
+      for (let i = 0; i < slots.length; i++) composeNodeTransform(nodeMesh, i, slots[i], selectedId, hoveredIdRef.current, t);
+      nodeMesh.instanceMatrix.needsUpdate = true;
+      if (selectedId && positionsById.has(selectedId)) {
+        selectionRing.visible = true;
+        selectionRing.position.copy(positionsById.get(selectedId)!);
+        selectionRing.lookAt(camera.position);
+      } else {
+        selectionRing.visible = false;
+      }
+      particleFlow.update(t);
+      for (const [key, line] of linesByKey) {
+        const material = line.material as THREE.LineBasicMaterial;
+        material.opacity = hoveredIdRef.current || selectedId ? 0.13 : 0.08;
+        void key;
       }
       if (cameraFlight) {
-        const progress = Math.min(1, (t - cameraFlight.startedAt) / cameraFlight.durationMs);
+        const progress = Math.min(1, (t - cameraFlight.startedAt) / CAMERA_ANIMATION_MS);
         const eased = easeInOutCubic(progress);
         camera.position.lerpVectors(cameraFlight.fromPosition, cameraFlight.toPosition, eased);
         controls.target.lerpVectors(cameraFlight.fromTarget, cameraFlight.toTarget, eased);
         if (progress >= 1) cameraFlight = null;
       }
-      ring.lookAt(camera.position);
-      if (!cameraFlight && !focusTargetRef.current) idleOrbit.update(t);
+      if (!cameraFlight) idleOrbit.update(t);
       controls.update();
       composer.render();
       labelRenderer.render(scene, camera);
-      const value = fps.tick(t);
-      if (value) {
-        setFps(value);
-        fpsGuard.sample(value, t);
-      }
+      const fpsValue = fps.tick(t);
+      if (fpsValue) setFps(fpsValue);
       raf = window.requestAnimationFrame(tick);
     };
     raf = window.requestAnimationFrame(tick);
@@ -867,49 +771,34 @@ export function Brain() {
     window.addEventListener("resize", onResize);
 
     return () => {
-      window.removeEventListener("resize", onResize);
+      traversalTimers.forEach((timer) => window.clearTimeout(timer));
       window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onResize);
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
-      renderer.domElement.removeEventListener("wheel", notifyUserInput);
-      renderer.domElement.removeEventListener("touchstart", notifyUserInput);
       window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("axiom:reset-view", onHudResetView);
       window.removeEventListener("axiom:fly-to-entity", onFlyToEntity);
       window.removeEventListener("axiom:palette-state", onPaletteState);
-      window.removeEventListener("axiom:layer-toggle", onLayerToggle);
-      window.removeEventListener("axiom:highlight-entities", onHighlightEntities);
+      window.removeEventListener("axiom:traverse-clusters", onTraverseClusters);
       controls.dispose();
       composer.dispose();
-      nebula.dispose();
-      particleSystem.dispose();
+      stars.dispose();
       particleFlow.dispose();
-      radialTraffic.dispose();
-      aegisParticles.dispose();
-      renderer.dispose();
       grid.geometry.dispose();
       grid.material.map?.dispose();
       grid.material.dispose();
-      nodeGeometry.dispose();
-      nodeMaterial.dispose();
+      haloTexture.dispose();
       hubGeometry.dispose();
       hubMeshes.forEach((mesh) => mesh.material.dispose());
-      aegisGates.forEach((gate) => {
-        gate.ring.geometry.dispose();
-        gate.ring.material.dispose();
+      hubCores.forEach((mesh) => {
+        mesh.geometry.dispose();
+        (mesh.material as THREE.Material).dispose();
       });
-      hubIconSprites.forEach((sprite) => {
-        const material = sprite.material as THREE.SpriteMaterial;
-        material.map?.dispose();
-        material.dispose();
-      });
-      clusterAuras.forEach((aura) => {
-        scene.remove(aura);
-        aura.geometry.dispose();
-        aura.material.dispose();
-      });
-      bracketLabelObjects.clear();
-      bracketLabelDivs.clear();
+      hubHalos.forEach((sprite) => sprite.material.dispose());
+      nodeGeometry.dispose();
+      nodeMaterial.dispose();
+      intraWeb.geometry.dispose();
+      (intraWeb.material as THREE.Material).dispose();
       bracketLines.traverse((obj) => {
         if (obj instanceof THREE.Line) {
           obj.geometry.dispose();
@@ -922,11 +811,13 @@ export function Brain() {
           (obj.material as THREE.Material).dispose();
         }
       });
-      ring.geometry.dispose();
-      ring.material.dispose();
-      offBudgetChange();
+      selectionRing.geometry.dispose();
+      (selectionRing.material as THREE.Material).dispose();
+      renderer.dispose();
       if (renderer.domElement.parentNode === el) el.removeChild(renderer.domElement);
       if (labelRenderer.domElement.parentNode === el) el.removeChild(labelRenderer.domElement);
+      labelObjects.clear();
+      labelDivs.clear();
     };
   }, [sceneReady, select, selectCluster, setFps]);
 

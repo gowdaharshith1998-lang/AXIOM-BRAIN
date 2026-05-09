@@ -16,7 +16,7 @@ describe("ClusterBracketLabel", () => {
   it("renders the cluster label and count", () => {
     render(<ClusterBracketLabel cluster="company_knowledge" count={961} />);
     expect(screen.getByText("COMPANY KNOWLEDGE")).toBeInTheDocument();
-    expect(screen.getByText("961 entities · 0.0K LOC")).toBeInTheDocument();
+    expect(screen.getByText("961 entities · 0 relationships")).toBeInTheDocument();
   });
 
   it("colors labels by cluster", () => {
@@ -27,7 +27,7 @@ describe("ClusterBracketLabel", () => {
   it("positions labels outside the constellation", () => {
     const hub = CLUSTER_CENTROIDS.people_teams;
     const anchor = clusterLabelAnchor(hub);
-    expect(anchor.distanceTo(hub)).toBeGreaterThan(55);
+    expect(anchor.distanceTo(hub)).toBeGreaterThan(10);
   });
 
   it("computes bracket endpoints from label toward hub", () => {
@@ -43,20 +43,17 @@ describe("ClusterBracketLabel", () => {
     expect(clusterLabelText("customers")).toBe("CUSTOMERS");
   });
 
-  it("renders count, loc, and health pill metadata", () => {
+  it("renders count and relationship metadata", () => {
     const div = createClusterBracketElement("billing", 4, {
       entities: 412,
-      loc: "24.8K",
-      health: "degraded",
+      relationships: 24800,
     });
-    expect(div.textContent).toContain("412 entities · 24.8K LOC");
-    expect(div.querySelector(".health-degraded")?.textContent).toBe("degraded");
+    expect(div.textContent).toContain("412 entities · 25k relationships");
   });
 
-  it("flashes when health status transitions", () => {
-    const div = createClusterBracketElement("billing", 4, { health: "healthy" });
-    updateClusterBracketElement(div, "billing", 4, { health: "critical" });
-    expect(div.classList.contains("health-flash")).toBe(true);
-    expect(div.querySelector(".health-critical")?.textContent).toBe("critical");
+  it("updates relationship metadata", () => {
+    const div = createClusterBracketElement("billing", 4, { relationships: 1 });
+    updateClusterBracketElement(div, "billing", 4, { relationships: 9 });
+    expect(div.textContent).toContain("4 entities · 9 relationships");
   });
 });
