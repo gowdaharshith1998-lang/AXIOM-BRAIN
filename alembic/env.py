@@ -8,6 +8,11 @@ from sqlalchemy import engine_from_config, pool
 
 from axiom.schema.models import Base
 
+# Side-effect imports: every module that defines ORM tables on `Base` must be
+# imported here so its tables are registered into `Base.metadata` before
+# alembic snapshots `target_metadata`.
+import axiom.vault.models  # noqa: E402, F401  -- registers `secrets` table
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config

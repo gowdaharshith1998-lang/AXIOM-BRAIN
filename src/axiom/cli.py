@@ -3,6 +3,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
+import sys
+from collections import Counter
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -46,6 +49,60 @@ def cmd_serve(args: argparse.Namespace) -> None:
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 
+def cmd_vault_init(args: argparse.Namespace) -> None:
+    """Generate a fresh Fernet master key and print copy/paste instructions.
+
+    Refuses to overwrite if ``AXIOM_VAULT_KEY`` is already set in the current
+    environment — rotation is destructive (existing ciphertext becomes
+    unreadable) and must be a deliberate manual step.
+    """
+    from axiom.vault import generate_master_key
+    from axiom.vault.crypto import ENV_VAR
+
+    if os.environ.get(ENV_VAR):
+        print(
+            f"refusing to generate a new key: {ENV_VAR} is already set in the "
+            f"current environment.\n"
+            f"rotating the master key invalidates every existing encrypted secret. "
+            f"if you really want to rotate, unset {ENV_VAR} first, generate, then "
+            f"manually re-store every secret with the new key.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+    key = generate_master_key()
+    print(f"# AXIOM vault master key (Fernet, 32-byte url-safe base64)")
+    print(f"# Add the line below to your .env file. Keep it secret. Back it up.")
+    print(f"# Losing it makes every stored secret permanently unreadable.")
+    print(f"{ENV_VAR}={key}")
+
+
+def cmd_vault_status(args: argparse.Namespace) -> None:
+    """Report whether the vault is unlocked and per-provider secret counts.
+
+    Never prints plaintext, ciphertext, or key material.
+    """
+    from axiom.vault import list_secrets
+    from axiom.vault.crypto import ENV_VAR
+
+    from axiom.storage.db import init_engine
+
+    init_engine(args.db_url)
+
+    locked = not os.environ.get(ENV_VAR)
+    if locked:
+        print(f"vault: LOCKED ({ENV_VAR} not set)")
+    else:
+        print("vault: unlocked")
+
+    metas = list_secrets()
+    print(f"stored secrets: {len(metas)}")
+    if metas:
+        counts = Counter(m.provider_id for m in metas)
+        for provider in sorted(counts):
+            print(f"  {provider}: {counts[provider]}")
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(prog="axiom")
@@ -64,6 +121,20 @@ def main() -> None:
     p_serve.add_argument("--rate", type=float, default=0.125)
     p_serve.add_argument("--pause-after", type=int, default=None)
     p_serve.set_defaults(func=cmd_serve)
+
+    p_vault = sub.add_parser("vault", help="manage the encrypted secrets vault")
+    vault_sub = p_vault.add_subparsers(dest="vault_cmd", required=True)
+
+    p_vault_init = vault_sub.add_parser(
+        "init", help="generate a fresh Fernet master key and print it to stdout"
+    )
+    p_vault_init.set_defaults(func=cmd_vault_init)
+
+    p_vault_status = vault_sub.add_parser(
+        "status", help="report vault lock state and per-provider secret counts"
+    )
+    p_vault_status.add_argument("--db-url", default="sqlite:///./axiom.db")
+    p_vault_status.set_defaults(func=cmd_vault_status)
 
     args = parser.parse_args()
     args.func(args)
