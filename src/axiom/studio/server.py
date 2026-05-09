@@ -65,6 +65,7 @@ def create_app(
         if live
         else None
     )
+    demo_simulator_enabled = os.environ.get("AXIOM_DEMO_SIMULATOR") == "1"
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -108,8 +109,12 @@ def create_app(
                 await asyncio.sleep(15)
 
         health_task = asyncio.create_task(cluster_health_loop())
-        agent_action_task = asyncio.create_task(
-            emit_demo_agent_actions(broadcaster, session_factory=session_local)
+        agent_action_task = (
+            asyncio.create_task(
+                emit_demo_agent_actions(broadcaster, session_factory=session_local)
+            )
+            if demo_simulator_enabled
+            else None
         )
         warden_task = asyncio.create_task(emit_demo_warden_insights(broadcaster, session_local))
         app.state.cluster_health_task = health_task
@@ -137,12 +142,14 @@ def create_app(
                 if organizer is not None:
                     await organizer.cancel()
                 health_task.cancel()
-                agent_action_task.cancel()
+                if agent_action_task is not None:
+                    agent_action_task.cancel()
                 warden_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await health_task
-                with suppress(asyncio.CancelledError):
-                    await agent_action_task
+                if agent_action_task is not None:
+                    with suppress(asyncio.CancelledError):
+                        await agent_action_task
                 with suppress(asyncio.CancelledError):
                     await warden_task
                 engine.dispose()
@@ -169,12 +176,14 @@ def create_app(
                     if organizer is not None:
                         await organizer.cancel()
                     health_task.cancel()
-                    agent_action_task.cancel()
+                    if agent_action_task is not None:
+                        agent_action_task.cancel()
                     warden_task.cancel()
                     with suppress(asyncio.CancelledError):
                         await health_task
-                    with suppress(asyncio.CancelledError):
-                        await agent_action_task
+                    if agent_action_task is not None:
+                        with suppress(asyncio.CancelledError):
+                            await agent_action_task
                     with suppress(asyncio.CancelledError):
                         await warden_task
                     engine.dispose()

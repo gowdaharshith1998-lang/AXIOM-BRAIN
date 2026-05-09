@@ -306,7 +306,8 @@ export function Brain() {
   }, [bootstrap, setClusterHealth]);
 
   useEffect(() => {
-    const url = `ws://${window.location.hostname}:8000/ws/brain`;
+    const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
+    const url = `${wsScheme}://${window.location.host}/ws/brain`;
     const ws = new BrainSocket(url);
     setConnectionStatus("syncing");
     const off = ws.on((event) => {

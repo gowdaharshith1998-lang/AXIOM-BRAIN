@@ -138,3 +138,20 @@ def test_ws_replay_since_seq(tmp_path: Path) -> None:
             assert msg1["seq"] == 6
             msg2 = ws.receive_json()
             assert msg2["seq"] == 7
+
+
+def test_demo_simulator_disabled_by_default_emits_no_agent_action_events(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("AXIOM_DEMO_SIMULATOR", raising=False)
+    db_url = _make_db_url(tmp_path)
+    engine = create_engine(db_url, future=True)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    app = create_app(db_url=db_url, enable_organizer=False)
+    with TestClient(app):
+        time.sleep(9.0)
+        assert app.state.agent_action_task is None
+        assert app.state.broadcaster.current_seq == 0
