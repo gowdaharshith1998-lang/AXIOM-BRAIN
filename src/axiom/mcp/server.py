@@ -5,12 +5,13 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Literal
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.api.search import _score_title
@@ -39,6 +40,14 @@ class _GraphCache:
         self.entities: dict[str, _EntityLite] = {}
         self.outgoing: dict[str, list[tuple[str, str, str]]] = {}
         self.incoming: dict[str, list[tuple[str, str, str]]] = {}
+
+
+@dataclass(slots=True)
+class _SyncState:
+    entity_count: int = 0
+    edge_count: int = 0
+    last_entity_updated_at: datetime | None = None
+    last_edge_created_at: datetime | None = None
 
 
 def _title_from_data(entity_id: str, data: dict[str, Any]) -> str:
@@ -101,6 +110,7 @@ class AxiomMCPService:
         self._fts_conn.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS entities_fts USING fts5(entity_id UNINDEXED, searchable)"
         )
+        self._sync_state = _SyncState()
 
     def _refresh_cache_if_needed(self, session: Session) -> None:
         now = time.monotonic()
@@ -111,50 +121,120 @@ class AxiomMCPService:
             if now - self._cache_loaded_at < self._cache_ttl_sec:
                 return
 
-            entities = session.execute(select(Entity)).scalars().all()
-            edges = session.execute(select(Edge)).scalars().all()
+            entity_count = int(session.execute(select(func.count(Entity.id))).scalar_one())
+            edge_count = int(session.execute(select(func.count(Edge.id))).scalar_one())
+            last_entity_updated_at = session.execute(select(func.max(Entity.updated_at))).scalar_one()
+            last_edge_created_at = session.execute(select(func.max(Edge.created_at))).scalar_one()
 
-            new_cache = _GraphCache()
-            for row in entities:
-                lite = _EntityLite(
-                    id=row.id,
-                    type=row.type,
-                    source_id=row.source_id,
-                    cluster_id=row.cluster_id,
-                    composite_importance=float(row.composite_importance or 0.0),
-                    data=row.data,
-                )
-                new_cache.entities[row.id] = lite
-                new_cache.outgoing[row.id] = []
-                new_cache.incoming[row.id] = []
-
-            for edge in edges:
-                if edge.source_id in new_cache.outgoing:
-                    new_cache.outgoing[edge.source_id].append(
-                        (edge.target_id, edge.id, edge.relationship)
-                    )
-                if edge.target_id in new_cache.incoming:
-                    new_cache.incoming[edge.target_id].append(
-                        (edge.source_id, edge.id, edge.relationship)
-                    )
-
-            cur = self._fts_conn.cursor()
-            cur.execute("DELETE FROM entities_fts")
-            rows = []
-            for ent in new_cache.entities.values():
-                title = _title_from_data(ent.id, ent.data)
-                name = str(ent.data.get("name", ""))
-                subject = str(ent.data.get("subject", ""))
-                label = str(ent.data.get("label", ""))
-                rows.append((ent.id, f"{title} {name} {subject} {label}".strip()))
-            cur.executemany(
-                "INSERT INTO entities_fts(entity_id, searchable) VALUES (?, ?)",
-                rows,
+            requires_full_rebuild = (
+                self._sync_state.entity_count == 0
+                or entity_count < self._sync_state.entity_count
+                or edge_count < self._sync_state.edge_count
+                or self._sync_state.last_entity_updated_at is None
+                or self._sync_state.last_edge_created_at is None
             )
-            self._fts_conn.commit()
 
-            self._cache = new_cache
+            if requires_full_rebuild:
+                self._full_rebuild(session)
+            else:
+                self._incremental_sync(
+                    session,
+                    last_entity_updated_at=last_entity_updated_at,
+                    last_edge_created_at=last_edge_created_at,
+                )
+
+            self._sync_state = _SyncState(
+                entity_count=entity_count,
+                edge_count=edge_count,
+                last_entity_updated_at=last_entity_updated_at,
+                last_edge_created_at=last_edge_created_at,
+            )
             self._cache_loaded_at = now
+
+    def _full_rebuild(self, session: Session) -> None:
+        entities = session.execute(select(Entity)).scalars().all()
+        edges = session.execute(select(Edge)).scalars().all()
+
+        new_cache = _GraphCache()
+        for row in entities:
+            lite = _EntityLite(
+                id=row.id,
+                type=row.type,
+                source_id=row.source_id,
+                cluster_id=row.cluster_id,
+                composite_importance=float(row.composite_importance or 0.0),
+                data=row.data,
+            )
+            new_cache.entities[row.id] = lite
+            new_cache.outgoing[row.id] = []
+            new_cache.incoming[row.id] = []
+
+        for edge in edges:
+            if edge.source_id in new_cache.outgoing:
+                new_cache.outgoing[edge.source_id].append((edge.target_id, edge.id, edge.relationship))
+            if edge.target_id in new_cache.incoming:
+                new_cache.incoming[edge.target_id].append((edge.source_id, edge.id, edge.relationship))
+
+        cur = self._fts_conn.cursor()
+        cur.execute("DELETE FROM entities_fts")
+        rows = []
+        for ent in new_cache.entities.values():
+            rows.append((ent.id, self._searchable_text(ent)))
+        cur.executemany("INSERT INTO entities_fts(entity_id, searchable) VALUES (?, ?)", rows)
+        self._fts_conn.commit()
+        self._cache = new_cache
+
+    def _incremental_sync(
+        self,
+        session: Session,
+        *,
+        last_entity_updated_at: datetime | None,
+        last_edge_created_at: datetime | None,
+    ) -> None:
+        if self._sync_state.last_entity_updated_at is not None and last_entity_updated_at is not None:
+            changed_entities = session.execute(
+                select(Entity).where(Entity.updated_at > self._sync_state.last_entity_updated_at)
+            ).scalars().all()
+            if changed_entities:
+                cur = self._fts_conn.cursor()
+                for row in changed_entities:
+                    lite = _EntityLite(
+                        id=row.id,
+                        type=row.type,
+                        source_id=row.source_id,
+                        cluster_id=row.cluster_id,
+                        composite_importance=float(row.composite_importance or 0.0),
+                        data=row.data,
+                    )
+                    self._cache.entities[row.id] = lite
+                    self._cache.outgoing.setdefault(row.id, [])
+                    self._cache.incoming.setdefault(row.id, [])
+                    cur.execute("DELETE FROM entities_fts WHERE entity_id = ?", (row.id,))
+                    cur.execute(
+                        "INSERT INTO entities_fts(entity_id, searchable) VALUES (?, ?)",
+                        (row.id, self._searchable_text(lite)),
+                    )
+                self._fts_conn.commit()
+
+        if self._sync_state.last_edge_created_at is not None and last_edge_created_at is not None:
+            new_edges = session.execute(
+                select(Edge).where(Edge.created_at > self._sync_state.last_edge_created_at)
+            ).scalars().all()
+            for edge in new_edges:
+                self._cache.outgoing.setdefault(edge.source_id, []).append(
+                    (edge.target_id, edge.id, edge.relationship)
+                )
+                self._cache.incoming.setdefault(edge.target_id, []).append(
+                    (edge.source_id, edge.id, edge.relationship)
+                )
+
+    @staticmethod
+    def _searchable_text(ent: _EntityLite) -> str:
+        title = _title_from_data(ent.id, ent.data)
+        name = str(ent.data.get("name", ""))
+        subject = str(ent.data.get("subject", ""))
+        label = str(ent.data.get("label", ""))
+        return f"{title} {name} {subject} {label}".strip()
 
     def query_brain(
         self,
