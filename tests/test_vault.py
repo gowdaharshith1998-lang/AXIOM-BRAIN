@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from axiom.vault import (
     DuplicateSecret,
     SecretMetadataDTO,
+    SecretNotFound,
     VaultCorrupt,
     VaultLocked,
     generate_master_key,
@@ -249,11 +250,18 @@ def test_mark_tested_rejects_unknown_status(
         )
 
 
-def test_mark_tested_for_missing_secret_raises_key_error(
+def test_mark_tested_for_missing_secret_raises_secret_not_found(
     db_session: Session, unlocked_vault: str
 ) -> None:
-    with pytest.raises(KeyError):
+    with pytest.raises(SecretNotFound):
         vault_store.mark_tested_with_session(db_session, "nope", "nope", "valid")
+
+
+def test_get_secret_for_missing_secret_raises_secret_not_found(
+    db_session: Session, unlocked_vault: str
+) -> None:
+    with pytest.raises(SecretNotFound):
+        vault_store.get_secret_with_session(db_session, "nope", "nope")
 
 
 # ─── CLI: vault init ────────────────────────────────────────────────────────

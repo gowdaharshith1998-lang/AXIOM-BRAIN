@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from axiom.storage.db import get_session
 from axiom.vault import crypto
-from axiom.vault.errors import DuplicateSecret
+from axiom.vault.errors import DuplicateSecret, SecretNotFound
 from axiom.vault.models import VALID_STATUSES, Secret, SecretMetadataDTO, SecretStatus
 
 
@@ -84,11 +84,11 @@ def get_secret_with_session(
     Raises:
         VaultLocked: if the master key is not available.
         VaultCorrupt: if decryption fails (rotated key / tampered row).
-        KeyError: if no secret matches.
+        SecretNotFound: if no secret matches.
     """
     row = _get_row(session, provider_id, key_name)
     if row is None:
-        raise KeyError(f"no secret for provider_id={provider_id!r} key_name={key_name!r}")
+        raise SecretNotFound(provider_id, key_name)
     return crypto.decrypt(row.encrypted_value)
 
 
@@ -141,7 +141,7 @@ def mark_tested_with_session(
 
     Raises:
         ValueError: if ``status`` is not one of the four canonical values.
-        KeyError: if no secret matches.
+        SecretNotFound: if no secret matches.
     """
     if status not in VALID_STATUSES:
         raise ValueError(
@@ -149,7 +149,7 @@ def mark_tested_with_session(
         )
     row = _get_row(session, provider_id, key_name)
     if row is None:
-        raise KeyError(f"no secret for provider_id={provider_id!r} key_name={key_name!r}")
+        raise SecretNotFound(provider_id, key_name)
     row.status = status
     row.last_tested_at = when or datetime.utcnow()
     session.add(row)

@@ -34,3 +34,14 @@ class DuplicateSecret(VaultError):
     avoids silent drift between what the operator thinks is stored and what
     actually is.
     """
+
+
+class SecretNotFound(VaultError):
+    """Raised when ``get_secret`` or ``mark_tested`` targets a missing row."""
+
+    def __init__(self, provider_id: str, key_name: str) -> None:
+        self.provider_id = provider_id
+        self.key_name = key_name
+        super().__init__(
+            f"no secret for provider_id={provider_id!r} key_name={key_name!r}"
+        )

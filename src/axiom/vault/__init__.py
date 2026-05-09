@@ -21,6 +21,7 @@ Errors:
   * :class:`VaultLocked` — ``AXIOM_VAULT_KEY`` missing or malformed.
   * :class:`VaultCorrupt` — ciphertext cannot be decrypted with current master key.
   * :class:`DuplicateSecret` — ``(provider_id, key_name)`` already exists.
+  * :class:`SecretNotFound` — no row for ``get_secret`` / ``mark_tested``.
 
 Future phases (NOT in 5.13.0):
   * 5.13.1 — provider registry + verification.
@@ -33,7 +34,13 @@ Future phases (NOT in 5.13.0):
 from __future__ import annotations
 
 from axiom.vault.crypto import generate_master_key
-from axiom.vault.errors import DuplicateSecret, VaultCorrupt, VaultError, VaultLocked
+from axiom.vault.errors import (
+    DuplicateSecret,
+    SecretNotFound,
+    VaultCorrupt,
+    VaultError,
+    VaultLocked,
+)
 from axiom.vault.models import Secret, SecretMetadataDTO, SecretStatus
 from axiom.vault.store import (
     delete_secret,
@@ -45,6 +52,7 @@ from axiom.vault.store import (
 
 __all__ = [
     "DuplicateSecret",
+    "SecretNotFound",
     "Secret",
     "SecretMetadataDTO",
     "SecretStatus",
