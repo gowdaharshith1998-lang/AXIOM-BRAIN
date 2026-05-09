@@ -110,8 +110,8 @@ export function fibonacciSpherePoints(n: number, radius: number): THREE.Vector3[
 }
 
 export const CLUSTER_CENTROIDS: Record<ClusterId, THREE.Vector3> = {
-  company_knowledge: new THREE.Vector3(-35, 10, 0),
-  execution_context: new THREE.Vector3(38, 18, -5),
+  company_knowledge: new THREE.Vector3(-50, 10, 0),
+  execution_context: new THREE.Vector3(52, 18, -5),
   policies: new THREE.Vector3(-78, 58, 10),
   customers: new THREE.Vector3(-158, -3, 5),
   receipts: new THREE.Vector3(-62, -32, 0),

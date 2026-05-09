@@ -25,8 +25,8 @@ describe("packSatellites", () => {
       },
       { 0: 0, 1: 0, 2: 0 } as Record<0 | 1 | 2, number>,
     );
-    expect(counts[0]).toBeGreaterThanOrEqual(8);
-    expect(counts[0]).toBeLessThanOrEqual(12);
+    expect(counts[0]).toBeGreaterThanOrEqual(6);
+    expect(counts[0]).toBeLessThanOrEqual(10);
     expect(counts[0] + counts[1] + counts[2]).toBe(40);
   });
 

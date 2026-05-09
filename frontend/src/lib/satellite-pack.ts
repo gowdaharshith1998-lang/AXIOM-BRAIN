@@ -69,7 +69,7 @@ export function packSatellites(input: PackSatellitesInput): SatellitePosition[] 
     });
   }
 
-  const innerCount = Math.min(count, 8);
+  const innerCount = Math.min(count, 6);
   const remainingAfterInner = count - innerCount;
   const midCount = Math.min(remainingAfterInner, 16);
   const outerCount = Math.max(0, count - innerCount - midCount);

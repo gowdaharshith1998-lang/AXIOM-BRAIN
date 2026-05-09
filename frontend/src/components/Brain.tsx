@@ -164,8 +164,8 @@ function relationshipCounts(edges: Iterable<Edge>, entitiesById: Map<string, Ent
 function labelAnchorForCluster(cluster: ClusterId): THREE.Vector3 {
   const hub = CLUSTER_CENTROIDS[cluster];
   const overrides: Partial<Record<ClusterId, THREE.Vector3>> = {
-    company_knowledge: new THREE.Vector3(-78, 28, 5),
-    execution_context: new THREE.Vector3(25, 44, 0),
+    company_knowledge: new THREE.Vector3(-95, 28, 5),
+    execution_context: new THREE.Vector3(40, 44, 0),
     policies: new THREE.Vector3(-72, 76, 14),
     customers: new THREE.Vector3(-140, 8, 10),
     receipts: new THREE.Vector3(-96, -28, 5),
@@ -468,9 +468,9 @@ export function Brain() {
 
       const core = new THREE.Mesh(
         new THREE.SphereGeometry(1.6, 16, 16),
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.42, blending: THREE.AdditiveBlending }),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending }),
       );
-      core.position.copy(CLUSTER_CENTROIDS[cluster]);
+      core.position.copy(CLUSTER_CENTROIDS[cluster]).add(new THREE.Vector3(0, 0, 0.5));
       hubCores.push(core);
       scene.add(core);
 

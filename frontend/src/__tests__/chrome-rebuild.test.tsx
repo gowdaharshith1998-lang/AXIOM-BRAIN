@@ -24,17 +24,20 @@ describe("phase 5.12 visual chrome", () => {
     expect(screen.getByText("LIVE")).toBeInTheDocument();
   });
 
-  it("renders reference-matched health stats", () => {
+  it("renders brain health card rows from store-backed metrics", () => {
     useBrainStore.setState({
       entities: new Map([["a", { id: "a", type: "document", data: { composite_importance: 0.9 }, source_id: null, created_at: "t", updated_at: "t" }]]),
       edges: new Map([["e", { id: "e", source_id: "a", target_id: "b", relationship: "mentions", data: {}, created_at: "t" }]]),
+      clusterHealth: {},
     });
     render(<BrainHealthCard />);
     expect(screen.getByText("Brain Health")).toBeInTheDocument();
     expect(screen.getByText("Entities")).toBeInTheDocument();
     expect(screen.getByText("Relationships")).toBeInTheDocument();
-    expect(screen.getByText("2.48M")).toBeInTheDocument();
-    expect(screen.getByText("98.2%")).toBeInTheDocument();
+    expect(screen.getByText("Classified")).toBeInTheDocument();
+    expect(screen.getByText("Health")).toBeInTheDocument();
+    expect(screen.queryByText("2.48M")).not.toBeInTheDocument();
+    expect(screen.getByText("Initializing")).toBeInTheDocument();
   });
 
   it("query prompt chips dispatch traversal events", () => {
