@@ -1,21 +1,29 @@
 import { AxiomGlyph } from "@/components/AxiomGlyph";
+import { useSettingsStore } from "@/state/settings.store";
 
 type NavItem = {
   label: string;
   icon: string;
-  active?: boolean;
+  /** Top-section items use this view id when wired */
+  view?: "brain";
+};
+
+type BottomNavItem = {
+  label: string;
+  icon: string;
+  view?: "settings";
 };
 
 const topItems: NavItem[] = [
-  { label: "Brain", icon: "brain", active: true },
+  { label: "Brain", icon: "brain", view: "brain" },
   { label: "Explore", icon: "search" },
   { label: "Agents", icon: "bot" },
   { label: "Insights", icon: "chart" },
   { label: "Governance", icon: "shield" },
 ];
 
-const bottomItems: NavItem[] = [
-  { label: "Settings", icon: "gear" },
+const bottomItems: BottomNavItem[] = [
+  { label: "Settings", icon: "gear", view: "settings" },
   { label: "Account", icon: "user" },
 ];
 
@@ -34,20 +42,29 @@ function Icon({ name }: { name: string }) {
   );
 }
 
-function NavButton({ item }: { item: NavItem }) {
+function NavButton({
+  item,
+  active,
+  onActivate,
+}: {
+  item: NavItem | BottomNavItem;
+  active: boolean;
+  onActivate?: () => void;
+}) {
   return (
     <button
       type="button"
       title={item.label}
+      onClick={onActivate}
       className={`group relative flex h-[86px] w-full flex-col items-center justify-center gap-2 transition ${
-        item.active ? "text-[#00E5D8]" : "text-[#8d9bbb] hover:text-[#E8F0FF]"
+        active ? "text-[#00E5D8]" : "text-[#8d9bbb] hover:text-[#E8F0FF]"
       }`}
     >
-      {item.active && <span className="absolute left-0 h-12 w-[2px] rounded-r-full bg-[#00E5D8] shadow-[0_0_14px_#00E5D8]" />}
-      <span className={`rounded-xl p-2 ${item.active ? "bg-[#00E5D8]/12 shadow-[0_0_24px_rgba(0,229,216,0.22)]" : "bg-transparent"}`}>
+      {active && <span className="absolute left-0 h-12 w-[2px] rounded-r-full bg-[#00E5D8] shadow-[0_0_14px_#00E5D8]" />}
+      <span className={`rounded-xl p-2 ${active ? "bg-[#00E5D8]/12 shadow-[0_0_24px_rgba(0,229,216,0.22)]" : "bg-transparent"}`}>
         <Icon name={item.icon} />
       </span>
-      <span className={`font-mono text-[12px] ${item.active ? "text-[#00E5D8]" : "text-[#9aa8c4]"}`}>
+      <span className={`font-mono text-[12px] ${active ? "text-[#00E5D8]" : "text-[#9aa8c4]"}`}>
         {item.label}
       </span>
     </button>
@@ -55,6 +72,9 @@ function NavButton({ item }: { item: NavItem }) {
 }
 
 export function NavRail() {
+  const activeView = useSettingsStore((s) => s.activeView);
+  const setActiveView = useSettingsStore((s) => s.setActiveView);
+
   return (
     <aside className="fixed inset-y-0 left-0 z-30 flex w-[84px] flex-col items-center border-r border-[#1a3550]/60 bg-[#06101b]/78 shadow-[18px_0_50px_rgba(0,0,0,0.34)] backdrop-blur-xl">
       <div className="mt-6 flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 text-[#E8F0FF]/85">
@@ -64,12 +84,22 @@ export function NavRail() {
       </div>
       <div className="mt-8 w-full">
         {topItems.map((item) => (
-          <NavButton key={item.label} item={item} />
+          <NavButton
+            key={item.label}
+            item={item}
+            active={item.view === "brain" ? activeView === "brain" : false}
+            onActivate={item.view === "brain" ? () => setActiveView("brain") : undefined}
+          />
         ))}
       </div>
       <div className="mb-5 mt-auto w-full">
         {bottomItems.map((item) => (
-          <NavButton key={item.label} item={item} />
+          <NavButton
+            key={item.label}
+            item={item}
+            active={item.view === "settings" ? activeView === "settings" : false}
+            onActivate={item.view === "settings" ? () => setActiveView("settings") : undefined}
+          />
         ))}
       </div>
     </aside>

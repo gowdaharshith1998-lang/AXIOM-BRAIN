@@ -1,8 +1,9 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { App } from "@/App";
 import { useBrainStore } from "@/state/brain.store";
+import { useSettingsStore } from "@/state/settings.store";
 
 vi.mock("@/components/Brain", () => ({ Brain: () => <div /> }));
 vi.mock("@/components/NavRail", () => ({ NavRail: () => <div /> }));
@@ -15,6 +16,10 @@ vi.mock("@/components/StatusFooter", () => ({ StatusFooter: () => <div /> }));
 vi.mock("@/components/CommandPalette", () => ({ CommandPalette: () => <div /> }));
 
 describe("browser title", () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ activeView: "brain" });
+  });
+
   it("includes entity count when live", () => {
     useBrainStore.setState({
       entities: new Map([
