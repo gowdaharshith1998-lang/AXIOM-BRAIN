@@ -1,7 +1,7 @@
 import * as THREE from "three";
 
 export const IDLE_THRESHOLD_MS = 4000;
-export const IDLE_ORBIT_DEGREES_PER_FRAME = 0.05;
+export const IDLE_ORBIT_DEGREES_PER_FRAME = 0.025;
 
 export type OrbitLikeControls = {
   target: THREE.Vector3;

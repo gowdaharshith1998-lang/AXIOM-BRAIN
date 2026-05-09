@@ -5,7 +5,12 @@ from datetime import datetime, timedelta
 from pytest import MonkeyPatch
 from sqlalchemy.orm import Session
 
-from axiom.organize.cluster_health import ClusterHealth, ClusterHealthMonitor
+from axiom.organize.cluster_health import (
+    ClusterHealth,
+    ClusterHealthMonitor,
+    compute_brain_health_score,
+    health_status_for_score,
+)
 from axiom.schema.models import Entity
 
 
@@ -58,3 +63,39 @@ def test_cluster_health_env_override(monkeypatch: MonkeyPatch, db_session: Sessi
     snapshot = ClusterHealthMonitor().snapshot(db_session)
 
     assert snapshot["billing_payments"].status is ClusterHealth.CRITICAL
+
+
+def test_brain_health_score_full_healthy_state() -> None:
+    score = compute_brain_health_score(
+        classified_pct=100.0,
+        events_per_min=190.0,
+        fps=60.0,
+        clusters_present=8,
+        total_clusters=8,
+    )
+    assert score >= 0.85
+    assert health_status_for_score(score) is ClusterHealth.HEALTHY
+
+
+def test_brain_health_score_zero_events_is_critical() -> None:
+    score = compute_brain_health_score(
+        classified_pct=100.0,
+        events_per_min=0.0,
+        fps=60.0,
+        clusters_present=8,
+        total_clusters=8,
+    )
+    assert score < 0.60
+    assert health_status_for_score(score) is ClusterHealth.CRITICAL
+
+
+def test_brain_health_score_half_classified_is_degraded() -> None:
+    score = compute_brain_health_score(
+        classified_pct=50.0,
+        events_per_min=190.0,
+        fps=60.0,
+        clusters_present=8,
+        total_clusters=8,
+    )
+    assert 0.60 <= score < 0.85
+    assert health_status_for_score(score) is ClusterHealth.DEGRADED

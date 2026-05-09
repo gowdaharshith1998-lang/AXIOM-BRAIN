@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
@@ -18,7 +19,11 @@ from axiom.govern.warden import emit_demo_warden_insights
 from axiom.ingest.broadcaster import EventBroadcaster
 from axiom.ingest.pipeline import IngestPipeline
 from axiom.organize.agent import OrganizerAgent
-from axiom.organize.cluster_health import ClusterHealthMonitor
+from axiom.organize.cluster_health import (
+    ClusterHealthMonitor,
+    compute_brain_health_score,
+    health_status_for_score,
+)
 from axiom.schema.dto import EdgeDTO, EntityDTO
 from axiom.schema.models import Edge, Entity
 from axiom.sources.base import IngestEvent
@@ -59,9 +64,13 @@ def create_app(
         app.state.agent_action_task = None
         app.state.warden_task = None
         app.state.organizer = None
+        app.state.events_per_min = 0.0
         previous_health: dict[str, str] = {}
+        last_seq = broadcaster.current_seq
+        last_seq_at = asyncio.get_running_loop().time()
 
         async def cluster_health_loop() -> None:
+            nonlocal last_seq, last_seq_at
             while True:
                 with session_local() as session:
                     snapshot = cluster_health_monitor.snapshot(session)
@@ -78,6 +87,12 @@ def create_app(
                             }
                         )
                     previous_health[cluster_id] = status
+                now = asyncio.get_running_loop().time()
+                elapsed = max(now - last_seq_at, 1e-6)
+                seq_delta = max(0, broadcaster.current_seq - last_seq)
+                app.state.events_per_min = (seq_delta / elapsed) * 60.0
+                last_seq = broadcaster.current_seq
+                last_seq_at = now
                 await asyncio.sleep(15)
 
         health_task = asyncio.create_task(cluster_health_loop())
@@ -177,10 +192,33 @@ def create_app(
             return [EntityDTO.model_validate(r).model_dump(mode="json") for r in rows]
 
     @app.get("/api/cluster_health")
-    def get_cluster_health() -> dict[str, dict[str, object]]:
+    def get_cluster_health() -> dict[str, object]:
         with session_local() as session:
             snapshot = cluster_health_monitor.snapshot(session)
-            return {cluster_id: item.to_json() for cluster_id, item in snapshot.items()}
+            payload = {cluster_id: item.to_json() for cluster_id, item in snapshot.items()}
+            rows = session.execute(select(Entity)).scalars().all()
+            classified = sum(1 for row in rows if (row.composite_importance or 0.0) > 0.0)
+            classified_pct = 0.0 if not rows else (classified / len(rows)) * 100.0
+            clusters_present = sum(1 for item in snapshot.values() if item.total_entities > 0)
+            events_per_min = float(getattr(app.state, "events_per_min", 0.0))
+            fps = float(os.environ.get("AXIOM_TARGET_FPS", "60"))
+            score = compute_brain_health_score(
+                classified_pct=classified_pct,
+                events_per_min=events_per_min,
+                fps=fps,
+                clusters_present=clusters_present,
+                total_clusters=len(snapshot),
+            )
+            payload["overall"] = {
+                "percentage": score,
+                "status": health_status_for_score(score).value,
+                "classified_pct": classified_pct,
+                "events_per_min": events_per_min,
+                "fps": fps,
+                "clusters_present": clusters_present,
+                "total_clusters": len(snapshot),
+            }
+            return payload
 
     @app.get("/api/sources")
     def get_sources() -> list[dict[str, object]]:

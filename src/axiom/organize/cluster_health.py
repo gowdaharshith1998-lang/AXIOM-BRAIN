@@ -69,3 +69,35 @@ class ClusterHealthMonitor:
         if last_90_count == 0:
             return ClusterHealth.CRITICAL
         return ClusterHealth.DEGRADED
+
+
+def compute_brain_health_score(
+    *,
+    classified_pct: float,
+    events_per_min: float,
+    fps: float,
+    clusters_present: int,
+    total_clusters: int,
+) -> float:
+    """
+    Composite score in [0, 1].
+    Formula:
+      0.40 * classified_ratio + 0.35 * events_component + 0.15 * fps_component + 0.10 * cluster_coverage
+    with a hard idle-penalty of -0.15 when events_per_min <= 0.
+    """
+    classified_ratio = min(max(classified_pct / 100.0, 0.0), 1.0)
+    events_component = 1.0 if events_per_min > 0 else 0.0
+    fps_component = min(max(fps / 50.0, 0.0), 1.0)
+    coverage = 0.0 if total_clusters <= 0 else min(max(clusters_present / float(total_clusters), 0.0), 1.0)
+    score = 0.40 * classified_ratio + 0.35 * events_component + 0.15 * fps_component + 0.10 * coverage
+    if events_per_min <= 0:
+        score -= 0.15
+    return min(max(score, 0.0), 1.0)
+
+
+def health_status_for_score(score: float) -> ClusterHealth:
+    if score >= 0.85:
+        return ClusterHealth.HEALTHY
+    if score >= 0.60:
+        return ClusterHealth.DEGRADED
+    return ClusterHealth.CRITICAL

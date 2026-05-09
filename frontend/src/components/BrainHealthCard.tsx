@@ -20,6 +20,7 @@ export function BrainHealthCard() {
   const edgeCount = useBrainStore((s) => s.edges.size);
   const entities = useBrainStore((s) => s.entities);
   const clusterHealth = useBrainStore((s) => s.clusterHealth);
+  const fps = useBrainStore((s) => s.fps);
 
   const [eventTimes, setEventTimes] = useState<number[]>([]);
 
@@ -40,14 +41,27 @@ export function BrainHealthCard() {
     else if (snapshot.status === "critical") critical++;
   }
   const totalClusters = healthy + degraded + critical;
-  const healthScore =
-    totalClusters === 0 ? null : ((healthy + degraded * 0.5) / totalClusters) * 100;
+  const clustersPresent = Object.values(clusterHealth).filter((snapshot) => snapshot.total_entities > 0).length;
+  const eventsPerMin = eventTimes.length;
+
+  // Health score in [0, 1]:
+  // 0.40*classified + 0.35*event-flow + 0.15*fps + 0.10*cluster-coverage; minus 0.15 when event-flow is zero.
+  const healthScore = (() => {
+    if (totalClusters === 0 || classifiedPct === null) return null;
+    const classifiedRatio = Math.max(0, Math.min(1, classifiedPct / 100));
+    const eventsComponent = eventsPerMin > 0 ? 1 : 0;
+    const fpsComponent = Math.max(0, Math.min(1, fps / 50));
+    const coverage = Math.max(0, Math.min(1, clustersPresent / Math.max(1, totalClusters)));
+    let score = 0.4 * classifiedRatio + 0.35 * eventsComponent + 0.15 * fpsComponent + 0.1 * coverage;
+    if (eventsPerMin <= 0) score -= 0.15;
+    return Math.max(0, Math.min(1, score));
+  })();
 
   type PillKind = "initializing" | "healthy" | "degraded" | "critical";
   let pillKind: PillKind;
   if (totalClusters === 0) pillKind = "initializing";
-  else if (healthScore! >= 80) pillKind = "healthy";
-  else if (healthScore! >= 40) pillKind = "degraded";
+  else if ((healthScore ?? 0) >= 0.85) pillKind = "healthy";
+  else if ((healthScore ?? 0) >= 0.6) pillKind = "degraded";
   else pillKind = "critical";
 
   const [history, setHistory] = useState<number[]>(
@@ -82,7 +96,7 @@ export function BrainHealthCard() {
     })
     .join(" ");
 
-  const healthDisplay = healthScore === null ? "—" : `${healthScore.toFixed(1)}%`;
+  const healthDisplay = healthScore === null ? "—" : `${(healthScore * 100).toFixed(1)}%`;
   const classifiedDisplay = classifiedPct === null ? "—" : `${classifiedPct.toFixed(1)}%`;
 
   const healthValueClass =
@@ -123,7 +137,7 @@ export function BrainHealthCard() {
       <div className="space-y-4 text-sm">
         <Row label="Entities" value={formatCount(entityCount)} />
         <Row label="Relationships" value={formatCount(edgeCount)} />
-        <Row label="Events / min" value={eventTimes.length.toLocaleString()} />
+        <Row label="Events / min" value={eventsPerMin.toLocaleString()} />
         <Row label="Classified" value={classifiedDisplay} />
         <div className="border-t border-white/10 pt-4">
           <Row label="Health" value={healthDisplay} valueClassName={healthValueClass} />
