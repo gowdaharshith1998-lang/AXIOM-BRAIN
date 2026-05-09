@@ -8,16 +8,17 @@ returns nothing or is ambiguous (top two scores within 1 point). Result
 is cached on a short hash of the entity title to avoid repeated calls
 for the same canonical phrase.
 
-The classifier is fully offline-safe: if no API key is configured (or
-the SDK is missing, or the call fails), it falls back to the highest
-keyword score, then to the canonical DEFAULT_CLUSTER_ID.
+The classifier is fully offline-safe: if no API key is resolved (vault
+``default`` entry for Anthropic—see :mod:`axiom.providers.router`—then
+standard ``ANTHROPIC_API_KEY`` env—or the SDK is missing, or the LLM call
+fails), it falls back to the highest keyword score, then to the canonical
+DEFAULT_CLUSTER_ID.
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
-import os
 from collections.abc import Mapping
 from typing import cast
 
@@ -27,6 +28,7 @@ from axiom.organize.clusters import (
     SEMANTIC_CLUSTERS,
     is_valid_cluster_id,
 )
+from axiom.providers.router import get_active_llm_key_anthropic
 from axiom.schema.models import Entity
 
 logger = logging.getLogger("axiom.organize.classifier")
@@ -48,11 +50,18 @@ class HybridClassifier:
         api_key: str | None = None,
     ) -> None:
         self._cache: dict[str, str] = {} if cache is None else cache
-        # Lazy: only instantiate the SDK client if a caller did not inject one
-        # AND an API key is configured. Tests inject their own client and the
-        # production server reads ANTHROPIC_API_KEY from the environment.
+        # Lazy SDK client unless injected. Default path resolves ANTHROPIC_API_KEY via
+        # vault-first router (phase 5.13.4). Explicit ``api_key=""`` disables the LLM tier.
         self._anthropic_client: object | None = anthropic_client
-        self._api_key: str | None = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if anthropic_client is not None:
+            self._api_key: str | None = (api_key.strip() if api_key and api_key.strip() else None)
+        elif api_key is not None:
+            trimmed = api_key.strip() if api_key and api_key.strip() else None
+            self._api_key = trimmed
+        else:
+            resolution = get_active_llm_key_anthropic()
+            self._api_key = resolution.key
+            logger.info("anthropic key loaded from %s", resolution.source)
 
     @property
     def cache(self) -> Mapping[str, str]:

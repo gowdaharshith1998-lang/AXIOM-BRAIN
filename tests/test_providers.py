@@ -23,18 +23,18 @@ from axiom.providers import verify as verify_mod
 
 _REAL_HTTPX_CLIENT = httpx.Client
 
-# (provider_id, expected_kind, expected_shape_len)
-_PROVIDER_EXPECTATIONS: tuple[tuple[str, str, int], ...] = (
-    ("anthropic", "llm", 1),
-    ("openai", "llm", 1),
-    ("mistral", "llm", 1),
-    ("groq", "llm", 1),
-    ("github", "connector", 1),
-    ("linear", "connector", 1),
-    ("notion", "connector", 1),
-    ("slack", "connector", 1),
-    ("google", "oauth", 2),
-    ("microsoft", "oauth", 2),
+# (provider_id, expected_kind, expected_shape_len, expected_env_var)
+_PROVIDER_EXPECTATIONS: tuple[tuple[str, str, int, str | None], ...] = (
+    ("anthropic", "llm", 1, "ANTHROPIC_API_KEY"),
+    ("openai", "llm", 1, "OPENAI_API_KEY"),
+    ("mistral", "llm", 1, "MISTRAL_API_KEY"),
+    ("groq", "llm", 1, "GROQ_API_KEY"),
+    ("github", "connector", 1, None),
+    ("linear", "connector", 1, None),
+    ("notion", "connector", 1, None),
+    ("slack", "connector", 1, None),
+    ("google", "oauth", 2, None),
+    ("microsoft", "oauth", 2, None),
 )
 
 _VERIFY_TARGETS: tuple[tuple[str, ModuleType, str], ...] = (
@@ -66,9 +66,15 @@ def _ok_handler(request: httpx.Request) -> httpx.Response:
     return httpx.Response(200, json={})
 
 
-@pytest.mark.parametrize("provider_id,expected_kind,shape_len", _PROVIDER_EXPECTATIONS)
-def test_get_provider_metadata_kind_and_shape(
-    provider_id: str, expected_kind: str, shape_len: int
+@pytest.mark.parametrize(
+    "provider_id,expected_kind,shape_len,expected_env_var",
+    _PROVIDER_EXPECTATIONS,
+)
+def test_get_provider_metadata_kind_shape_env_var_name(
+    provider_id: str,
+    expected_kind: str,
+    shape_len: int,
+    expected_env_var: str | None,
 ) -> None:
     meta = get_provider(provider_id)
     assert meta.id == provider_id
@@ -76,6 +82,7 @@ def test_get_provider_metadata_kind_and_shape(
     assert len(meta.credential_shape) == shape_len
     assert meta.docs_url.startswith("http")
     assert meta.verify_endpoint
+    assert meta.env_var_name == expected_env_var
 
 
 def test_get_provider_unknown_raises() -> None:

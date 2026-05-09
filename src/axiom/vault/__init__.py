@@ -27,7 +27,8 @@ Future phases (NOT in 5.13.0):
   * 5.13.1 — provider registry + verification.
   * 5.13.2 — HTTP API endpoints.
   * 5.13.3 — frontend UI.
-  * 5.13.4 — migrate ``ANTHROPIC_API_KEY`` reading off raw env into vault.
+  * 5.13.4 — organizer classifier resolves Anthropic keys vault-first via
+    :mod:`axiom.providers.router`, with registry env-var fallback.
   * 5.13.5+ — OAuth flows.
 """
 

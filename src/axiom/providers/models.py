@@ -41,6 +41,7 @@ class ProviderMetadata(BaseModel):
     credential_shape: tuple[CredentialField, ...]
     docs_url: str
     verify_endpoint: str
+    env_var_name: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json")
