@@ -44,7 +44,7 @@ describe("curved conduits", () => {
     const [path] = conduitPathsForEdges([edge]);
     const line = createConduitLine(path);
     expect(line.geometry.getAttribute("color").count).toBe(path.points.length);
-    expect((line.material as THREE.LineBasicMaterial).opacity).toBe(0.08);
+    expect((line.material as THREE.LineBasicMaterial).opacity).toBe(0.045);
   });
 
   it("keeps chevron count within max particles", () => {

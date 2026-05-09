@@ -21,7 +21,7 @@ export function App() {
   }, [entityCount, titleStatus]);
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-[#05050A]">
+    <div className="relative h-screen w-screen overflow-hidden bg-[#020711]">
       <NavRail />
       <TopHeader />
       <BrainHealthCard />

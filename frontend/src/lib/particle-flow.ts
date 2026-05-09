@@ -48,13 +48,13 @@ export class ParticleFlowController {
         map: texture,
         color: "#ffffff",
         transparent: true,
-        opacity: 0.95,
+        opacity: 0.55,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       });
       const sprite = new THREE.Sprite(material);
       sprite.visible = false;
-      sprite.scale.set(0.55, 0.55, 1);
+      sprite.scale.set(0.38, 0.38, 1);
       this.materialMap.set(sprite, material);
       this.sprites.push(sprite);
       this.points.add(sprite);
@@ -114,10 +114,10 @@ export class ParticleFlowController {
         } else {
           material.color.copy(particle.color);
         }
-        const pulseBoost = (this.pulseUntilByEdge.get(particle.edgeKey) ?? 0) > nowMs ? 1.35 : 1;
-        material.opacity = (particle.trail ? 0.45 : 0.95) * pulseBoost;
+        const pulseBoost = (this.pulseUntilByEdge.get(particle.edgeKey) ?? 0) > nowMs ? 1.18 : 1;
+        material.opacity = (particle.trail ? 0.22 : 0.5) * pulseBoost;
       }
-      const scale = particle.burst ? 0.7 : THREE.MathUtils.lerp(0.42, 0.62, Math.sin(t * Math.PI));
+      const scale = particle.burst ? 0.45 : THREE.MathUtils.lerp(0.28, 0.42, Math.sin(t * Math.PI));
       sprite.scale.set(scale, scale, 1);
       sprite.visible = true;
     }
@@ -173,8 +173,8 @@ export function createDotTexture(): THREE.CanvasTexture {
   const ctx = isJsdom ? null : canvas.getContext("2d");
   if (ctx) {
     const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 30);
-    gradient.addColorStop(0, "rgba(255,255,255,1)");
-    gradient.addColorStop(0.35, "rgba(255,255,255,0.95)");
+    gradient.addColorStop(0, "rgba(255,255,255,0.78)");
+    gradient.addColorStop(0.35, "rgba(255,255,255,0.42)");
     gradient.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);

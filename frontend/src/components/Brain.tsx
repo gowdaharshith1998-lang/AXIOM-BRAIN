@@ -50,7 +50,7 @@ async function fetchJson<T>(url: string): Promise<T> {
 const SCENE_TARGET = new THREE.Vector3(10, 12, 0);
 const INITIAL_CAMERA_POSITION = new THREE.Vector3(10, 12, 205);
 const CAMERA_ANIMATION_MS = 800;
-const HUB_EMISSIVE = 2;
+const HUB_EMISSIVE = 0.85;
 const MIN_VISIBLE_PER_CLUSTER = 6;
 const VISUAL_CAPS: Record<ClusterId, number> = {
   company_knowledge: 60,
@@ -190,8 +190,8 @@ function makeHaloTexture(): THREE.CanvasTexture {
   const ctx = canvas.getContext("2d");
   if (ctx) {
     const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 62);
-    gradient.addColorStop(0, "rgba(255,255,255,0.85)");
-    gradient.addColorStop(0.3, "rgba(255,255,255,0.28)");
+    gradient.addColorStop(0, "rgba(255,255,255,0.42)");
+    gradient.addColorStop(0.3, "rgba(255,255,255,0.14)");
     gradient.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, 128, 128);
@@ -219,7 +219,7 @@ function createIntraClusterWeb(slots: VisibleEntitySlot[]): THREE.LineSegments {
   const material = new THREE.LineBasicMaterial({
     color: "#4DD3B8",
     transparent: true,
-    opacity: 0.08,
+    opacity: 0.045,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
@@ -339,7 +339,7 @@ export function Brain() {
     const width = el.clientWidth || window.innerWidth;
     const height = el.clientHeight || window.innerHeight;
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#05050A");
+    scene.background = new THREE.Color("#020711");
 
     const grid = createHexGridPlane();
     scene.add(grid);
@@ -348,9 +348,9 @@ export function Brain() {
 
     const camera = new THREE.PerspectiveCamera(44, width / height, 1, 4000);
     camera.position.copy(INITIAL_CAMERA_POSITION);
-    const ambient = new THREE.AmbientLight(0xffffff, 0.32);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.24);
     scene.add(ambient);
-    const keyLight = new THREE.DirectionalLight(0xddeeff, 0.85);
+    const keyLight = new THREE.DirectionalLight(0xddeeff, 0.55);
     keyLight.position.set(0.5, 1, 2);
     scene.add(keyLight);
 
@@ -372,7 +372,7 @@ export function Brain() {
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.8));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 0.92;
+    renderer.toneMappingExposure = 0.72;
     el.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -385,7 +385,7 @@ export function Brain() {
 
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.8, 0.5, 0.15);
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.32, 0.28, 0.42);
     composer.addPass(bloomPass);
 
     const labelRenderer = new CSS2DRenderer();
@@ -435,7 +435,7 @@ export function Brain() {
           new THREE.LineBasicMaterial({
             color: CLUSTER_COLORS[cluster],
             transparent: true,
-            opacity: 0.5,
+            opacity: 0.32,
             depthWrite: false,
             blending: THREE.AdditiveBlending,
           }),
@@ -468,7 +468,7 @@ export function Brain() {
 
       const core = new THREE.Mesh(
         new THREE.SphereGeometry(1.6, 16, 16),
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending }),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.42, blending: THREE.AdditiveBlending }),
       );
       core.position.copy(CLUSTER_CENTROIDS[cluster]);
       hubCores.push(core);
@@ -479,12 +479,12 @@ export function Brain() {
           map: haloTexture,
           color,
           transparent: true,
-          opacity: cluster === "company_knowledge" || cluster === "execution_context" ? 0.28 : 0.2,
+          opacity: cluster === "company_knowledge" || cluster === "execution_context" ? 0.13 : 0.09,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
         }),
       );
-      const haloScale = (CLUSTER_RADIUS[cluster] + 10) * 1.55;
+      const haloScale = (CLUSTER_RADIUS[cluster] + 10) * 1.35;
       halo.scale.set(haloScale, haloScale, 1);
       halo.position.copy(CLUSTER_CENTROIDS[cluster]).add(new THREE.Vector3(0, 0, -1));
       hubHalos.push(halo);
@@ -495,7 +495,7 @@ export function Brain() {
     const nodeMaterial = new THREE.MeshBasicMaterial({
       color: "#ffffff",
       transparent: true,
-      opacity: 0.82,
+      opacity: 0.48,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
@@ -736,7 +736,7 @@ export function Brain() {
         const core = hubCores[index];
         if (core) core.scale.setScalar(0.9 + Math.sin(t * 0.0015 + index) * 0.05);
         const halo = hubHalos[index];
-        if (halo) halo.material.opacity = (cluster === "company_knowledge" || cluster === "execution_context" ? 0.28 : 0.18) + Math.sin(t * 0.0012 + index) * 0.025;
+        if (halo) halo.material.opacity = (cluster === "company_knowledge" || cluster === "execution_context" ? 0.13 : 0.08) + Math.sin(t * 0.0012 + index) * 0.012;
       }
       const selectedId = useBrainStore.getState().selectedId;
       for (let i = 0; i < slots.length; i++) composeNodeTransform(nodeMesh, i, slots[i], selectedId, hoveredIdRef.current, t);
@@ -751,7 +751,7 @@ export function Brain() {
       particleFlow.update(t);
       for (const [key, line] of linesByKey) {
         const material = line.material as THREE.LineBasicMaterial;
-        material.opacity = hoveredIdRef.current || selectedId ? 0.13 : 0.08;
+        material.opacity = hoveredIdRef.current || selectedId ? 0.08 : 0.045;
         void key;
       }
       if (cameraFlight) {

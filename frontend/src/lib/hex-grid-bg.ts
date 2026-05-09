@@ -20,9 +20,9 @@ export function createHexGridPlane(): THREE.Mesh<THREE.PlaneGeometry, THREE.Mesh
   const ctx = canvas.getContext("2d");
   if (ctx) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = "#0F1A2A";
-    ctx.lineWidth = 1;
-    const size = 28;
+    ctx.strokeStyle = "rgba(55, 102, 146, 0.2)";
+    ctx.lineWidth = 1.25;
+    const size = 40;
     const h = Math.sqrt(3) * size;
     for (let y = -h; y < canvas.height + h; y += h * 0.75) {
       const row = Math.round(y / (h * 0.75));
@@ -35,20 +35,20 @@ export function createHexGridPlane(): THREE.Mesh<THREE.PlaneGeometry, THREE.Mesh
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(3.2, 2.4);
+  texture.repeat.set(2.25, 1.65);
 
   const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(520, 320),
+    new THREE.PlaneGeometry(620, 360),
     new THREE.MeshBasicMaterial({
       map: texture,
-      color: "#0F1A2A",
+      color: "#DCEEFF",
       transparent: true,
-      opacity: 0.095,
+      opacity: 0.13,
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.NormalBlending,
     }),
   );
-  mesh.position.z = -90;
+  mesh.position.z = -120;
   return mesh;
 }
 
@@ -58,7 +58,7 @@ export type StarField = {
   dispose: () => void;
 };
 
-export function createStarField(count = 90): StarField {
+export function createStarField(count = 58): StarField {
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) {
@@ -68,7 +68,7 @@ export function createStarField(count = 90): StarField {
     positions[i * 3] = Math.sin(phi) * Math.cos(theta) * radius;
     positions[i * 3 + 1] = Math.sin(phi) * Math.sin(theta) * radius * 0.58;
     positions[i * 3 + 2] = -40 + Math.cos(phi) * radius * 0.35;
-    const alpha = 0.35 + Math.random() * 0.45;
+    const alpha = 0.18 + Math.random() * 0.34;
     colors[i * 3] = alpha;
     colors[i * 3 + 1] = alpha;
     colors[i * 3 + 2] = alpha * 1.15;
@@ -80,7 +80,7 @@ export function createStarField(count = 90): StarField {
     size: 0.55,
     vertexColors: true,
     transparent: true,
-    opacity: 0.7,
+    opacity: 0.48,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });

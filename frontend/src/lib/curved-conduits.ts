@@ -80,7 +80,7 @@ export function createConduitLine(edge: ConduitPath): THREE.Line {
   const material = new THREE.LineBasicMaterial({
     vertexColors: true,
     transparent: true,
-    opacity: 0.08,
+    opacity: 0.045,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
