@@ -1,3 +1,31 @@
+# Reboot Checkpoint — after Phase 5.13.1
+
+Date: 2026-05-09 (late)
+Branch: main
+Last commit: d8e17f6 phase 5.13.1: provider registry + key verification
+Tests: pytest 172/0, vitest 249/0
+Vault: AXIOM_VAULT_KEY in .env, key rotation completed cleanly
+
+## Phase 5.13 ladder progress
+- [x] 5.13.0 vault foundation — 26b8d83
+- [x] 5.13.1 provider registry + verify — d8e17f6
+- [ ] 5.13.2 vault HTTP API endpoints ← NEXT
+- [ ] 5.13.3 settings page UI
+- [ ] 5.13.4 wire classifier to use vault
+- [ ] 5.14.0 query layer (the original "make prompt chips work" goal)
+
+## Resume protocol
+  1. cat NOTES.md | head -50
+  2. git log --oneline -8
+  3. git status (must be clean)
+  4. set -a; source .env; set +a; echo "Vault: ${#AXIOM_VAULT_KEY}"
+  5. pytest -q | tail -3 (must show 172 passed)
+  6. cd frontend && npm test -- --run --reporter=basic | tail -3 (249 passed)
+  7. Reboot Cursor — fresh composer
+  8. Send Phase 5.13.2 prompt
+
+---
+
 # Reboot Checkpoint — after Phase 5.13.0 vault foundation
 
 Date: 2026-05-09
