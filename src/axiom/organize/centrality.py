@@ -66,26 +66,76 @@ def composite_score(
     return max(0.0, min(blended, 1.0))
 
 
+class ImportanceDelta:
+    """Records an entity's old and new composite_importance values."""
+
+    __slots__ = ("entity_id", "old_value", "new_value")
+
+    def __init__(self, entity_id: str, old_value: float, new_value: float) -> None:
+        self.entity_id = entity_id
+        self.old_value = old_value
+        self.new_value = new_value
+
+    @property
+    def delta(self) -> float:
+        return self.new_value - self.old_value
+
+    @property
+    def direction(self) -> str:
+        return "rising" if self.delta >= 0 else "falling"
+
+
+class CentralityResult:
+    """Return value from recompute_all with traversal + delta info."""
+
+    __slots__ = ("updated", "traversal_steps", "importance_deltas")
+
+    def __init__(self) -> None:
+        self.updated: int = 0
+        self.traversal_steps: list[tuple[str, str, str | None]] = []
+        self.importance_deltas: list[ImportanceDelta] = []
+
+
+IMPORTANCE_DELTA_THRESHOLD: Final[float] = 0.05
+
+
 class CentralityScorer:
     """Recomputes ``Entity.composite_importance`` for every node."""
 
-    def recompute_all(self, session: Session, *, now: datetime | None = None) -> int:
+    def recompute_all(
+        self, session: Session, *, now: datetime | None = None
+    ) -> int:
+        result = self.recompute_all_rich(session, now=now)
+        return result.updated
+
+    def recompute_all_rich(
+        self, session: Session, *, now: datetime | None = None
+    ) -> CentralityResult:
+        result = CentralityResult()
         entities = session.execute(select(Entity)).scalars().all()
         if not entities:
-            return 0
+            return result
 
         edges = session.execute(select(Edge)).scalars().all()
         graph = nx.DiGraph()
         for entity in entities:
             graph.add_node(entity.id)
+        edge_map: dict[tuple[str, str], str] = {}
         for edge in edges:
             if edge.source_id in graph and edge.target_id in graph:
                 graph.add_edge(edge.source_id, edge.target_id)
+                edge_map[(edge.source_id, edge.target_id)] = edge.id
 
         if graph.number_of_nodes() == 0:
-            return 0
+            return result
 
         pagerank = self._safe_pagerank(graph)
+
+        for u, v in graph.edges():
+            result.traversal_steps.append(
+                (str(u), str(v), edge_map.get((str(u), str(v))))
+            )
+
         degree = dict(graph.degree())
         max_degree = max(degree.values()) if degree else 1
         if max_degree == 0:
@@ -93,20 +143,25 @@ class CentralityScorer:
 
         reference = _coerce_aware(now or datetime.now(UTC))
 
-        updated = 0
         for entity in entities:
+            old_value = entity.composite_importance or 0.0
             pr_score = pagerank.get(entity.id, 0.0)
             deg_ratio = degree.get(entity.id, 0) / max_degree
             rec = recency_score(entity.updated_at, now=reference)
-            entity.composite_importance = composite_score(
+            new_value = composite_score(
                 pagerank=pr_score,
                 degree_ratio=deg_ratio,
                 recency=rec,
             )
-            updated += 1
+            entity.composite_importance = new_value
+            result.updated += 1
+            if abs(new_value - old_value) >= IMPORTANCE_DELTA_THRESHOLD:
+                result.importance_deltas.append(
+                    ImportanceDelta(entity.id, old_value, new_value)
+                )
 
         session.commit()
-        return updated
+        return result
 
     @staticmethod
     def _safe_pagerank(graph: nx.DiGraph) -> dict[str, float]:

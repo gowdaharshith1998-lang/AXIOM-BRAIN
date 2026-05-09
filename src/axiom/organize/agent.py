@@ -151,13 +151,83 @@ class OrganizerAgent:
             logger.exception("organizer: failed to open db session for centrality")
             return 0
         try:
-            return self.scorer.recompute_all(session)
+            result = self.scorer.recompute_all_rich(session)
+            if self._broadcaster is not None:
+                await self._emit_navigation_steps(result.traversal_steps)
+                await self._emit_confidence_changes(result.importance_deltas)
+            return result.updated
         except Exception:  # noqa: BLE001
             logger.exception("organizer: centrality recompute failed")
             session.rollback()
             return 0
         finally:
             session.close()
+
+    async def _emit_navigation_steps(
+        self, steps: list[tuple[str, str, str | None]]
+    ) -> None:
+        if not steps or self._broadcaster is None:
+            return
+        max_events = 50
+        sampled: list[tuple[str, str, str | None]]
+        if len(steps) <= max_events:
+            sampled = steps
+        else:
+            first_10 = steps[:10]
+            last_10 = steps[-10:]
+            middle = steps[10:-10]
+            stride = max(1, len(middle) // (max_events - 20))
+            sampled = first_10 + middle[::stride][: max_events - 20] + last_10
+
+        now_ms = int(time.time() * 1000)
+        for from_id, to_id, edge_id in sampled:
+            try:
+                await self._broadcaster.publish(
+                    {
+                        "type": "agent_navigation_step",
+                        "source_id": None,
+                        "persisted_id": None,
+                        "timestamp": now_ms,
+                        "payload": {
+                            "agent_name": "organizer",
+                            "from_id": from_id,
+                            "to_id": to_id,
+                            "edge_id": edge_id,
+                            "timestamp": now_ms,
+                            "demo": False,
+                        },
+                    }
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("organizer: navigation step broadcast failed")
+
+    async def _emit_confidence_changes(
+        self, deltas: list[Any]
+    ) -> None:
+        if not deltas or self._broadcaster is None:
+            return
+        now_ms = int(time.time() * 1000)
+        for delta in deltas:
+            try:
+                await self._broadcaster.publish(
+                    {
+                        "type": "confidence_changed",
+                        "source_id": None,
+                        "persisted_id": delta.entity_id,
+                        "timestamp": now_ms,
+                        "payload": {
+                            "entity_id": delta.entity_id,
+                            "old_value": round(delta.old_value, 4),
+                            "new_value": round(delta.new_value, 4),
+                            "delta": round(delta.delta, 4),
+                            "direction": delta.direction,
+                            "timestamp": now_ms,
+                            "demo": False,
+                        },
+                    }
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("organizer: confidence change broadcast failed")
 
     async def propose_edges(self) -> int:
         try:

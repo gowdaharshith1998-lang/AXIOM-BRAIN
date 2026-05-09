@@ -35,7 +35,8 @@ import {
   type VisibleEntitySlot,
 } from "@/lib/hex-layout";
 import { IdleOrbitController } from "@/lib/idle-orbit";
-import { ParticleFlowController } from "@/lib/particle-flow";
+import { ParticleBehaviorPool } from "@/lib/particle-behaviors";
+import { ParticleFlowController, createDotTexture } from "@/lib/particle-flow";
 import { hashStringToFloat, hubEmissiveIntensityAt, shimmerScale } from "@/lib/spoke-shimmer";
 import { hasWebGPU, preferredRendererKind } from "@/lib/webgpu-detect";
 import { BrainSocket, type BrainEvent } from "@/lib/websocket";
@@ -518,6 +519,71 @@ export function Brain() {
     const particleFlow = new ParticleFlowController(conduitPaths);
     scene.add(particleFlow.points);
 
+    const behaviorPool = new ParticleBehaviorPool();
+    const behaviorDotTexture = createDotTexture();
+    const behaviorMaxSprites = 200;
+    const behaviorSprites: THREE.Sprite[] = [];
+    const behaviorMaterials: THREE.SpriteMaterial[] = [];
+    const behaviorGroup = new THREE.Group();
+    for (let i = 0; i < behaviorMaxSprites; i++) {
+      const mat = new THREE.SpriteMaterial({
+        map: behaviorDotTexture,
+        color: "#ffffff",
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const sprite = new THREE.Sprite(mat);
+      sprite.visible = false;
+      sprite.scale.set(0.42, 0.42, 1);
+      behaviorSprites.push(sprite);
+      behaviorMaterials.push(mat);
+      behaviorGroup.add(sprite);
+    }
+    scene.add(behaviorGroup);
+
+    const demoBadgeTexture = (() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 64;
+      canvas.height = 24;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.fillStyle = "rgba(0,0,0,0.5)";
+        ctx.roundRect(0, 0, 64, 24, 4);
+        ctx.fill();
+        ctx.fillStyle = "#FFB300";
+        ctx.font = "bold 14px monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("DEMO", 32, 12);
+      }
+      return new THREE.CanvasTexture(canvas);
+    })();
+    const demoBadges: THREE.Sprite[] = [];
+    const demoBadgeMaterials: THREE.SpriteMaterial[] = [];
+    const demoBadgeGroup = new THREE.Group();
+    for (let i = 0; i < 20; i++) {
+      const mat = new THREE.SpriteMaterial({
+        map: demoBadgeTexture,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      });
+      const sprite = new THREE.Sprite(mat);
+      sprite.visible = false;
+      sprite.scale.set(3, 1.2, 1);
+      demoBadges.push(sprite);
+      demoBadgeMaterials.push(mat);
+      demoBadgeGroup.add(sprite);
+    }
+    scene.add(demoBadgeGroup);
+    const demoBadgeTimers: { position: THREE.Vector3; startedAt: number }[] = [];
+
+    const resolvePosition = (entityId: string): THREE.Vector3 | null => {
+      return positionsById.get(entityId)?.clone() ?? null;
+    };
+
     const selectionRing = new THREE.Mesh(
       new THREE.TorusGeometry(HEX_NODE_RADIUS * 2.2, 0.055, 6, 48),
       new THREE.MeshBasicMaterial({
@@ -612,6 +678,8 @@ export function Brain() {
     const processLiveEvents = (nowMs: number) => {
       const deferred: BrainEvent[] = [];
       for (const event of liveEventsRef.current) {
+        behaviorPool.handleEvent(event, resolvePosition);
+
         if ((event.type === "entity_added" || event.type === "entity_created") && event.persisted_id) {
           const payload = event.payload as Omit<Entity, "id"> & { nick?: unknown };
           const { nick: _nick, ...rest } = payload;
@@ -749,6 +817,40 @@ export function Brain() {
         selectionRing.visible = false;
       }
       particleFlow.update(t);
+      behaviorPool.update(t);
+      const bpCount = Math.min(behaviorPool.particles.length, behaviorMaxSprites);
+      for (let i = 0; i < bpCount; i++) {
+        const bp = behaviorPool.particles[i];
+        const sprite = behaviorSprites[i];
+        const mat = behaviorMaterials[i];
+        sprite.position.copy(bp.position);
+        mat.color.copy(bp.color);
+        mat.opacity = Math.max(0, bp.opacity);
+        sprite.visible = true;
+        if (bp.demoBadge && bp.demo) {
+          const age = t - bp.startedAt;
+          if (age < 50 && demoBadgeTimers.length < 20) {
+            demoBadgeTimers.push({ position: bp.position.clone(), startedAt: t });
+          }
+        }
+      }
+      for (let i = bpCount; i < behaviorMaxSprites; i++) behaviorSprites[i].visible = false;
+      let dbWrite = 0;
+      for (let di = 0; di < demoBadgeTimers.length; di++) {
+        const db = demoBadgeTimers[di];
+        const dbAge = t - db.startedAt;
+        if (dbAge > 2000) continue;
+        if (dbWrite < demoBadges.length) {
+          demoBadges[dbWrite].position.copy(db.position).add(new THREE.Vector3(0, 1.5, 0));
+          demoBadgeMaterials[dbWrite].opacity = Math.max(0, 1 - dbAge / 2000);
+          demoBadges[dbWrite].visible = true;
+          if (dbWrite !== di) demoBadgeTimers[dbWrite] = db;
+          dbWrite++;
+        }
+      }
+      demoBadgeTimers.length = dbWrite;
+      for (let i = dbWrite; i < demoBadges.length; i++) demoBadges[i].visible = false;
+
       for (const [key, line] of linesByKey) {
         const material = line.material as THREE.LineBasicMaterial;
         material.opacity = hoveredIdRef.current || selectedId ? 0.08 : 0.045;
@@ -796,6 +898,11 @@ export function Brain() {
       composer.dispose();
       stars.dispose();
       particleFlow.dispose();
+      behaviorPool.clear();
+      behaviorDotTexture.dispose();
+      demoBadgeTexture.dispose();
+      behaviorMaterials.forEach((m) => m.dispose());
+      demoBadgeMaterials.forEach((m) => m.dispose());
       grid.geometry.dispose();
       grid.material.map?.dispose();
       grid.material.dispose();

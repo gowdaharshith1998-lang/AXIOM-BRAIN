@@ -81,7 +81,9 @@ def create_app(
                 await asyncio.sleep(15)
 
         health_task = asyncio.create_task(cluster_health_loop())
-        agent_action_task = asyncio.create_task(emit_demo_agent_actions(broadcaster))
+        agent_action_task = asyncio.create_task(
+            emit_demo_agent_actions(broadcaster, session_factory=session_local)
+        )
         warden_task = asyncio.create_task(emit_demo_warden_insights(broadcaster, session_local))
         app.state.cluster_health_task = health_task
         app.state.agent_action_task = agent_action_task

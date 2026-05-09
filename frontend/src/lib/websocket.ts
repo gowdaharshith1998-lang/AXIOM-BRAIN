@@ -13,7 +13,9 @@ export type BrainEvent = {
     | "agent_action"
     | "agent_action_evaluated"
     | "receipt_added"
-    | "insight_flagged";
+    | "insight_flagged"
+    | "agent_navigation_step"
+    | "confidence_changed";
   timestamp: number;
   source_id: string | null;
   persisted_id: string | null;
