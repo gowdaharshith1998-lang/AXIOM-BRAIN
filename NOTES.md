@@ -1,5 +1,86 @@
 # NOTES — AXIOM-BRAIN
 
+# Reboot Checkpoint — after Phase 5.12.3 (Force layout)
+
+Date: 2026-05-09
+Branch: phase-5-living-brain
+Last commit: e3166c2 (force-directed cluster layout)
+Tests: 275 passed / 5 failed (CompanyBrainPage interaction tests, known)
+
+## Phase 5.12 ladder progress:
+- [x] 5.12.0 lock spec + reference image (a3ea305)
+- [x] 5.12.1 spike scaffolding removed (58bc376)
+- [x] 5.12.2 cluster reframe + cool palette (45d66df)
+- [x] 5.12.3 force-directed cluster layout (e3166c2)
+- [ ] 5.12.4 organic satellite packing + size variation ← NEXT
+- [ ] 5.12.5 discrete particle conduits
+- [ ] 5.12.6 edge typing
+- [ ] 5.12.7 intra-cluster web
+- [ ] 5.12.8 chrome part 1 (NavRail + TopHeader + StatusFooter)
+- [ ] 5.12.9 chrome part 2 (BrainHealthCard + QueryBar + EdgeLegend)
+- [ ] 5.12.10 entity inspector
+- [ ] 5.12.11 query traversal animation
+- [ ] 5.12.12 polish
+
+## Phase 3 APPROVED PLAN — execute in next session
+
+Goal: each cluster transforms from "ball of dots" into "1 large hub
++ concentric rings of varied-size hexes."
+
+Files to CREATE:
+- frontend/src/lib/satellite-pack.ts
+  - packSatellites({centroid, count, clusterRadius, seed}) → SatellitePosition[]
+  - 3 rings: inner (8-12 sats, 0.35*radius), mid (35%, 0.65*radius), outer (rest, 1.0*radius)
+  - Spherical Fibonacci lattice per shell + 7.5% radial jitter
+  - Per-instance hex radius: inner 1.4x, mid 1.0x, outer 0.7x
+  - mulberry32 seeded PRNG for determinism
+- frontend/src/__tests__/satellite-pack.test.ts
+  - Determinism, ring split correctness, bounds, per-ring radius
+
+Files to EDIT:
+- frontend/src/lib/cluster-layout.ts
+  - Add CLUSTER_RADIUS = {company_knowledge: 28, execution_context: 25,
+    customers: 12, policies: 10, receipts: 10, agents: 11, governance: 11,
+    billing: 14, people_teams: 12}
+- frontend/src/lib/hex-geometry.ts
+  - HEX_HUB_RADIUS: 2.4 → 3.6
+  - HEX_NODE_RADIUS: 1.0 → 1.6
+- frontend/src/lib/hex-layout.ts
+  - Extend VisibleEntitySlot: add hexRadius: number, ring: 0|1|2
+  - Rewrite computeVisibleEntitySlots to use packSatellites per cluster
+  - Keep MAX_VISIBLE_PER_CLUSTER, CLUSTER_VISIBLE_SLOTS exports for backcompat
+- frontend/src/components/Brain.tsx
+  - Drop mesh.scale.setScalar(1.3) on hubs (HEX_HUB_RADIUS now 3.6)
+  - In setInstanceTransform: add ringScale = slot.hexRadius / HEX_NODE_RADIUS
+    multiplied into existing scale chain
+- frontend/src/__tests__/hex-layout.test.ts
+  - Add assertions: every slot.hexRadius in {1.6*1.4, 1.6*1.0, 1.6*0.7}
+  - Primary cluster max satellite distance ≤ CLUSTER_RADIUS * 1.08
+- frontend/src/__tests__/cluster-mesh.test.ts (test helper)
+  - Add hexRadius default in local VisibleEntitySlot helper
+- frontend/src/__tests__/radial-traffic.test.ts (test helper)
+  - Add hexRadius default in local VisibleEntitySlot helper
+
+Visual expectation:
+- Hubs visibly dominant at 3.6-radius
+- Inner ring 8-12 prominent hexes (radius 2.24)
+- Mid + outer rings at 1.6 / 1.12 radii
+- Knowledge/Execution clusters noticeably larger
+- Peripheral clusters tighter
+- Organic 3D constellation, not flat rings
+
+Resume protocol for next session:
+  1. cat docs/AXIOM_PHASE_5_12_SPEC.md (full spec)
+  2. cat NOTES.md (this checkpoint)
+  3. git log --oneline -10
+  4. git status (confirm clean tree)
+  5. Run backend (port 8000) + frontend (port 5173)
+  6. Begin Phase 5.12.4 Phase B (execute) — Phase A is APPROVED above
+
+## END CHECKPOINT
+
+---
+
 ## 2026-05-08 — Phase 5.11 checkpoint (pre-Phase 5 implementation)
 
 - **Context budget**: ~57% used / ~43% remaining (Cursor session estimate)
