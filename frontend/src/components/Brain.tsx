@@ -31,7 +31,6 @@ import {
   isClusterId,
   type ClusterId,
 } from "@/lib/cluster-layout";
-import { buildIntraClusterMeshGroup } from "@/lib/cluster-mesh";
 import { conduitPathsForEdges, createConduitLine, type ConduitPath } from "@/lib/curved-conduits";
 import { RollingFpsCounter } from "@/lib/fps";
 import { FpsGuard } from "@/lib/fps-guard";
@@ -52,7 +51,6 @@ import { ParticleEffectSystem } from "@/lib/particles/agent-effects";
 import { createNebulaBackground } from "@/lib/particles/nebula-bg";
 import { spawnEdgeTrace, spawnEntityArrival } from "@/lib/particles/reactive-spawn";
 import { RadialTrafficController } from "@/lib/radial-traffic";
-import { createSphereNodeGeometry } from "@/lib/sphere-geometry";
 import { hashStringToFloat, hubEmissiveIntensityAt, shimmerScale } from "@/lib/spoke-shimmer";
 import { hasWebGPU, preferredRendererKind } from "@/lib/webgpu-detect";
 import { BrainSocket, type BrainEvent } from "@/lib/websocket";
@@ -133,34 +131,6 @@ function setInstanceTransform(
   );
   matrix.compose(slot.position, quat, scale);
   mesh.setMatrixAt(index, matrix);
-}
-
-function buildRadialEdges(slots: VisibleEntitySlot[]): THREE.Group {
-  const group = new THREE.Group();
-  for (const cluster of CLUSTER_IDS) {
-    const clusterSlots = slots.filter((slot) => slot.clusterId === cluster);
-    const positions = new Float32Array(clusterSlots.length * 2 * 3);
-    const hub = CLUSTER_CENTROIDS[cluster];
-    let index = 0;
-    for (const slot of clusterSlots) {
-      positions[index++] = hub.x;
-      positions[index++] = hub.y;
-      positions[index++] = hub.z;
-      positions[index++] = slot.position.x;
-      positions[index++] = slot.position.y;
-      positions[index++] = slot.position.z;
-    }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    const material = new THREE.LineBasicMaterial({
-      color: CLUSTER_COLORS[cluster],
-      transparent: true,
-      opacity: 0.3,
-      depthWrite: false,
-    });
-    group.add(new THREE.LineSegments(geometry, material));
-  }
-  return group;
 }
 
 function buildConduitLines(paths: ConduitPath[]): { group: THREE.Group; linesByKey: Map<string, THREE.Line> } {
@@ -340,7 +310,7 @@ export function Brain() {
     }
     scene.add(bracketLines);
 
-    const nodeGeometry = createSphereNodeGeometry();
+    const nodeGeometry = createHexPrismGeometry(HEX_NODE_RADIUS, HEX_HEIGHT);
     const nodeMaterial = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
@@ -396,10 +366,6 @@ export function Brain() {
       aegisGates.set(cluster, new AegisGate(cluster, gateRing, CLUSTER_COLORS[cluster]));
     }
 
-    let radialEdges = buildRadialEdges(slots);
-    scene.add(radialEdges);
-    let intraClusterMesh = buildIntraClusterMeshGroup(slots);
-    scene.add(intraClusterMesh);
     let { group: interHubLines, linesByKey: conduitLinesByKey } = buildConduitLines(conduitPaths);
     scene.add(interHubLines);
 
@@ -607,8 +573,6 @@ export function Brain() {
       }
       if (detail.layer === "dependencies") {
         layerVisibility.dependencies = enabled;
-        radialEdges.visible = enabled;
-        intraClusterMesh.visible = enabled;
       }
       if (detail.layer === "health") {
         layerVisibility.health = enabled;
@@ -626,28 +590,6 @@ export function Brain() {
     const notifyUserInput = (ev: Event) => idleOrbit.noteUserInput(ev.timeStamp);
 
     const rebuildEdges = () => {
-      scene.remove(radialEdges);
-      radialEdges.traverse((obj) => {
-        if (obj instanceof THREE.LineSegments) {
-          obj.geometry.dispose();
-          (obj.material as THREE.Material).dispose();
-        }
-      });
-      radialEdges = buildRadialEdges(slots);
-      radialEdges.visible = layerVisibility.dependencies;
-      scene.add(radialEdges);
-
-      scene.remove(intraClusterMesh);
-      intraClusterMesh.traverse((obj) => {
-        if (obj instanceof THREE.LineSegments) {
-          obj.geometry.dispose();
-          (obj.material as THREE.Material).dispose();
-        }
-      });
-      intraClusterMesh = buildIntraClusterMeshGroup(slots);
-      intraClusterMesh.visible = layerVisibility.dependencies;
-      scene.add(intraClusterMesh);
-
       scene.remove(interHubLines);
       interHubLines.traverse((obj) => {
         if (obj instanceof THREE.Line) {
@@ -946,18 +888,6 @@ export function Brain() {
       bracketLabelDivs.clear();
       bracketLines.traverse((obj) => {
         if (obj instanceof THREE.Line) {
-          obj.geometry.dispose();
-          (obj.material as THREE.Material).dispose();
-        }
-      });
-      radialEdges.traverse((obj) => {
-        if (obj instanceof THREE.LineSegments) {
-          obj.geometry.dispose();
-          (obj.material as THREE.Material).dispose();
-        }
-      });
-      intraClusterMesh.traverse((obj) => {
-        if (obj instanceof THREE.LineSegments) {
           obj.geometry.dispose();
           (obj.material as THREE.Material).dispose();
         }
