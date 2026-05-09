@@ -8,7 +8,8 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 from typing import Any, cast
 
-from fastapi import FastAPI, Query, WebSocket
+from fastapi import Body, FastAPI, Query, WebSocket
+from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -30,6 +31,17 @@ from axiom.sources.base import IngestEvent
 from axiom.sources.live_synthetic import LiveSyntheticSource
 from axiom.studio.sources import synthetic_sources_snapshot
 from axiom.studio.vault_api import router as vault_router
+
+
+class NavigationStepIn(BaseModel):
+    from_id: str
+    to_id: str
+    edge_id: str | None = None
+
+
+class NavigationBatchIn(BaseModel):
+    agent_name: str = "external_mcp_client"
+    steps: list[NavigationStepIn] = Field(default_factory=list)
 
 
 def datetime_now_ms() -> int:
@@ -244,5 +256,29 @@ def create_app(
         await ws.accept()
         async for envelope in broadcaster.subscribe(since=since):
             await ws.send_text(json.dumps(envelope))
+
+    @app.post("/api/internal/agent-navigation")
+    async def publish_agent_navigation(batch: NavigationBatchIn = Body(...)) -> dict[str, int]:
+        now_ms = datetime_now_ms()
+        emitted = 0
+        for step in batch.steps[:50]:
+            await broadcaster.publish(
+                {
+                    "type": "agent_navigation_step",
+                    "source_id": None,
+                    "persisted_id": None,
+                    "timestamp": now_ms,
+                    "payload": {
+                        "agent_name": batch.agent_name or "external_mcp_client",
+                        "from_id": step.from_id,
+                        "to_id": step.to_id,
+                        "edge_id": step.edge_id,
+                        "timestamp": now_ms,
+                        "demo": False,
+                    },
+                }
+            )
+            emitted += 1
+        return {"emitted": emitted}
 
     return app

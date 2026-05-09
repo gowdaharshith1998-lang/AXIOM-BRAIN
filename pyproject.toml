@@ -15,6 +15,7 @@ dependencies = [
     "httpx",
     "uuid-utils",
     "networkx>=3.0",
+    "mcp==1.9.4",
 ]
 
 [project.optional-dependencies]

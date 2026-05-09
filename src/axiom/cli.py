@@ -77,6 +77,12 @@ def cmd_vault_init(args: argparse.Namespace) -> None:
     print(f"{ENV_VAR}={key}")
 
 
+def cmd_mcp_serve(args: argparse.Namespace) -> None:
+    from axiom.mcp.server import serve_stdio
+
+    serve_stdio(db_url=args.db_url, api_base_url=args.api_base_url)
+
+
 def cmd_vault_status(args: argparse.Namespace) -> None:
     """Report whether the vault is unlocked and per-provider secret counts.
 
@@ -121,6 +127,11 @@ def main() -> None:
     p_serve.add_argument("--rate", type=float, default=0.125)
     p_serve.add_argument("--pause-after", type=int, default=None)
     p_serve.set_defaults(func=cmd_serve)
+
+    p_mcp = sub.add_parser("mcp-serve", help="run AXIOM MCP server over stdio")
+    p_mcp.add_argument("--db-url", default="sqlite:///./axiom.db")
+    p_mcp.add_argument("--api-base-url", default="http://127.0.0.1:8000")
+    p_mcp.set_defaults(func=cmd_mcp_serve)
 
     p_vault = sub.add_parser("vault", help="manage the encrypted secrets vault")
     vault_sub = p_vault.add_subparsers(dest="vault_cmd", required=True)
