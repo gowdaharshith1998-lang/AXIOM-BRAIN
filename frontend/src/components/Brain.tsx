@@ -27,11 +27,11 @@ import { RollingFpsCounter } from "@/lib/fps";
 import { createHexGridPlane, createStarField } from "@/lib/hex-grid-bg";
 import { createHexPrismGeometry, HEX_HEIGHT, HEX_HUB_RADIUS, HEX_NODE_RADIUS } from "@/lib/hex-geometry";
 import {
-  computeInterHubEdges,
   computeVisibleEntitySlots,
   entityImportance,
   findEntityPosition,
   sortedVisibleEntities,
+  type InterHubEdge,
   type VisibleEntitySlot,
 } from "@/lib/hex-layout";
 import { IdleOrbitController } from "@/lib/idle-orbit";
@@ -47,13 +47,14 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-const INITIAL_CAMERA_POSITION = new THREE.Vector3(0, 0, 280);
+const SCENE_TARGET = new THREE.Vector3(10, 12, 0);
+const INITIAL_CAMERA_POSITION = new THREE.Vector3(10, 12, 205);
 const CAMERA_ANIMATION_MS = 800;
 const HUB_EMISSIVE = 2;
 const MIN_VISIBLE_PER_CLUSTER = 6;
 const VISUAL_CAPS: Record<ClusterId, number> = {
-  company_knowledge: 46,
-  execution_context: 42,
+  company_knowledge: 60,
+  execution_context: 56,
   customers: 9,
   policies: 9,
   receipts: 8,
@@ -73,6 +74,16 @@ const LABELED_CLUSTERS = new Set<ClusterId>([
   "incidents",
   "governance",
 ]);
+const VISUAL_CLUSTER_IDS: readonly ClusterId[] = [
+  "customers",
+  "policies",
+  "receipts",
+  "company_knowledge",
+  "execution_context",
+  "agents",
+  "incidents",
+  "governance",
+];
 
 function reframe(entity: Entity): Entity {
   return { ...entity, cluster_id: superClusterIdForEntity(entity) ?? entity.cluster_id ?? "company_knowledge" };
@@ -105,14 +116,14 @@ function syntheticEntity(cluster: ClusterId, index: number): Entity {
 
 function visualEntities(realEntities: Iterable<Entity>): Entity[] {
   const byCluster = new Map<ClusterId, Entity[]>();
-  for (const cluster of CLUSTER_IDS) byCluster.set(cluster, []);
+  for (const cluster of VISUAL_CLUSTER_IDS) byCluster.set(cluster, []);
   for (const entity of realEntities) {
     const reframed = reframe(entity);
     if (isClusterId(reframed.cluster_id)) byCluster.get(reframed.cluster_id)?.push(reframed);
   }
 
   const out: Entity[] = [];
-  for (const cluster of CLUSTER_IDS) {
+  for (const cluster of VISUAL_CLUSTER_IDS) {
     const cap = VISUAL_CAPS[cluster];
     const selected = sortedVisibleEntities(byCluster.get(cluster) ?? [], cap);
     out.push(...selected);
@@ -153,14 +164,14 @@ function relationshipCounts(edges: Iterable<Edge>, entitiesById: Map<string, Ent
 function labelAnchorForCluster(cluster: ClusterId): THREE.Vector3 {
   const hub = CLUSTER_CENTROIDS[cluster];
   const overrides: Partial<Record<ClusterId, THREE.Vector3>> = {
-    company_knowledge: new THREE.Vector3(-82, 12, 5),
-    execution_context: new THREE.Vector3(58, 42, 0),
-    policies: new THREE.Vector3(-78, 58, 14),
-    customers: new THREE.Vector3(-112, -8, 10),
-    receipts: new THREE.Vector3(-62, -30, 5),
-    agents: new THREE.Vector3(82, 62, -4),
-    incidents: new THREE.Vector3(100, 22, 5),
-    governance: new THREE.Vector3(88, -28, 0),
+    company_knowledge: new THREE.Vector3(-78, 28, 5),
+    execution_context: new THREE.Vector3(25, 44, 0),
+    policies: new THREE.Vector3(-72, 76, 14),
+    customers: new THREE.Vector3(-140, 8, 10),
+    receipts: new THREE.Vector3(-96, -28, 5),
+    agents: new THREE.Vector3(70, 80, -4),
+    incidents: new THREE.Vector3(108, 24, 5),
+    governance: new THREE.Vector3(82, -8, 0),
   };
   if (overrides[cluster]) return overrides[cluster]!.clone();
   const offset = CLUSTER_RADIUS[cluster] + 22;
@@ -190,7 +201,7 @@ function makeHaloTexture(): THREE.CanvasTexture {
 
 function createIntraClusterWeb(slots: VisibleEntitySlot[]): THREE.LineSegments {
   const points: THREE.Vector3[] = [];
-  for (const cluster of CLUSTER_IDS) {
+  for (const cluster of VISUAL_CLUSTER_IDS) {
     const clusterSlots = slots.filter((slot) => slot.clusterId === cluster);
     for (let i = 0; i < clusterSlots.length; i++) {
       const here = clusterSlots[i];
@@ -224,6 +235,18 @@ function createConduitLines(paths: ConduitPath[]): { group: THREE.Group; linesBy
     linesByKey.set(path.key, line);
   }
   return { group, linesByKey };
+}
+
+function referenceHubEdges(): InterHubEdge[] {
+  return [
+    { key: "customers:company_knowledge", sourceCluster: "customers", targetCluster: "company_knowledge", weight: 8 },
+    { key: "policies:company_knowledge", sourceCluster: "policies", targetCluster: "company_knowledge", weight: 7 },
+    { key: "receipts:company_knowledge", sourceCluster: "receipts", targetCluster: "company_knowledge", weight: 6 },
+    { key: "company_knowledge:execution_context", sourceCluster: "company_knowledge", targetCluster: "execution_context", weight: 14 },
+    { key: "execution_context:agents", sourceCluster: "execution_context", targetCluster: "agents", weight: 7 },
+    { key: "execution_context:incidents", sourceCluster: "execution_context", targetCluster: "incidents", weight: 8 },
+    { key: "execution_context:governance", sourceCluster: "execution_context", targetCluster: "governance", weight: 6 },
+  ];
 }
 
 function composeNodeTransform(
@@ -307,19 +330,8 @@ export function Brain() {
     const entities = new Map(state.entities);
     const edges = new Map(state.edges);
     const entitiesById = () => new Map(Array.from(entities.values(), reframe).map((entity) => [entity.id, entity]));
-    let slots = computeVisibleEntitySlots(visualEntities(entities.values()), CLUSTER_IDS, 60, CLUSTER_CENTROIDS);
-    let interHubEdges = computeInterHubEdges(edges.values(), entitiesById(), CLUSTER_CENTROIDS).slice(0, 15);
-    if (interHubEdges.length < 7) {
-      interHubEdges = [
-        { key: "customers:company_knowledge", sourceCluster: "customers", targetCluster: "company_knowledge", weight: 8 },
-        { key: "policies:company_knowledge", sourceCluster: "policies", targetCluster: "company_knowledge", weight: 7 },
-        { key: "receipts:company_knowledge", sourceCluster: "receipts", targetCluster: "company_knowledge", weight: 6 },
-        { key: "company_knowledge:execution_context", sourceCluster: "company_knowledge", targetCluster: "execution_context", weight: 14 },
-        { key: "execution_context:agents", sourceCluster: "execution_context", targetCluster: "agents", weight: 7 },
-        { key: "execution_context:incidents", sourceCluster: "execution_context", targetCluster: "incidents", weight: 8 },
-        { key: "execution_context:governance", sourceCluster: "execution_context", targetCluster: "governance", weight: 6 },
-      ];
-    }
+    let slots = computeVisibleEntitySlots(visualEntities(entities.values()), VISUAL_CLUSTER_IDS, 60, CLUSTER_CENTROIDS);
+    let interHubEdges = referenceHubEdges();
     let conduitPaths = conduitPathsForEdges(interHubEdges, CLUSTER_CENTROIDS);
     const positionsById = new Map(slots.map((slot) => [slot.entity.id, slot.position.clone()]));
     const idByInstanceIndex = slots.map((slot) => slot.entity.id);
@@ -334,7 +346,7 @@ export function Brain() {
     const stars = createStarField();
     scene.add(stars.points);
 
-    const camera = new THREE.PerspectiveCamera(48, width / height, 1, 4000);
+    const camera = new THREE.PerspectiveCamera(44, width / height, 1, 4000);
     camera.position.copy(INITIAL_CAMERA_POSITION);
     const ambient = new THREE.AmbientLight(0xffffff, 0.32);
     scene.add(ambient);
@@ -366,9 +378,9 @@ export function Brain() {
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-    controls.minDistance = 60;
+    controls.minDistance = 54;
     controls.maxDistance = 400;
-    controls.target.set(0, 0, 0);
+    controls.target.copy(SCENE_TARGET);
     const idleOrbit = new IdleOrbitController(camera, controls);
 
     const composer = new EffectComposer(renderer);
@@ -389,7 +401,7 @@ export function Brain() {
     const refreshLabels = () => {
       const counts = entityCounts(entities.values(), useBrainStore.getState().clusterHealth);
       const relationships = relationshipCounts(edges.values(), entitiesById());
-      for (const cluster of CLUSTER_IDS) {
+      for (const cluster of VISUAL_CLUSTER_IDS) {
         const div = labelDivs.get(cluster);
         if (div) {
           updateClusterBracketElement(div, cluster, counts.get(cluster) ?? 0, {
@@ -402,7 +414,7 @@ export function Brain() {
     const initialCounts = entityCounts(entities.values(), state.clusterHealth);
     const initialRelationships = relationshipCounts(edges.values(), entitiesById());
     const bracketLines = new THREE.Group();
-    for (const cluster of CLUSTER_IDS) {
+    for (const cluster of VISUAL_CLUSTER_IDS) {
       if (!LABELED_CLUSTERS.has(cluster)) continue;
       const div = createClusterBracketElement(cluster, initialCounts.get(cluster) ?? 0, {
         entities: initialCounts.get(cluster) ?? 0,
@@ -437,7 +449,7 @@ export function Brain() {
     const hubMeshes = new Map<ClusterId, THREE.Mesh<THREE.CylinderGeometry, THREE.MeshStandardMaterial>>();
     const hubCores: THREE.Mesh[] = [];
     const hubHalos: THREE.Sprite[] = [];
-    for (const cluster of CLUSTER_IDS) {
+    for (const cluster of VISUAL_CLUSTER_IDS) {
       const color = new THREE.Color(CLUSTER_COLORS[cluster]);
       const hub = new THREE.Mesh(
         hubGeometry,
@@ -472,7 +484,7 @@ export function Brain() {
           blending: THREE.AdditiveBlending,
         }),
       );
-      const haloScale = (CLUSTER_RADIUS[cluster] + 10) * 1.4;
+      const haloScale = (CLUSTER_RADIUS[cluster] + 10) * 1.55;
       halo.scale.set(haloScale, haloScale, 1);
       halo.position.copy(CLUSTER_CENTROIDS[cluster]).add(new THREE.Vector3(0, 0, -1));
       hubHalos.push(halo);
@@ -547,7 +559,7 @@ export function Brain() {
     };
     const resetCamera = () => {
       select(null);
-      startCameraFlight(new THREE.Vector3(0, 0, 0), 280);
+      startCameraFlight(SCENE_TARGET, 205);
     };
     const setPointer = (ev: PointerEvent) => {
       const rect = renderer.domElement.getBoundingClientRect();
@@ -565,7 +577,7 @@ export function Brain() {
       return isClusterId(hit?.object.userData.cluster) ? hit.object.userData.cluster : null;
     };
     const syncSlots = () => {
-      slots = computeVisibleEntitySlots(visualEntities(entities.values()), CLUSTER_IDS, 60, CLUSTER_CENTROIDS);
+      slots = computeVisibleEntitySlots(visualEntities(entities.values()), VISUAL_CLUSTER_IDS, 60, CLUSTER_CENTROIDS);
       positionsById.clear();
       idByInstanceIndex.length = 0;
       nodeMesh.count = slots.length;
@@ -589,7 +601,7 @@ export function Brain() {
           (obj.material as THREE.Material).dispose();
         }
       });
-      interHubEdges = computeInterHubEdges(edges.values(), entitiesById(), CLUSTER_CENTROIDS).slice(0, 15);
+      interHubEdges = referenceHubEdges();
       conduitPaths = conduitPathsForEdges(interHubEdges, CLUSTER_CENTROIDS);
       const built = createConduitLines(conduitPaths);
       interHubLines = built.group;
@@ -718,7 +730,7 @@ export function Brain() {
       void dt;
       processLiveEvents(t);
       stars.update(t);
-      for (const [index, cluster] of CLUSTER_IDS.entries()) {
+      for (const [index, cluster] of VISUAL_CLUSTER_IDS.entries()) {
         const hub = hubMeshes.get(cluster);
         if (hub) hub.material.emissiveIntensity = hubEmissiveIntensityAt(HUB_EMISSIVE, index, t);
         const core = hubCores[index];

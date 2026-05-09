@@ -56,6 +56,19 @@ export function packSatellites(input: PackSatellitesInput): SatellitePosition[] 
   const rand = mulberry32(seed);
   const jitterFrac = 0.075;
 
+  if (count <= 10) {
+    const radius = clusterRadius * 0.95;
+    return Array.from({ length: count }, (_, index) => {
+      const angle = (index / count) * Math.PI * 2 - Math.PI / 2 + (rand() - 0.5) * 0.18;
+      const radial = radius * (0.88 + rand() * 0.18);
+      return {
+        ring: 1,
+        hexRadius: baseHexRadius * 0.92,
+        position: centroid.clone().add(new THREE.Vector3(Math.cos(angle) * radial, Math.sin(angle) * radial, (rand() - 0.5) * 4)),
+      };
+    });
+  }
+
   const innerCount = Math.min(count, 8);
   const remainingAfterInner = count - innerCount;
   const midCount = Math.min(remainingAfterInner, 16);

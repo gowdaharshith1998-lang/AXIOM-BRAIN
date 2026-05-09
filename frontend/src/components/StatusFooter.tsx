@@ -5,7 +5,7 @@ const tabs = ["Graph", "Flow", "Governance", "Timeline", "Search", "Receipts", "
 export function StatusFooter() {
   const fps = useBrainStore((s) => s.fps);
   return (
-    <footer className="fixed bottom-0 left-[56px] right-0 z-30 flex h-8 items-center justify-between border-t border-[#1a3550]/55 bg-[#050a12]/74 px-5 font-mono text-[11px] text-[#E8F0FF]/58 backdrop-blur-xl">
+    <footer className="fixed bottom-0 left-[84px] right-0 z-30 flex h-8 items-center justify-between border-t border-[#1a3550]/55 bg-[#050a12]/74 px-5 font-mono text-[11px] text-[#E8F0FF]/58 backdrop-blur-xl">
       <div className="text-[#E8F0FF]/45">AXIOM v0.1</div>
       <nav className="flex items-center gap-5">
         {tabs.map((tab) => (

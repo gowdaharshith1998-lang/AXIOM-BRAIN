@@ -1,11 +1,11 @@
 import { useRef, useState } from "react";
 
 const prompts = [
-  "Who owns payroll integration?",
-  "What decisions affect billing?",
-  "Which policy governs customer data?",
-  "Show systems impacted by PAY-1234",
-  "What changed after the Q2 strategy decision?",
+  "What impacted Q2 revenue?",
+  "Show risks to launch",
+  "Which policy applies?",
+  "Trace decision D-4821",
+  "Summarize incident 1021",
 ];
 
 export function QueryBar() {
@@ -19,7 +19,7 @@ export function QueryBar() {
   };
 
   return (
-    <div className="fixed bottom-[34px] left-1/2 z-30 w-[min(880px,52vw)] -translate-x-1/2 max-xl:w-[calc(100vw-180px)] max-md:w-[calc(100vw-84px)]">
+    <div className="fixed bottom-[36px] left-1/2 z-30 w-[min(900px,70vw)] -translate-x-1/2 max-xl:w-[calc(100vw-220px)] max-md:w-[calc(100vw-104px)]">
       <div className="mx-auto mb-2 flex w-max items-center gap-2 rounded-xl border border-white/10 bg-[#07111d]/68 px-4 py-2 font-mono text-xs text-[#E8F0FF]/62 shadow-xl backdrop-blur-xl">
         <span className="h-2 w-2 rounded-full bg-[#45f0a1] shadow-[0_0_10px_#45f0a1]" />
         Queryable by humans + AI agents
@@ -51,12 +51,12 @@ export function QueryBar() {
           <SendIcon />
         </button>
       </div>
-      <div className="mt-4 flex flex-wrap justify-center gap-2">
+      <div className="mt-6 flex flex-nowrap justify-center gap-2 overflow-hidden">
         {prompts.map((prompt) => (
           <button
             key={prompt}
             type="button"
-            className="rounded-full border border-white/12 bg-[#07111d]/68 px-3 py-1.5 font-mono text-[11px] text-[#E8F0FF]/68 backdrop-blur transition hover:border-[#00E5D8]/45 hover:text-[#E8F0FF]"
+            className="shrink-0 rounded-full border border-white/12 bg-[#07111d]/68 px-3 py-1.5 font-mono text-[11px] text-[#E8F0FF]/68 backdrop-blur transition hover:border-[#00E5D8]/45 hover:text-[#E8F0FF]"
             onClick={() => submit(prompt)}
           >
             {prompt}

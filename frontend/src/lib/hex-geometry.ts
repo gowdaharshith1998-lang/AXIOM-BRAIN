@@ -1,8 +1,8 @@
 import * as THREE from "three";
 
-export const HEX_HUB_RADIUS = 3.6;
-export const HEX_NODE_RADIUS = 1.6;
-export const HEX_HEIGHT = 0.4;
+export const HEX_HUB_RADIUS = 5.2;
+export const HEX_NODE_RADIUS = 2.15;
+export const HEX_HEIGHT = 0.42;
 
 export function createHexPrismGeometry(
   radius: number = 1,

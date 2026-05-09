@@ -25,7 +25,7 @@ export function App() {
       <NavRail />
       <TopHeader />
       <BrainHealthCard />
-      <div className="fixed inset-0 left-[56px] right-0">
+      <div className="fixed inset-0 left-[84px] right-0">
         <Brain />
       </div>
       <QueryBar />

@@ -43,7 +43,7 @@ export function createHexGridPlane(): THREE.Mesh<THREE.PlaneGeometry, THREE.Mesh
       map: texture,
       color: "#0F1A2A",
       transparent: true,
-      opacity: 0.055,
+      opacity: 0.095,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     }),

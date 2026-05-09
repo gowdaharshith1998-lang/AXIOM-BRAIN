@@ -13,10 +13,10 @@ import {
 import { CLUSTER_CENTROIDS } from "@/lib/cluster-layout";
 
 describe("ClusterBracketLabel", () => {
-  it("renders the cluster label and count", () => {
+  it("renders the cluster label without metadata", () => {
     render(<ClusterBracketLabel cluster="company_knowledge" count={961} />);
     expect(screen.getByText("COMPANY KNOWLEDGE")).toBeInTheDocument();
-    expect(screen.getByText("961 entities · 0 relationships")).toBeInTheDocument();
+    expect(screen.queryByText(/entities/i)).not.toBeInTheDocument();
   });
 
   it("colors labels by cluster", () => {
@@ -43,17 +43,17 @@ describe("ClusterBracketLabel", () => {
     expect(clusterLabelText("customers")).toBe("CUSTOMERS");
   });
 
-  it("renders count and relationship metadata", () => {
+  it("omits count and relationship metadata to match the reference labels", () => {
     const div = createClusterBracketElement("billing", 4, {
       entities: 412,
       relationships: 24800,
     });
-    expect(div.textContent).toContain("412 entities · 25k relationships");
+    expect(div.textContent).toBe("BILLING");
   });
 
-  it("updates relationship metadata", () => {
+  it("updates the label name only", () => {
     const div = createClusterBracketElement("billing", 4, { relationships: 1 });
     updateClusterBracketElement(div, "billing", 4, { relationships: 9 });
-    expect(div.textContent).toContain("4 entities · 9 relationships");
+    expect(div.textContent).toBe("BILLING");
   });
 });

@@ -39,15 +39,15 @@ function NavButton({ item }: { item: NavItem }) {
     <button
       type="button"
       title={item.label}
-      className={`group relative flex h-[54px] w-full items-center justify-center transition ${
+      className={`group relative flex h-[86px] w-full flex-col items-center justify-center gap-2 transition ${
         item.active ? "text-[#00E5D8]" : "text-[#8d9bbb] hover:text-[#E8F0FF]"
       }`}
     >
-      {item.active && <span className="absolute left-0 h-8 w-[2px] rounded-r-full bg-[#00E5D8] shadow-[0_0_14px_#00E5D8]" />}
-      <span className={`rounded-xl p-2 ${item.active ? "bg-[#00E5D8]/12 shadow-[0_0_24px_rgba(0,229,216,0.18)]" : "bg-transparent"}`}>
+      {item.active && <span className="absolute left-0 h-12 w-[2px] rounded-r-full bg-[#00E5D8] shadow-[0_0_14px_#00E5D8]" />}
+      <span className={`rounded-xl p-2 ${item.active ? "bg-[#00E5D8]/12 shadow-[0_0_24px_rgba(0,229,216,0.22)]" : "bg-transparent"}`}>
         <Icon name={item.icon} />
       </span>
-      <span className="pointer-events-none absolute left-[62px] z-50 rounded-md border border-white/10 bg-[#06101b]/95 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-[#E8F0FF]/75 opacity-0 shadow-xl backdrop-blur transition group-hover:opacity-100">
+      <span className={`font-mono text-[12px] ${item.active ? "text-[#00E5D8]" : "text-[#9aa8c4]"}`}>
         {item.label}
       </span>
     </button>
@@ -56,16 +56,18 @@ function NavButton({ item }: { item: NavItem }) {
 
 export function NavRail() {
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 flex w-[56px] flex-col items-center border-r border-[#1a3550]/55 bg-[#06101b]/72 shadow-[18px_0_50px_rgba(0,0,0,0.3)] backdrop-blur-xl">
-      <div className="mt-4 flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-[#E8F0FF]/85">
-        <AxiomGlyph className="h-5 w-5" />
+    <aside className="fixed inset-y-0 left-0 z-30 flex w-[84px] flex-col items-center border-r border-[#1a3550]/60 bg-[#06101b]/78 shadow-[18px_0_50px_rgba(0,0,0,0.34)] backdrop-blur-xl">
+      <div className="mt-6 flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 text-[#E8F0FF]/85">
+        <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+          <path d="M5 7h14M5 12h14M5 17h14" />
+        </svg>
       </div>
-      <div className="mt-8 w-full space-y-1">
+      <div className="mt-8 w-full">
         {topItems.map((item) => (
           <NavButton key={item.label} item={item} />
         ))}
       </div>
-      <div className="mb-5 mt-auto w-full space-y-1">
+      <div className="mb-5 mt-auto w-full">
         {bottomItems.map((item) => (
           <NavButton key={item.label} item={item} />
         ))}

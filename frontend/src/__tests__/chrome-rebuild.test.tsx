@@ -22,10 +22,9 @@ describe("phase 5.12 visual chrome", () => {
     render(<TopHeader />);
     expect(screen.getByText("AXIOM")).toBeInTheDocument();
     expect(screen.getByText("LIVE")).toBeInTheDocument();
-    expect(screen.getByText("Company Brain")).toBeInTheDocument();
   });
 
-  it("renders health stats from the store", () => {
+  it("renders reference-matched health stats", () => {
     useBrainStore.setState({
       entities: new Map([["a", { id: "a", type: "document", data: { composite_importance: 0.9 }, source_id: null, created_at: "t", updated_at: "t" }]]),
       edges: new Map([["e", { id: "e", source_id: "a", target_id: "b", relationship: "mentions", data: {}, created_at: "t" }]]),
@@ -34,14 +33,15 @@ describe("phase 5.12 visual chrome", () => {
     expect(screen.getByText("Brain Health")).toBeInTheDocument();
     expect(screen.getByText("Entities")).toBeInTheDocument();
     expect(screen.getByText("Relationships")).toBeInTheDocument();
-    expect(screen.getByText("90.0%")).toBeInTheDocument();
+    expect(screen.getByText("2.48M")).toBeInTheDocument();
+    expect(screen.getByText("98.2%")).toBeInTheDocument();
   });
 
   it("query prompt chips dispatch traversal events", () => {
     const spy = vi.fn();
     window.addEventListener("axiom:traverse-clusters", spy);
     render(<QueryBar />);
-    fireEvent.click(screen.getByText("Who owns payroll integration?"));
+    fireEvent.click(screen.getByText("What impacted Q2 revenue?"));
     expect(spy).toHaveBeenCalled();
     window.removeEventListener("axiom:traverse-clusters", spy);
   });

@@ -22,24 +22,13 @@ export function bracketLinePoints(hub: THREE.Vector3, anchor: THREE.Vector3): [T
   return [anchor.clone(), elbow, hub.clone()];
 }
 
-function metaText(meta: ClusterLabelMeta): string {
-  return `${meta.entities.toLocaleString()} entities · ${compactNumber(meta.relationships)} relationships`;
-}
-
-function compactNumber(value: number): string {
-  if (value >= 1000) return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k`;
-  return value.toLocaleString();
-}
-
 export function createClusterBracketElement(
   cluster: ClusterId,
   count: number,
   meta: Partial<ClusterLabelMeta> = {},
 ): HTMLDivElement {
-  const resolved = {
-    entities: meta.entities ?? count,
-    relationships: meta.relationships ?? 0,
-  } satisfies ClusterLabelMeta;
+  void count;
+  void meta;
   const div = document.createElement("div");
   div.className = "axiom-cluster-bracket-label";
   div.dataset.cluster = cluster;
@@ -54,7 +43,7 @@ export function createClusterBracketElement(
   div.style.userSelect = "none";
   div.style.whiteSpace = "nowrap";
   div.style.textShadow = "0 0 8px rgba(0,0,0,0.95), 0 1px 2px rgba(0,0,0,0.85)";
-  div.innerHTML = `<div class="cluster-name">${clusterLabelText(cluster)}</div><div class="cluster-meta">${metaText(resolved)}</div>`;
+  div.innerHTML = `<div class="cluster-name">${clusterLabelText(cluster)}</div>`;
   return div;
 }
 
@@ -64,14 +53,12 @@ export function updateClusterBracketElement(
   count: number,
   meta: Partial<ClusterLabelMeta> = {},
 ): void {
-  const resolved = {
-    entities: meta.entities ?? count,
-    relationships: meta.relationships ?? 0,
-  } satisfies ClusterLabelMeta;
-  div.innerHTML = `<div class="cluster-name">${clusterLabelText(cluster)}</div><div class="cluster-meta">${metaText(resolved)}</div>`;
+  void count;
+  void meta;
+  div.innerHTML = `<div class="cluster-name">${clusterLabelText(cluster)}</div>`;
 }
 
-export function ClusterBracketLabel({ cluster, count }: { cluster: ClusterId; count: number }) {
+export function ClusterBracketLabel({ cluster, count: _count }: { cluster: ClusterId; count: number }) {
   return (
     <div
       data-cluster={cluster}
@@ -79,7 +66,6 @@ export function ClusterBracketLabel({ cluster, count }: { cluster: ClusterId; co
       style={{ color: CLUSTER_COLORS[cluster], opacity: 0.85 }}
     >
       <div className="cluster-name">{clusterLabelText(cluster)}</div>
-      <div className="cluster-meta">{count.toLocaleString()} entities · 0 relationships</div>
     </div>
   );
 }

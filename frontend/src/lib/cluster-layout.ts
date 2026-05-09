@@ -67,14 +67,14 @@ export const SAME_CLUSTER_EDGE_WIDTH = 0.7;
 
 // Phase 5.12.4: per-cluster satellite packing radius (world units)
 export const CLUSTER_RADIUS: Record<ClusterId, number> = {
-  company_knowledge: 22,
-  execution_context: 20,
-  customers: 8,
-  policies: 7,
-  receipts: 7,
-  agents: 8,
-  incidents: 8,
-  governance: 8,
+  company_knowledge: 31,
+  execution_context: 29,
+  customers: 11,
+  policies: 11,
+  receipts: 11,
+  agents: 12,
+  incidents: 11,
+  governance: 12,
   people_teams: 9,
   billing: 10,
 };
@@ -110,14 +110,14 @@ export function fibonacciSpherePoints(n: number, radius: number): THREE.Vector3[
 }
 
 export const CLUSTER_CENTROIDS: Record<ClusterId, THREE.Vector3> = {
-  company_knowledge: new THREE.Vector3(-30, 18, 0),
-  execution_context: new THREE.Vector3(35, 23, -5),
-  policies: new THREE.Vector3(-50, 53, 10),
-  customers: new THREE.Vector3(-80, 13, 5),
-  receipts: new THREE.Vector3(-30, -22, 0),
-  agents: new THREE.Vector3(60, 53, -10),
-  incidents: new THREE.Vector3(75, 13, 0),
-  governance: new THREE.Vector3(60, -17, -5),
+  company_knowledge: new THREE.Vector3(-35, 10, 0),
+  execution_context: new THREE.Vector3(38, 18, -5),
+  policies: new THREE.Vector3(-78, 58, 10),
+  customers: new THREE.Vector3(-158, -3, 5),
+  receipts: new THREE.Vector3(-62, -32, 0),
+  agents: new THREE.Vector3(62, 62, -10),
+  incidents: new THREE.Vector3(92, 14, 0),
+  governance: new THREE.Vector3(86, -12, -5),
   people_teams: new THREE.Vector3(0, 43, 15),
   billing: new THREE.Vector3(10, -7, 10),
 };
