@@ -1,14 +1,6 @@
 import { create } from "zustand";
 
-import {
-  VaultLockedError,
-  deleteSecret,
-  formatVaultError,
-  listProviders,
-  listSecrets,
-  storeSecret,
-  testSecret,
-} from "@/lib/vaultClient";
+import { disconnectLLMKey, listLLMKeys, saveLLMKey, testLLMKey } from "@/lib/llmKeysClient";
 import type { ProviderMetadata, SecretMetadata } from "@/lib/vaultTypes";
 
 export type ActiveView = "brain" | "settings";
@@ -41,17 +33,67 @@ type SettingsState = {
 
 const DEFAULT_KEY_NAME = "default";
 
+const LLM_PROVIDERS: ProviderMetadata[] = [
+  {
+    id: "anthropic",
+    display_name: "Anthropic",
+    kind: "llm",
+    credential_shape: [{ name: "api_key", label: "API Key", secret: true }],
+    docs_url: "https://console.anthropic.com/settings/keys",
+    verify_endpoint: "GET /v1/models",
+  },
+  {
+    id: "groq",
+    display_name: "Groq",
+    kind: "llm",
+    credential_shape: [{ name: "api_key", label: "API Key", secret: true }],
+    docs_url: "https://console.groq.com/keys",
+    verify_endpoint: "GET /openai/v1/models",
+  },
+  {
+    id: "mistral",
+    display_name: "Mistral",
+    kind: "llm",
+    credential_shape: [{ name: "api_key", label: "API Key", secret: true }],
+    docs_url: "https://console.mistral.ai/api-keys",
+    verify_endpoint: "GET /v1/models",
+  },
+  {
+    id: "openai",
+    display_name: "OpenAI",
+    kind: "llm",
+    credential_shape: [{ name: "api_key", label: "API Key", secret: true }],
+    docs_url: "https://platform.openai.com/api-keys",
+    verify_endpoint: "GET /v1/models",
+  },
+];
+
 function mergeSecret(list: SecretMetadata[], next: SecretMetadata): SecretMetadata[] {
   const without = list.filter((s) => !(s.provider_id === next.provider_id && s.key_name === next.key_name));
   return [...without, next].sort((a, b) => a.provider_id.localeCompare(b.provider_id) || a.key_name.localeCompare(b.key_name));
 }
 
-function recordLocked(err: unknown, set: (partial: Partial<SettingsState>) => void): boolean {
-  if (err instanceof VaultLockedError) {
-    set({ vaultLocked: true });
-    return true;
-  }
-  return false;
+function formatSettingsError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+function toSecret(meta: {
+  provider: string;
+  key_fingerprint: string;
+  connected_at: string;
+  last_tested_at: string | null;
+  last_test_status: "valid" | "invalid" | "untested";
+}): SecretMetadata {
+  return {
+    id: meta.provider,
+    provider_id: meta.provider,
+    key_name: DEFAULT_KEY_NAME,
+    status: meta.last_test_status,
+    last_tested_at: meta.last_tested_at,
+    created_at: meta.connected_at,
+    updated_at: meta.last_tested_at ?? meta.connected_at,
+  };
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -77,18 +119,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loadSettingsData: async () => {
     set({ bootstrapError: null });
     try {
-      const [providers, secrets] = await Promise.all([listProviders(), listSecrets()]);
+      const keys = await listLLMKeys();
       set({
-        providers,
-        secrets,
+        providers: LLM_PROVIDERS,
+        secrets: keys.map(toSecret),
         vaultLocked: false,
       });
     } catch (err) {
-      if (recordLocked(err, set)) {
-        set({ bootstrapError: null });
-        return;
-      }
-      set({ bootstrapError: formatVaultError(err) });
+      set({ providers: LLM_PROVIDERS, bootstrapError: formatSettingsError(err) });
     }
   },
 
@@ -102,27 +140,22 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }));
 
     try {
-      const stored = await storeSecret({
-        provider_id: providerId,
-        key_name: DEFAULT_KEY_NAME,
-        plaintext,
-      });
+      const stored = toSecret(await saveLLMKey(providerId, plaintext));
       set((s) => ({
         secrets: mergeSecret(s.secrets, stored),
         providerPhase: { ...s.providerPhase, [providerId]: "testing" },
       }));
 
-      const tested = await testSecret(providerId, DEFAULT_KEY_NAME);
+      const tested = toSecret(await testLLMKey(providerId));
       set((s) => ({
-        secrets: mergeSecret(s.secrets, tested.secret),
+        secrets: mergeSecret(s.secrets, tested),
         providerPhase: { ...s.providerPhase, [providerId]: "idle" },
         connectTarget: null,
       }));
     } catch (err) {
-      recordLocked(err, set);
       set((s) => ({
         providerPhase: { ...s.providerPhase, [providerId]: "idle" },
-        dialogError: formatVaultError(err),
+        dialogError: formatSettingsError(err),
       }));
     }
   },
@@ -132,16 +165,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       providerPhase: { ...s.providerPhase, [providerId]: "testing" },
     }));
     try {
-      const tested = await testSecret(providerId, DEFAULT_KEY_NAME);
+      const tested = toSecret(await testLLMKey(providerId));
       set((s) => ({
-        secrets: mergeSecret(s.secrets, tested.secret),
+        secrets: mergeSecret(s.secrets, tested),
         providerPhase: { ...s.providerPhase, [providerId]: "idle" },
       }));
     } catch (err) {
-      recordLocked(err, set);
       set((s) => ({
         providerPhase: { ...s.providerPhase, [providerId]: "idle" },
-        bootstrapError: formatVaultError(err),
+        bootstrapError: formatSettingsError(err),
       }));
     }
   },
@@ -151,16 +183,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       providerPhase: { ...s.providerPhase, [providerId]: "removing" },
     }));
     try {
-      await deleteSecret(providerId, DEFAULT_KEY_NAME);
+      await disconnectLLMKey(providerId);
       set((s) => ({
         secrets: s.secrets.filter((x) => !(x.provider_id === providerId && x.key_name === DEFAULT_KEY_NAME)),
         providerPhase: { ...s.providerPhase, [providerId]: "idle" },
       }));
     } catch (err) {
-      recordLocked(err, set);
       set((s) => ({
         providerPhase: { ...s.providerPhase, [providerId]: "idle" },
-        bootstrapError: formatVaultError(err),
+        bootstrapError: formatSettingsError(err),
       }));
     }
   },

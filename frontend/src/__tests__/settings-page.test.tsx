@@ -38,6 +38,29 @@ vi.mock("@/lib/vaultClient", async () => {
   };
 });
 
+const llmKeys = vi.hoisted(() => ({
+  listLLMKeys: vi.fn().mockResolvedValue([]),
+  saveLLMKey: vi.fn().mockResolvedValue({
+    provider: "openai",
+    key_fingerprint: "1234",
+    connected_at: "2026-05-10T00:00:00",
+    last_tested_at: null,
+    last_test_status: "untested",
+    demo_flag: false,
+  }),
+  testLLMKey: vi.fn().mockResolvedValue({
+    provider: "openai",
+    key_fingerprint: "1234",
+    connected_at: "2026-05-10T00:00:00",
+    last_tested_at: "2026-05-10T00:01:00",
+    last_test_status: "valid",
+    demo_flag: false,
+  }),
+  disconnectLLMKey: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/lib/llmKeysClient", () => llmKeys);
+
 function renderSettings() {
   render(
     <MemoryRouter>
@@ -49,6 +72,8 @@ function renderSettings() {
 describe("SettingsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    llmKeys.listLLMKeys.mockResolvedValue([]);
+    window.confirm = vi.fn(() => true);
   });
 
   it("renders general settings with real company field", async () => {
@@ -68,8 +93,63 @@ describe("SettingsPage", () => {
     renderSettings();
     fireEvent.click(screen.getByRole("button", { name: "API & MCP" }));
     await waitFor(() => expect(screen.getByText("OpenAI")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Connect" }).at(-1)!);
     expect(screen.getByRole("dialog")).toHaveTextContent("Connect OpenAI");
+  });
+
+  it("saves and tests an OpenAI vault key through Phase 7.D endpoints", async () => {
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "API & MCP" }));
+    await waitFor(() => expect(screen.getByText("OpenAI")).toBeInTheDocument());
+    fireEvent.click(screen.getAllByRole("button", { name: "Connect" }).at(-1)!);
+    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-test-1234" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save & Test" }));
+    await waitFor(() => expect(llmKeys.saveLLMKey).toHaveBeenCalledWith("openai", "sk-test-1234"));
+    expect(llmKeys.testLLMKey).toHaveBeenCalledWith("openai");
+    expect(await screen.findByText("Valid")).toBeInTheDocument();
+  });
+
+  it("tests a saved vault key", async () => {
+    llmKeys.listLLMKeys.mockResolvedValue([
+      {
+        provider: "openai",
+        key_fingerprint: "1234",
+        connected_at: "2026-05-10T00:00:00",
+        last_tested_at: null,
+        last_test_status: "untested",
+        demo_flag: false,
+      },
+    ]);
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "API & MCP" }));
+    await waitFor(() => expect(screen.getByText("OpenAI")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    await waitFor(() => expect(llmKeys.testLLMKey).toHaveBeenCalledWith("openai"));
+  });
+
+  it("disconnects a saved vault key", async () => {
+    llmKeys.listLLMKeys.mockResolvedValue([
+      {
+        provider: "openai",
+        key_fingerprint: "1234",
+        connected_at: "2026-05-10T00:00:00",
+        last_tested_at: null,
+        last_test_status: "untested",
+        demo_flag: false,
+      },
+    ]);
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "API & MCP" }));
+    await waitFor(() => expect(screen.getByText("OpenAI")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => expect(llmKeys.disconnectLLMKey).toHaveBeenCalledWith("openai"));
+  });
+
+  it("links to the passports page from agent access policies", async () => {
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "API & MCP" }));
+    await waitFor(() => expect(screen.getByText("Agent Access Policies")).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "Manage Passports" })).toHaveAttribute("href", "/settings/passports");
   });
 
   it.each([

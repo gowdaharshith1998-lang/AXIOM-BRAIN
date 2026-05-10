@@ -9,6 +9,7 @@ describe("CommandPalette", () => {
     cleanup();
     vi.restoreAllMocks();
     vi.useRealTimers();
+    window.localStorage.clear();
     useBrainStore.setState({ entities: new Map(), edges: new Map(), selectedId: null });
   });
 
@@ -54,7 +55,7 @@ describe("CommandPalette", () => {
   it("renders an empty state for no search matches", async () => {
     vi.spyOn(window, "fetch").mockResolvedValue({
       ok: true,
-      json: async () => [],
+      json: async () => ({ results: [] }),
     } as Response);
     render(<CommandPalette />);
 
@@ -69,14 +70,18 @@ describe("CommandPalette", () => {
   it("searches entities and dispatches fly-to on Enter", async () => {
     const fetchMock = vi.spyOn(window, "fetch").mockResolvedValue({
       ok: true,
-      json: async () => [
-        {
-          id: "entity-1",
-          type: "decision",
-          title: "Refund Policy 2026 (v3)",
-          connection_count: 14,
-        },
-      ],
+      json: async () => ({
+        results: [
+          {
+            id: "entity-1",
+            type: "decision",
+            title: "Refund Policy 2026 (v3)",
+            connection_count: 14,
+            methods: ["hybrid"],
+            breakdown: { lexical: { rank: 1, score: 0.9 } },
+          },
+        ],
+      }),
     } as Response);
     const dispatchSpy = vi.spyOn(window, "dispatchEvent");
     render(<CommandPalette />);
@@ -90,8 +95,11 @@ describe("CommandPalette", () => {
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter" });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/entities/search?q=refund&limit=8",
-      expect.any(Object),
+      "/api/internal/search",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ query: "refund", mode: "hybrid", top_k: 8 }),
+      }),
     );
     expect(useBrainStore.getState().selectedId).toBe("entity-1");
     expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({ type: "axiom:fly-to-entity" }));
@@ -126,5 +134,72 @@ describe("CommandPalette", () => {
     });
 
     await waitFor(() => expect(screen.getByText("Refund Policy 2026 (v3)")).toBeInTheDocument());
+  });
+
+  it("persists the selected search mode", async () => {
+    vi.spyOn(window, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ results: [] }),
+    } as Response);
+    render(<CommandPalette />);
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Semantic" }));
+
+    expect(window.localStorage.getItem("axiom.search.mode")).toBe("semantic");
+  });
+
+  it("uses the persisted search mode for requests", async () => {
+    window.localStorage.setItem("axiom.search.mode", "graph");
+    const fetchMock = vi.spyOn(window, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ results: [] }),
+    } as Response);
+    render(<CommandPalette />);
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(screen.getByPlaceholderText("Ask the brain… (e.g. how do refunds work)"), {
+      target: { value: "refund" },
+    });
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/internal/search",
+        expect.objectContaining({
+          body: JSON.stringify({ query: "refund", mode: "graph", top_k: 8 }),
+        }),
+      ),
+    );
+  });
+
+  it("renders method badges with breakdown tooltip", async () => {
+    vi.spyOn(window, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [
+          {
+            id: "entity-1",
+            type: "decision",
+            title: "Refund Policy 2026 (v3)",
+            connection_count: 14,
+            methods: ["lexical", "semantic"],
+            breakdown: {
+              lexical: { rank: 1, score: 0.91 },
+              semantic: { rank: 2, score: 0.82 },
+            },
+          },
+        ],
+      }),
+    } as Response);
+    render(<CommandPalette />);
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(screen.getByPlaceholderText("Ask the brain… (e.g. how do refunds work)"), {
+      target: { value: "refund" },
+    });
+
+    await waitFor(() => expect(screen.getByText("lex")).toBeInTheDocument());
+    expect(screen.getByText("sem")).toBeInTheDocument();
+    expect(screen.getByTitle((title) => title.includes("lexical: rank 1") && title.includes("semantic: rank 2"))).toBeInTheDocument();
   });
 });

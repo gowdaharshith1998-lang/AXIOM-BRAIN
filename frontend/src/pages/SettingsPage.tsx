@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { AddKeyDialog } from "@/components/settings/AddKeyDialog";
 import { ProviderCard } from "@/components/settings/ProviderCard";
@@ -258,7 +258,7 @@ export function SettingsPage() {
             </div>
             <div className="grid grid-cols-[555px_507px] gap-[14px]">
               <Panel title="API Key Vault" subtitle="Manage API keys for programmatic access.">
-                {vaultLocked ? <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-amber-100">Vault locked. Run <code>python -m axiom.cli vault init</code>.</div> : null}
+                {vaultLocked ? <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-amber-100">Key vault unavailable.</div> : null}
                 {bootstrapError ? <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 p-3 text-red-100">{bootstrapError}</div> : null}
                 <div className="max-h-[350px] space-y-2 overflow-auto pr-1">
                   {[...llm, ...connectors].map((provider) => (
@@ -271,13 +271,15 @@ export function SettingsPage() {
                       onConnect={() => openConnectDialog(provider)}
                       onTest={() => void runTest(provider.id)}
                       onRemove={() => {
-                        if (window.confirm(`Remove ${provider.display_name} credential?`)) void removeSecret(provider.id);
+                        if (window.confirm(`Disconnect ${provider.display_name} credential?`)) void removeSecret(provider.id);
                       }}
                     />
                   ))}
                 </div>
               </Panel>
-              <Panel title="Agent Access Policies">Access matrix and rate limits <Phase>PHASE 9</Phase></Panel>
+              <Panel title="Agent Access Policies">
+                <Link className="text-[#00E5D8] hover:underline" to="/settings/passports">Manage Passports</Link>
+              </Panel>
             </div>
           </div>
           <div className="space-y-[14px]">

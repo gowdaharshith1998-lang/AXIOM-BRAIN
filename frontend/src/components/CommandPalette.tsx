@@ -8,10 +8,16 @@ type EntitySearchResult = {
   id: string;
   type: string;
   title: string;
-  connection_count: number;
+  connection_count?: number;
+  methods?: SearchMode[];
+  breakdown?: Partial<Record<SearchMode, { rank: number; score: number }>>;
 };
 
-const SEARCH_URL = "/api/entities/search";
+type SearchMode = "hybrid" | "lexical" | "semantic" | "graph";
+
+const SEARCH_URL = "/api/internal/search";
+const SEARCH_MODE_KEY = "axiom.search.mode";
+const SEARCH_MODES: SearchMode[] = ["hybrid", "lexical", "semantic", "graph"];
 const TITLE_KEYS = ["title", "name", "subject", "label", "file_path"] as const;
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -38,6 +44,7 @@ function localSearch(query: string, limit: number): EntitySearchResult[] {
   if (!q) return [];
 
   const { entities, edges } = useBrainStore.getState();
+  type LocalResult = EntitySearchResult & { score: number; connection_count: number };
   const connectionCounts = new Map<string, number>();
   for (const edge of edges.values()) {
     connectionCounts.set(edge.source_id, (connectionCounts.get(edge.source_id) ?? 0) + 1);
@@ -45,7 +52,7 @@ function localSearch(query: string, limit: number): EntitySearchResult[] {
   }
 
   return Array.from(entities.values())
-    .map((entity) => {
+    .map<LocalResult | null>((entity) => {
       const title = titleForEntity(entity);
       const normalizedTitle = title.toLowerCase();
       const prefix = normalizedTitle.startsWith(q);
@@ -56,13 +63,32 @@ function localSearch(query: string, limit: number): EntitySearchResult[] {
         type: entity.type,
         title,
         connection_count: connectionCounts.get(entity.id) ?? 0,
+        methods: ["lexical" as const],
+        breakdown: { lexical: { rank: 1, score: prefix ? 2 : 1 } },
         score: prefix ? 2 : 1,
       };
     })
-    .filter((result): result is EntitySearchResult & { score: number } => result !== null)
+    .filter((result): result is LocalResult => result !== null)
     .sort((a, b) => b.score - a.score || b.connection_count - a.connection_count || a.title.localeCompare(b.title))
     .slice(0, limit)
     .map(({ score: _score, ...result }) => result);
+}
+
+function initialSearchMode(): SearchMode {
+  const saved = window.localStorage.getItem(SEARCH_MODE_KEY);
+  return SEARCH_MODES.includes(saved as SearchMode) ? (saved as SearchMode) : "hybrid";
+}
+
+function methodLabel(method: SearchMode): string {
+  return method[0].toUpperCase() + method.slice(1);
+}
+
+function tooltipFor(result: EntitySearchResult): string {
+  const entries = Object.entries(result.breakdown ?? {});
+  if (!entries.length) return "No method breakdown";
+  return entries
+    .map(([method, item]) => `${method}: rank ${item.rank}, score ${item.score}`)
+    .join("\n");
 }
 
 export function CommandPalette() {
@@ -72,6 +98,7 @@ export function CommandPalette() {
   const [results, setResults] = useState<EntitySearchResult[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [hintDismissed, setHintDismissed] = useState(false);
+  const [mode, setMode] = useState<SearchMode>(initialSearchMode);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const openPalette = () => {
@@ -104,6 +131,10 @@ export function CommandPalette() {
   }, [open]);
 
   useEffect(() => {
+    window.localStorage.setItem(SEARCH_MODE_KEY, mode);
+  }, [mode]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
       const commandKey = (event.metaKey || event.ctrlKey) && key === "k";
@@ -130,13 +161,17 @@ export function CommandPalette() {
 
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      const params = new URLSearchParams({ q: query, limit: "8" });
-      void fetch(`${SEARCH_URL}?${params.toString()}`, { signal: controller.signal })
+      void fetch(SEARCH_URL, {
+        method: "POST",
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, mode, top_k: 8 }),
+      })
         .then((response) => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return response.json() as Promise<EntitySearchResult[]>;
+          return response.json() as Promise<{ results: EntitySearchResult[] }>;
         })
-        .then((items) => {
+        .then(({ results: items }) => {
           setResults(items.length > 0 ? items : localSearch(query, 8));
           setActiveIndex(0);
         })
@@ -150,7 +185,7 @@ export function CommandPalette() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [open, query]);
+  }, [mode, open, query]);
 
   const onPaletteKeyDown = (event: ReactKeyboardEvent) => {
     if (event.key === "Escape") {
@@ -207,6 +242,19 @@ export function CommandPalette() {
                 placeholder="Ask the brain… (e.g. how do refunds work)"
                 className="w-full bg-transparent font-mono text-base text-white outline-none placeholder:text-white/35"
               />
+              <div className="mt-3 grid grid-cols-4 rounded-lg border border-white/10 bg-black/20 p-1">
+                {SEARCH_MODES.map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    aria-pressed={mode === item}
+                    className={`h-8 rounded-md text-[12px] transition ${mode === item ? "bg-[#00E5D8]/18 text-[#00E5D8]" : "text-white/50 hover:text-white"}`}
+                    onClick={() => setMode(item)}
+                  >
+                    {methodLabel(item)}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="max-h-[420px] overflow-y-auto p-2">
               {results.map((result, index) => {
@@ -229,8 +277,15 @@ export function CommandPalette() {
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{result.title}</span>
                       <span className="mt-1 block text-xs text-white/40">
-                        {result.type} · {result.connection_count} connections
+                        {result.type} · {result.connection_count ?? 0} connections
                       </span>
+                    </span>
+                    <span className="flex shrink-0 gap-1" title={tooltipFor(result)}>
+                      {(result.methods ?? ["lexical"]).map((method) => (
+                        <span key={method} className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] uppercase text-white/55">
+                          {method.slice(0, 3)}
+                        </span>
+                      ))}
                     </span>
                   </button>
                 );

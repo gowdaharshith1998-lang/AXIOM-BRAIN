@@ -13,6 +13,7 @@ import { AgentsPage } from "@/pages/AgentsPage";
 import { ExplorePage } from "@/pages/ExplorePage";
 import { GovernancePage } from "@/pages/GovernancePage";
 import { InsightsPage } from "@/pages/InsightsPage";
+import { PassportsPage } from "@/pages/PassportsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { useBrainStore } from "@/state/brain.store";
 
@@ -68,6 +69,7 @@ function StudioShell() {
   const isExploreRoute = location.pathname.startsWith("/explore");
   const isGovernanceRoute = location.pathname === "/governance";
   const isInsightsRoute = location.pathname === "/insights";
+  const isSettingsRoute = location.pathname.startsWith("/settings");
   const hasCompactHeader = isGovernanceRoute || isInsightsRoute;
   const shellNavItems = isAgentsRoute ? agentNavItems : navItems;
 
@@ -109,7 +111,7 @@ function StudioShell() {
             <NavLink
               key={to}
               to={to}
-              end={to === "/agents" || to === "/settings" || to === "/graph"}
+              end={to === "/agents" || to === "/graph"}
               className={({ isActive }) =>
                 `mb-1 flex h-[52px] items-center gap-4 rounded-lg px-4 text-[18px] transition ${isActive ? "border border-[#1f5db0] bg-[#10266a]/70 text-[#eef5ff] shadow-[inset_3px_0_0_#2389ff]" : "text-[#aab5c7] hover:bg-[#0b1930]"}`
               }
@@ -152,7 +154,7 @@ function StudioShell() {
             </div>
           ) : (
             <div>
-              <div className="text-[28px] leading-none tracking-[0.22em] text-[#eef5ff]">{location.pathname === "/settings" ? "SETTINGS" : "STUDIO"}</div>
+              <div className="text-[28px] leading-none tracking-[0.22em] text-[#eef5ff]">{isSettingsRoute ? "SETTINGS" : "STUDIO"}</div>
               <div className="mt-2 text-[12px] text-[#7fa2c8]">Think in graph. Act with agents.</div>
             </div>
           )}
@@ -221,6 +223,7 @@ export function App() {
         <Route element={<StudioShell />}>
           <Route path="/graph" element={<GraphPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings/passports" element={<PassportsPage />} />
           <Route path="/agents/*" element={<AgentsPage />} />
           <Route path="/explore/*" element={<ExplorePage />} />
           <Route path="/insights" element={<InsightsPage />} />

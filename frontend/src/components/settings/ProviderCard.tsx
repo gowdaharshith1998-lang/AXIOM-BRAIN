@@ -115,7 +115,7 @@ export function ProviderCard({
               onClick={onRemove}
               className="rounded-lg border border-red-500/35 px-4 py-2 font-mono text-[13px] text-red-200/95 transition hover:border-red-400/55 hover:text-white disabled:opacity-35"
             >
-              {phase === "removing" ? "Removing…" : "Remove"}
+              {phase === "removing" ? "Disconnecting…" : "Disconnect"}
             </button>
           </>
         )}
