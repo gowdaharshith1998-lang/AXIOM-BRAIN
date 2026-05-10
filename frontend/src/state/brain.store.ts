@@ -65,6 +65,21 @@ export type WardenInsight = {
   demo?: boolean;
 };
 
+export type WatchdogAlert = {
+  alert_id: string;
+  entity_id: string;
+  rule_id: string;
+  severity: "info" | "warning" | "critical";
+  reason: string;
+  evidence: Record<string, unknown>;
+  suggested_action: string;
+  status: "open" | "acknowledged" | "resolved";
+  detected_at: string | null;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  demo_flag?: boolean;
+};
+
 export type BrainFocusMode = "AMBIENT" | "FOCUS_CLUSTER" | "FOCUS_ENTITY";
 
 export type BrainFocusState = {
@@ -88,6 +103,7 @@ type BrainState = {
   agentActions: AgentActionLog[];
   receipts: LedgerReceipt[];
   insights: WardenInsight[];
+  watchdogAlerts: WatchdogAlert[];
 
   bootstrap: (entities: Entity[], edges: Edge[]) => void;
   applyEvent: (event: BrainEvent) => void;
@@ -104,6 +120,7 @@ type BrainState = {
   addAgentAction: (action: AgentActionLog) => void;
   addReceipt: (receipt: LedgerReceipt) => void;
   addInsight: (insight: WardenInsight) => void;
+  addWatchdogAlert: (alert: WatchdogAlert) => void;
 };
 
 function isSafeId(value: unknown): value is string {
@@ -164,6 +181,7 @@ export const useBrainStore = create<BrainState>((set) => ({
   agentActions: [],
   receipts: [],
   insights: [],
+  watchdogAlerts: [],
 
   bootstrap: (entities, edges) =>
     set((state) => {
@@ -262,6 +280,39 @@ export const useBrainStore = create<BrainState>((set) => ({
         }
       }
 
+      if (event.type === "watchdog_alert_raised") {
+        const payload = event.payload as Partial<WatchdogAlert>;
+        if (typeof payload.alert_id === "string") {
+          const alert = payload as WatchdogAlert;
+          next.watchdogAlerts = [alert, ...state.watchdogAlerts.filter((item) => item.alert_id !== alert.alert_id)].slice(0, 25);
+          next.insights = [
+            {
+              insight_id: alert.alert_id,
+              severity: alert.severity,
+              message: alert.reason,
+              confidence: 1,
+              related_entity_ids: [alert.entity_id],
+              recommended_actions: [alert.suggested_action],
+              timestamp: alert.detected_at ?? new Date().toISOString(),
+              demo: alert.demo_flag,
+            },
+            ...state.insights.filter((item) => item.insight_id !== alert.alert_id),
+          ].slice(0, 10);
+        }
+      }
+
+      if (event.type === "watchdog_alert_acknowledged" || event.type === "watchdog_alert_resolved") {
+        const payload = event.payload as Partial<WatchdogAlert>;
+        if (typeof payload.alert_id === "string") {
+          next.watchdogAlerts = state.watchdogAlerts
+            .map((item) => (item.alert_id === payload.alert_id ? { ...item, ...(payload as WatchdogAlert) } : item))
+            .filter((item) => item.status === "open");
+          if (event.type === "watchdog_alert_resolved") {
+            next.insights = state.insights.filter((item) => item.insight_id !== payload.alert_id);
+          }
+        }
+      }
+
       return next;
     }),
 
@@ -347,4 +398,8 @@ export const useBrainStore = create<BrainState>((set) => ({
     })),
   addReceipt: (receipt) => set((state) => ({ receipts: [receipt, ...state.receipts].slice(0, 30) })),
   addInsight: (insight) => set((state) => ({ insights: [insight, ...state.insights].slice(0, 10) })),
+  addWatchdogAlert: (alert) =>
+    set((state) => ({
+      watchdogAlerts: [alert, ...state.watchdogAlerts.filter((item) => item.alert_id !== alert.alert_id)].slice(0, 25),
+    })),
 }));

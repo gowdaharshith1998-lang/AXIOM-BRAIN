@@ -14,6 +14,9 @@ export type BrainEvent = {
     | "agent_action_evaluated"
     | "receipt_added"
     | "insight_flagged"
+    | "watchdog_alert_raised"
+    | "watchdog_alert_acknowledged"
+    | "watchdog_alert_resolved"
     | "agent_navigation_step"
     | "confidence_changed";
   timestamp: number;

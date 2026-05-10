@@ -55,6 +55,14 @@ from axiom.govern.snapshots import (
     take_snapshot,
 )
 from axiom.govern.warden import emit_demo_warden_insights
+from axiom.govern.watchdog import (
+    WatchdogAgent,
+    acknowledge_alert,
+    alert_to_dict,
+    ensure_watchdog_alerts_schema,
+    list_open_alerts,
+    resolve_alert,
+)
 from axiom.ingest.broadcaster import EventBroadcaster
 from axiom.ingest.pipeline import IngestPipeline
 from axiom.organize.agent import OrganizerAgent
@@ -141,6 +149,10 @@ class PassportIn(BaseModel):
 
 class KillSwitchIn(BaseModel):
     enabled: bool
+
+
+class WatchdogResolveIn(BaseModel):
+    resolution_note: str = ""
 
 
 class InternalSearchIn(BaseModel):
@@ -243,6 +255,7 @@ def create_app(
     ensure_llm_provider_keys_schema(engine)
     ensure_skills_schema(engine)
     ensure_entity_embeddings_schema(engine)
+    ensure_watchdog_alerts_schema(engine)
     session_local = sessionmaker(bind=engine, future=True)
     broadcaster = EventBroadcaster()
     cluster_health_monitor = ClusterHealthMonitor()
@@ -262,6 +275,7 @@ def create_app(
         app.state.cluster_health_task = None
         app.state.agent_action_task = None
         app.state.warden_task = None
+        app.state.watchdog = None
         app.state.snapshot_task = None
         app.state.cluster_check_retention_task = None
         app.state.organizer = None
@@ -334,7 +348,11 @@ def create_app(
             if demo_simulator_enabled
             else None
         )
-        warden_task = asyncio.create_task(emit_demo_warden_insights(broadcaster, session_local))
+        warden_task = (
+            asyncio.create_task(emit_demo_warden_insights(broadcaster, session_local))
+            if os.environ.get("AXIOM_DEMO_WARDEN") == "1"
+            else None
+        )
         app.state.cluster_health_task = health_task
         app.state.cluster_check_retention_task = cluster_check_retention_task
         app.state.agent_action_task = agent_action_task
@@ -386,17 +404,26 @@ def create_app(
             organizer.start()
             app.state.organizer = organizer
 
+        watchdog = WatchdogAgent(
+            session_factory=session_local,
+            broadcaster=broadcaster,
+        )
+        watchdog.start()
+        app.state.watchdog = watchdog
+
         if live_source is None:
             try:
                 yield
             finally:
+                await watchdog.cancel()
                 if organizer is not None:
                     await organizer.cancel()
                 health_task.cancel()
                 if agent_action_task is not None:
                     agent_action_task.cancel()
                 cluster_check_retention_task.cancel()
-                warden_task.cancel()
+                if warden_task is not None:
+                    warden_task.cancel()
                 if snapshot_task is not None:
                     snapshot_task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -406,8 +433,9 @@ def create_app(
                         await agent_action_task
                 with suppress(asyncio.CancelledError):
                     await cluster_check_retention_task
-                with suppress(asyncio.CancelledError):
-                    await warden_task
+                if warden_task is not None:
+                    with suppress(asyncio.CancelledError):
+                        await warden_task
                 if snapshot_task is not None:
                     with suppress(asyncio.CancelledError):
                         await snapshot_task
@@ -432,13 +460,15 @@ def create_app(
                     yield
                 finally:
                     live_source.cancel()
+                    await watchdog.cancel()
                     if organizer is not None:
                         await organizer.cancel()
                     health_task.cancel()
                     if agent_action_task is not None:
                         agent_action_task.cancel()
                     cluster_check_retention_task.cancel()
-                    warden_task.cancel()
+                    if warden_task is not None:
+                        warden_task.cancel()
                     if snapshot_task is not None:
                         snapshot_task.cancel()
                     with suppress(asyncio.CancelledError):
@@ -448,8 +478,9 @@ def create_app(
                             await agent_action_task
                     with suppress(asyncio.CancelledError):
                         await cluster_check_retention_task
-                    with suppress(asyncio.CancelledError):
-                        await warden_task
+                    if warden_task is not None:
+                        with suppress(asyncio.CancelledError):
+                            await warden_task
                     if snapshot_task is not None:
                         with suppress(asyncio.CancelledError):
                             await snapshot_task
@@ -657,6 +688,69 @@ def create_app(
             "clusters": summary,
             "window_hours": 24,
         }
+
+    async def publish_watchdog_event(
+        event_type: str,
+        payload: dict[str, Any],
+        persisted_id: str,
+    ) -> None:
+        await broadcaster.publish(
+            {
+                "type": event_type,
+                "source_id": None,
+                "persisted_id": persisted_id,
+                "timestamp": datetime_now_ms(),
+                "payload": payload,
+            }
+        )
+
+    @app.get("/api/internal/watchdog/alerts")
+    def get_internal_watchdog_alerts(
+        status: str = Query("open"),
+        cluster_id: str | None = None,
+        limit: int = Query(50, ge=1, le=200),
+    ) -> dict[str, Any]:
+        try:
+            with session_local() as session:
+                rows = list_open_alerts(
+                    session,
+                    status=status,
+                    cluster_id=cluster_id,
+                    limit=limit,
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"alerts": [alert_to_dict(row) for row in rows]}
+
+    @app.post("/api/internal/watchdog/alerts/{alert_id}/acknowledge")
+    async def post_internal_watchdog_acknowledge(alert_id: str) -> dict[str, Any]:
+        try:
+            with session_local() as session:
+                payload = alert_to_dict(acknowledge_alert(session, alert_id))
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="watchdog alert not found") from exc
+        await publish_watchdog_event("watchdog_alert_acknowledged", payload, alert_id)
+        return payload
+
+    @app.post("/api/internal/watchdog/alerts/{alert_id}/resolve")
+    async def post_internal_watchdog_resolve(
+        alert_id: str,
+        body: WatchdogResolveIn = Body(...),
+    ) -> dict[str, Any]:
+        try:
+            with session_local() as session:
+                payload = alert_to_dict(
+                    resolve_alert(
+                        session,
+                        alert_id,
+                        resolved_by="studio",
+                        resolution_note=body.resolution_note,
+                    )
+                )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="watchdog alert not found") from exc
+        await publish_watchdog_event("watchdog_alert_resolved", payload, alert_id)
+        return payload
 
     async def publish_skill_event(event_type: str, payload: dict[str, Any], persisted_id: str | None = None) -> None:
         await broadcaster.publish(

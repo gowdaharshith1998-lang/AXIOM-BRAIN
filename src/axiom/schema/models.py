@@ -277,6 +277,29 @@ class SkillRun(Base):
     agent_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
 
 
+class WatchdogAlert(Base):
+    __tablename__ = "watchdog_alerts"
+    __table_args__ = (
+        Index("ix_watchdog_alerts_status_detected", "status", "detected_at"),
+        Index("ix_watchdog_alerts_entity_rule_status", "entity_id", "rule_id", "status"),
+    )
+
+    alert_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    entity_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("entities.id"), nullable=False, index=True
+    )
+    rule_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    reason: Mapped[str] = mapped_column(String, nullable=False)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    suggested_action: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open", index=True)
+    detected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    demo_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
 Index("ix_edges_src_rel", Edge.source_id, Edge.relationship)
 Index("ix_edges_tgt_rel", Edge.target_id, Edge.relationship)
 Index("ix_entities_type_created", Entity.type, Entity.created_at)

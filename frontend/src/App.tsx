@@ -202,15 +202,23 @@ function GraphPage() {
 
 function WsStatusBridge() {
   const setConnectionStatus = useBrainStore((s) => s.setConnectionStatus);
+  const applyEvent = useBrainStore((s) => s.applyEvent);
 
   useEffect(() => {
     const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
     const url = `${wsScheme}://${window.location.hostname}:8000/ws/brain`;
     const socket = new BrainSocket(url);
     socket.onStatus(setConnectionStatus);
+    const off = socket.on((event) => {
+      applyEvent(event);
+      window.dispatchEvent(new CustomEvent("axiom:brain-event", { detail: event }));
+    });
     socket.start();
-    return () => socket.close();
-  }, [setConnectionStatus]);
+    return () => {
+      off();
+      socket.close();
+    };
+  }, [applyEvent, setConnectionStatus]);
 
   return null;
 }
