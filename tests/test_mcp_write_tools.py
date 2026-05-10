@@ -10,8 +10,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from axiom.mcp.server import AxiomMCPService, build_mcp_server
-from axiom.govern.policy_evaluator import DemoPolicyEvaluator
-from axiom.schema.models import Base, Edge, Entity
+from axiom.govern.policy_evaluator import DemoPolicyEvaluator, PolicyDecision
+from axiom.schema.models import Base, Edge, Entity, Receipt, Skill, SkillRun
+from axiom.skills.registry import get_skill_with_session, register_skill_with_session
 from axiom.studio.server import create_app
 
 
@@ -87,6 +88,46 @@ def _events_stub(service: AxiomMCPService) -> _EventsStub:
     return service._events  # type: ignore[return-value]
 
 
+class _StaticPolicy:
+    def __init__(
+        self,
+        decision: str,
+        *,
+        reason: str = "blocked by test policy",
+        policy_id: str = "AEGIS-TEST",
+        guidance: str = "use the safer option",
+        suggested_alternative: str | None = "safe_skill",
+    ) -> None:
+        self.decision = decision
+        self.reason = reason
+        self.policy_id = policy_id
+        self.guidance = guidance
+        self.suggested_alternative = suggested_alternative
+
+    def evaluate(self, *_args, **_kwargs) -> PolicyDecision:  # type: ignore[no-untyped-def]
+        return PolicyDecision(
+            self.decision,
+            self.reason,
+            self.policy_id,
+            guidance=self.guidance,
+            suggested_alternative=self.suggested_alternative,
+        )
+
+
+def _register_test_skill(service: AxiomMCPService) -> str:
+    with service._session_factory() as session:  # type: ignore[attr-defined]
+        skill = register_skill_with_session(
+            session,
+            name="summarize_note",
+            description="Summarize",
+            intent="summarize",
+            prompt_template="Summarize {note}",
+            llm_provider="anthropic",
+            llm_model="claude-3-haiku",
+        )
+        return skill.id
+
+
 def test_record_action_allow_branch(write_service: AxiomMCPService) -> None:
     out = write_service.record_action(
         agent_name="agent_a",
@@ -118,15 +159,14 @@ def test_record_action_correct_branch(write_service: AxiomMCPService, monkeypatc
 
 
 def test_record_action_deny_branch(write_service: AxiomMCPService) -> None:
-    out = write_service.record_action(
-        agent_name="agent_c",
-        intent="write",
-        target_entity_id="billing_1",
-        proposed_action="write billing data",
-        idempotency_key=None,
-    )
-    assert out["decision"] == "deny"
-    assert out["reason"]
+    with pytest.raises(ToolError, match="policy_id=AEGIS"):
+        write_service.record_action(
+            agent_name="agent_c",
+            intent="write",
+            target_entity_id="billing_1",
+            proposed_action="write billing data",
+            idempotency_key=None,
+        )
 
 
 def test_record_action_idempotency_reuses_result(write_service: AxiomMCPService) -> None:
@@ -182,9 +222,9 @@ def test_check_policy_branches_and_no_persistence(write_service: AxiomMCPService
 def test_request_human_approval_happy_path(write_service: AxiomMCPService) -> None:
     recorded = write_service.record_action(
         agent_name="agent_f",
-        intent="write",
-        target_entity_id="billing_1",
-        proposed_action="mutate",
+        intent="read",
+        target_entity_id="low_1",
+        proposed_action="read before escalation",
         idempotency_key=None,
     )
     out = write_service.request_human_approval(
@@ -287,3 +327,126 @@ def test_request_human_approval_latency_budget(write_service: AxiomMCPService) -
     elapsed_ms = (time.perf_counter() - start) * 1000
     assert out["status"] == "pending"
     assert elapsed_ms < 30
+
+
+def test_run_skill_deny_blocks_llm_call(
+    write_service: AxiomMCPService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skill_id = _register_test_skill(write_service)
+    write_service._policy = _StaticPolicy("deny")  # type: ignore[attr-defined]
+    calls = 0
+
+    def fake_post(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        raise AssertionError("LLM should not be called")
+
+    monkeypatch.setattr("axiom.skills.runner.httpx.post", fake_post)
+    with pytest.raises(ToolError, match="policy_id=AEGIS-TEST"):
+        write_service.run_skill(skill_id=skill_id, input_payload={"note": "x"})
+    assert calls == 0
+
+
+def test_run_skill_deny_writes_single_receipt_no_run_row(write_service: AxiomMCPService) -> None:
+    skill_id = _register_test_skill(write_service)
+    write_service._policy = _StaticPolicy("deny")  # type: ignore[attr-defined]
+    with pytest.raises(ToolError):
+        write_service.run_skill(skill_id=skill_id, input_payload={"note": "x"})
+
+    with write_service._session_factory() as session:  # type: ignore[attr-defined]
+        receipts = session.query(Receipt).all()
+        runs = session.query(SkillRun).all()
+    assert len(receipts) == 1
+    assert receipts[0].decision == "deny"
+    assert runs == []
+
+
+def test_run_skill_correct_returns_alternative_no_llm_call(
+    write_service: AxiomMCPService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skill_id = _register_test_skill(write_service)
+    write_service._policy = _StaticPolicy("correct", suggested_alternative="safe_summary")  # type: ignore[attr-defined]
+    calls = 0
+
+    def fake_post(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        raise AssertionError("LLM should not be called")
+
+    monkeypatch.setattr("axiom.skills.runner.httpx.post", fake_post)
+    out = write_service.run_skill(skill_id=skill_id, input_payload={"note": "x"})
+
+    assert out["decision"] == "correct"
+    assert out["suggested_alternative"] == "safe_summary"
+    assert calls == 0
+    with write_service._session_factory() as session:  # type: ignore[attr-defined]
+        assert session.query(SkillRun).count() == 0
+        receipt = session.query(Receipt).one()
+    assert receipt.decision == "correct"
+    assert receipt.suggested_alternative == "safe_summary"
+
+
+def test_register_skill_deny_blocks_creation(write_service: AxiomMCPService) -> None:
+    write_service._policy = _StaticPolicy("deny")  # type: ignore[attr-defined]
+    with pytest.raises(ToolError, match="policy_id=AEGIS-TEST"):
+        write_service.register_skill(
+            name="blocked",
+            description="Blocked",
+            intent="summarize",
+            prompt_template="Summarize {text}",
+            llm_provider="anthropic",
+            llm_model="claude-3-haiku",
+        )
+
+    with write_service._session_factory() as session:  # type: ignore[attr-defined]
+        assert session.query(Skill).count() == 0
+        receipt = session.query(Receipt).one()
+    assert receipt.decision == "deny"
+
+
+def test_archive_skill_deny_blocks_archival(write_service: AxiomMCPService) -> None:
+    skill_id = _register_test_skill(write_service)
+    write_service._policy = _StaticPolicy("deny")  # type: ignore[attr-defined]
+    with pytest.raises(ToolError, match="policy_id=AEGIS-TEST"):
+        write_service.archive_skill(skill_id)
+
+    with write_service._session_factory() as session:  # type: ignore[attr-defined]
+        skill = get_skill_with_session(session, skill_id)
+        receipt = session.query(Receipt).one()
+    assert skill.status == "draft"
+    assert receipt.decision == "deny"
+
+
+def test_record_action_deny_short_circuits(write_service: AxiomMCPService) -> None:
+    write_service._policy = _StaticPolicy("deny")  # type: ignore[attr-defined]
+    with pytest.raises(ToolError):
+        write_service.record_action(
+            agent_name="agent_blocked",
+            intent="write",
+            target_entity_id="low_1",
+            proposed_action="blocked write",
+            idempotency_key=None,
+        )
+
+    with write_service._session_factory() as session:  # type: ignore[attr-defined]
+        receipts = session.query(Receipt).all()
+    assert len(receipts) == 1
+    assert receipts[0].decision == "deny"
+
+
+def test_ws_emits_agent_action_blocked_on_deny(write_service: AxiomMCPService) -> None:
+    write_service._policy = _StaticPolicy("deny")  # type: ignore[attr-defined]
+    with pytest.raises(ToolError):
+        write_service.record_action(
+            agent_name="agent_blocked",
+            intent="write",
+            target_entity_id="low_1",
+            proposed_action="blocked write",
+            idempotency_key=None,
+        )
+
+    batches = _events_stub(write_service).action_batches
+    assert len(batches) == 1
+    assert [event["type"] for event in batches[0]] == ["agent_action_blocked", "receipt_added"]

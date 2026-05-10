@@ -144,6 +144,8 @@ def _run_skill_with_session(
     agent_name: str,
     *,
     event_callback: RunEventCallback | None = None,
+    receipt_policy_id: str = "skill_runner",
+    receipt_reason: str = "skill run completed",
 ) -> dict[str, Any]:
     started = time.perf_counter()
     with session_factory() as session:
@@ -198,8 +200,8 @@ def _run_skill_with_session(
                 target_entity_id=None,
                 cluster_id="skills",
                 decision="allow",
-                reason="skill run completed",
-                policy_id="skill_runner",
+                reason=receipt_reason,
+                policy_id=receipt_policy_id,
                 guidance=None,
                 suggested_alternative=None,
                 signing_scheme="demo",
@@ -247,6 +249,8 @@ def run_skill(
     *,
     session_factory: sessionmaker[Session] | None = None,
     event_callback: RunEventCallback | None = None,
+    receipt_policy_id: str = "skill_runner",
+    receipt_reason: str = "skill run completed",
 ) -> dict[str, Any]:
     sf = session_factory or SessionLocal
     if sf is None:
@@ -258,6 +262,8 @@ def run_skill(
             input_payload,
             agent_name,
             event_callback=event_callback,
+            receipt_policy_id=receipt_policy_id,
+            receipt_reason=receipt_reason,
         )
     except SkillNotFound:
         raise

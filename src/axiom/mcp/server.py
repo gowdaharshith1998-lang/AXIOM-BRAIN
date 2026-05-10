@@ -19,7 +19,7 @@ from axiom.api.search import _score_title
 from axiom.govern.agent_registry import ensure_agent_registry_schema
 from axiom.govern.ledger import demo_receipt
 from axiom.govern.policy_evaluator import CORRECT_IMPORTANCE_THRESHOLD, DemoPolicyEvaluator
-from axiom.govern.receipts import ReceiptInsert, chain_insert_receipt, ensure_receipts_schema
+from axiom.govern.receipts import ReceiptInsert, chain_insert_receipt, ensure_receipts_schema, receipt_to_dict
 from axiom.schema.dto import EntityDTO
 from axiom.schema.models import Edge, Entity, Receipt
 from axiom.skills.registry import (
@@ -138,7 +138,7 @@ class AxiomMCPService:
             "CREATE VIRTUAL TABLE IF NOT EXISTS entities_fts USING fts5(entity_id UNINDEXED, searchable)"
         )
         self._sync_state = _SyncState()
-        self._policy = DemoPolicyEvaluator()
+        self._policy = DemoPolicyEvaluator(deny_rate=0)
         self._receipt_index = 0
         self._idempotency_ttl_sec = 3600.0
         self._idempotency: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
@@ -178,6 +178,167 @@ class AxiomMCPService:
             "suggested_alternative": receipt.suggested_alternative,
             "demo": receipt.demo_flag,
         }
+
+    def _emit_action_events(self, events: list[dict[str, Any]]) -> None:
+        if self._events is not None and events:
+            self._events.emit_action_events(events=events)
+
+    def _persist_policy_receipt(
+        self,
+        *,
+        action_id: str,
+        agent_name: str,
+        intent: str,
+        target_entity_id: str | None,
+        cluster_id: str | None,
+        evaluation: dict[str, Any],
+        demo_flag: bool = True,
+    ) -> tuple[Receipt, dict[str, Any]]:
+        self._receipt_index += 1
+        receipt_seed = demo_receipt(
+            action_id=action_id,
+            decision=str(evaluation["decision"]),
+            agent_name=agent_name,
+            index=self._receipt_index,
+        )
+        persisted, _inserted = chain_insert_receipt(
+            self._session_factory,
+            ReceiptInsert(
+                id=str(receipt_seed["receipt_id"]),
+                action_id=action_id,
+                agent_name=agent_name,
+                intent=intent,
+                target_entity_id=target_entity_id,
+                cluster_id=cluster_id,
+                decision=str(evaluation["decision"]),
+                reason=str(evaluation["reason"]),
+                policy_id=str(evaluation["policy_id"]),
+                guidance=evaluation["guidance"],
+                suggested_alternative=evaluation["suggested_alternative"],
+                signing_scheme=str(receipt_seed["signing_scheme"]),
+                signature=str(receipt_seed.get("signature") or receipt_seed["merkle_root"]),
+                demo_flag=demo_flag,
+            ),
+        )
+        out = self._action_output_from_receipt(persisted)
+        self._action_history[action_id] = out
+        return persisted, out
+
+    def _policy_preflight(
+        self,
+        *,
+        agent_name: str,
+        intent: str,
+        target_entity_id: str | None,
+        proposed_action: str,
+        action_id: str | None = None,
+    ) -> tuple[str, str, dict[str, Any]]:
+        resolved_action_id = action_id or f"act_{uuid4().hex[:12]}"
+        cluster_id, entity_importance, suggested_alternative = self._entity_context(target_entity_id)
+        decision = self._policy.evaluate(
+            cluster_id,
+            intent,
+            entity_importance=entity_importance,
+            suggested_alternative=suggested_alternative,
+        )
+        return resolved_action_id, cluster_id, {
+            "decision": decision.decision,
+            "reason": decision.reason,
+            "policy_id": decision.policy_id,
+            "guidance": decision.guidance or None,
+            "suggested_alternative": decision.suggested_alternative,
+            "demo": True,
+        }
+
+    def _emit_policy_result(
+        self,
+        *,
+        event_type: str,
+        action_id: str,
+        agent_name: str,
+        intent: str,
+        target_entity_id: str | None,
+        proposed_action: str,
+        evaluation: dict[str, Any],
+        receipt: Receipt,
+    ) -> None:
+        now_ms = int(datetime.utcnow().timestamp() * 1000)
+        payload = {
+            "action_id": action_id,
+            "agent_name": agent_name,
+            "intent": intent,
+            "target_entity_id": target_entity_id,
+            "proposed_action": proposed_action,
+            "decision": evaluation["decision"],
+            "reason": evaluation["reason"],
+            "policy_id": evaluation["policy_id"],
+            "guidance": evaluation["guidance"],
+            "suggested_alternative": evaluation["suggested_alternative"],
+            "timestamp": self._utcnow_iso(),
+            "demo": True,
+        }
+        self._emit_action_events(
+            [
+                {
+                    "type": event_type,
+                    "source_id": None,
+                    "persisted_id": action_id,
+                    "payload": payload,
+                    "timestamp": now_ms,
+                },
+                {
+                    "type": "receipt_added",
+                    "source_id": None,
+                    "persisted_id": action_id,
+                    "payload": receipt_to_dict(receipt),
+                    "timestamp": now_ms,
+                },
+            ]
+        )
+
+    def _enforce_preflight(
+        self,
+        *,
+        agent_name: str,
+        intent: str,
+        target_entity_id: str | None,
+        proposed_action: str,
+        action_id: str | None = None,
+    ) -> tuple[str, str, dict[str, Any]]:
+        resolved_action_id, cluster_id, evaluation = self._policy_preflight(
+            agent_name=agent_name,
+            intent=intent,
+            target_entity_id=target_entity_id,
+            proposed_action=proposed_action,
+            action_id=action_id,
+        )
+        decision = str(evaluation["decision"])
+        if decision == "allow":
+            return resolved_action_id, cluster_id, evaluation
+
+        receipt, out = self._persist_policy_receipt(
+            action_id=resolved_action_id,
+            agent_name=agent_name,
+            intent=intent,
+            target_entity_id=target_entity_id,
+            cluster_id=cluster_id,
+            evaluation=evaluation,
+            demo_flag=True,
+        )
+        event_type = "agent_action_blocked" if decision == "deny" else "agent_action_corrected"
+        self._emit_policy_result(
+            event_type=event_type,
+            action_id=resolved_action_id,
+            agent_name=agent_name,
+            intent=intent,
+            target_entity_id=target_entity_id,
+            proposed_action=proposed_action,
+            evaluation=evaluation,
+            receipt=receipt,
+        )
+        if decision == "deny":
+            raise ToolError(f"{out['reason']} (policy_id={out['policy_id']})")
+        return resolved_action_id, cluster_id, evaluation
 
     def _hydrate_action_history_from_receipts(self) -> None:
         with self._session_factory() as session:
@@ -221,21 +382,13 @@ class AxiomMCPService:
         target_entity_id: str | None,
         proposed_action: str,
     ) -> dict[str, Any]:
-        cluster_id, entity_importance, suggested_alternative = self._entity_context(target_entity_id)
-        decision = self._policy.evaluate(
-            cluster_id,
-            intent,
-            entity_importance=entity_importance,
-            suggested_alternative=suggested_alternative,
+        _action_id, _cluster_id, evaluation = self._policy_preflight(
+            agent_name=agent_name,
+            intent=intent,
+            target_entity_id=target_entity_id,
+            proposed_action=proposed_action,
         )
-        return {
-            "decision": decision.decision,
-            "reason": decision.reason,
-            "policy_id": decision.policy_id,
-            "guidance": decision.guidance or None,
-            "suggested_alternative": decision.suggested_alternative,
-            "demo": True,
-        }
+        return evaluation
 
     def record_action(
         self,
@@ -252,46 +405,36 @@ class AxiomMCPService:
             if existing is not None:
                 return existing[1]
 
-        action_id = f"act_{uuid4().hex[:12]}"
-        evaluation = self.check_policy(
+        action_id, cluster_id, evaluation = self._policy_preflight(
             agent_name=agent_name,
             intent=intent,
             target_entity_id=target_entity_id,
             proposed_action=proposed_action,
         )
-        self._receipt_index += 1
-        receipt = demo_receipt(
+        persisted, out = self._persist_policy_receipt(
             action_id=action_id,
-            decision=str(evaluation["decision"]),
             agent_name=agent_name,
-            index=self._receipt_index,
+            intent=intent,
+            target_entity_id=target_entity_id,
+            cluster_id=cluster_id,
+            evaluation=evaluation,
+            demo_flag=True,
         )
-        cluster_id, _entity_importance, _suggested_alternative = self._entity_context(
-            target_entity_id
-        )
-        persisted, _inserted = chain_insert_receipt(
-            self._session_factory,
-            ReceiptInsert(
-                id=str(receipt["receipt_id"]),
+        if idempotency_key:
+            self._idempotency[(agent_name, idempotency_key)] = (time.monotonic(), out)
+
+        if str(evaluation["decision"]) == "deny":
+            self._emit_policy_result(
+                event_type="agent_action_blocked",
                 action_id=action_id,
                 agent_name=agent_name,
                 intent=intent,
                 target_entity_id=target_entity_id,
-                cluster_id=cluster_id,
-                decision=str(evaluation["decision"]),
-                reason=str(evaluation["reason"]),
-                policy_id=str(evaluation["policy_id"]),
-                guidance=evaluation["guidance"],
-                suggested_alternative=evaluation["suggested_alternative"],
-                signing_scheme=str(receipt["signing_scheme"]),
-                signature=str(receipt.get("signature") or receipt["merkle_root"]),
-                demo_flag=True,
-            ),
-        )
-        out = self._action_output_from_receipt(persisted)
-        self._action_history[action_id] = out
-        if idempotency_key:
-            self._idempotency[(agent_name, idempotency_key)] = (time.monotonic(), out)
+                proposed_action=proposed_action,
+                evaluation=evaluation,
+                receipt=persisted,
+            )
+            raise ToolError(f"{out['reason']} (policy_id={out['policy_id']})")
 
         if self._events is not None:
             now_ms = int(datetime.utcnow().timestamp() * 1000)
@@ -332,7 +475,7 @@ class AxiomMCPService:
                         "type": "receipt_added",
                         "source_id": None,
                         "persisted_id": action_id,
-                        "payload": receipt,
+                        "payload": receipt_to_dict(persisted),
                         "timestamp": now_ms,
                     },
                 ]
@@ -342,6 +485,22 @@ class AxiomMCPService:
     def request_human_approval(self, *, action_id: str, reason: str, agent_name: str) -> dict[str, Any]:
         if action_id not in self._action_history:
             raise LookupError(f"unknown action id: {action_id}")
+        approval_action_id, cluster_id, evaluation = self._enforce_preflight(
+            agent_name=agent_name,
+            intent="request_human_approval",
+            target_entity_id=None,
+            proposed_action=reason,
+        )
+        if str(evaluation["decision"]) == "correct":
+            return {
+                "status": "correct",
+                "action_id": action_id,
+                "reason": evaluation["reason"],
+                "policy_id": evaluation["policy_id"],
+                "guidance": evaluation["guidance"],
+                "suggested_alternative": evaluation["suggested_alternative"],
+                "demo": True,
+            }
         item = {
             "queue_id": f"qa_{uuid4().hex[:12]}",
             "status": "pending",
@@ -352,6 +511,15 @@ class AxiomMCPService:
             "demo": False,
         }
         self._approval_queue.append(item)
+        self._persist_policy_receipt(
+            action_id=approval_action_id,
+            agent_name=agent_name,
+            intent="request_human_approval",
+            target_entity_id=None,
+            cluster_id=cluster_id,
+            evaluation=evaluation,
+            demo_flag=True,
+        )
         return {
             "queue_id": item["queue_id"],
             "status": item["status"],
@@ -381,6 +549,21 @@ class AxiomMCPService:
         output_schema: dict[str, Any] | None = None,
         trigger_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        action_id, cluster_id, evaluation = self._enforce_preflight(
+            agent_name="external_mcp_client",
+            intent="register_skill",
+            target_entity_id=None,
+            proposed_action=name,
+        )
+        if str(evaluation["decision"]) == "correct":
+            return {
+                "decision": "correct",
+                "reason": evaluation["reason"],
+                "policy_id": evaluation["policy_id"],
+                "guidance": evaluation["guidance"],
+                "suggested_alternative": evaluation["suggested_alternative"],
+                "demo": True,
+            }
         with self._session_factory() as session:
             row = register_skill_with_session(
                 session,
@@ -395,6 +578,15 @@ class AxiomMCPService:
                 created_by="external_mcp_client",
             )
             out = {"skill": skill_to_dict(row)}
+        self._persist_policy_receipt(
+            action_id=action_id,
+            agent_name="external_mcp_client",
+            intent="register_skill",
+            target_entity_id=out["skill"]["id"],
+            cluster_id=cluster_id,
+            evaluation=evaluation,
+            demo_flag=True,
+        )
         if self._events is not None:
             now_ms = int(datetime.utcnow().timestamp() * 1000)
             self._events.emit_action_events(
@@ -423,6 +615,31 @@ class AxiomMCPService:
             if existing is not None:
                 return existing[1]
 
+        with self._session_factory() as session:
+            skill = get_skill_with_session(session, skill_id)
+            skill_name = skill.name
+
+        action_id, _cluster_id, evaluation = self._enforce_preflight(
+            agent_name="external_mcp_client",
+            intent=f"skill:{skill_name}",
+            target_entity_id=None,
+            proposed_action=f"axiom_run_skill:{skill_id}",
+            action_id=f"skill_policy:{uuid4().hex[:12]}",
+        )
+        if str(evaluation["decision"]) == "correct":
+            out = {
+                "action_id": action_id,
+                "decision": "correct",
+                "reason": evaluation["reason"],
+                "policy_id": evaluation["policy_id"],
+                "guidance": evaluation["guidance"],
+                "suggested_alternative": evaluation["suggested_alternative"],
+                "demo": True,
+            }
+            if idempotency_key:
+                self._idempotency[("skill_runner", idempotency_key)] = (time.monotonic(), out)
+            return out
+
         def emit(event_type: str, payload: dict[str, Any]) -> None:
             if self._events is None:
                 return
@@ -444,15 +661,42 @@ class AxiomMCPService:
             "external_mcp_client",
             session_factory=self._session_factory,
             event_callback=emit,
+            receipt_policy_id=str(evaluation["policy_id"]),
+            receipt_reason=str(evaluation["reason"]),
         )
         if idempotency_key:
             self._idempotency[("skill_runner", idempotency_key)] = (time.monotonic(), out)
         return out
 
     def archive_skill(self, skill_id: str) -> dict[str, Any]:
+        action_id, cluster_id, evaluation = self._enforce_preflight(
+            agent_name="external_mcp_client",
+            intent="archive_skill",
+            target_entity_id=skill_id,
+            proposed_action=f"axiom_archive_skill:{skill_id}",
+        )
+        if str(evaluation["decision"]) == "correct":
+            return {
+                "decision": "correct",
+                "reason": evaluation["reason"],
+                "policy_id": evaluation["policy_id"],
+                "guidance": evaluation["guidance"],
+                "suggested_alternative": evaluation["suggested_alternative"],
+                "demo": True,
+            }
         with self._session_factory() as session:
             row = archive_skill_with_session(session, skill_id)
-            return {"skill": skill_to_dict(row)}
+            out = {"skill": skill_to_dict(row)}
+        self._persist_policy_receipt(
+            action_id=action_id,
+            agent_name="external_mcp_client",
+            intent="archive_skill",
+            target_entity_id=skill_id,
+            cluster_id=cluster_id,
+            evaluation=evaluation,
+            demo_flag=True,
+        )
+        return out
 
     def _refresh_cache_if_needed(self, session: Session) -> None:
         now = time.monotonic()
