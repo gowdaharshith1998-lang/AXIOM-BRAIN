@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from pathlib import Path
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
@@ -51,6 +52,17 @@ class AgentActionEventsIn(BaseModel):
 def datetime_now_ms() -> int:
     return int(datetime.utcnow().timestamp() * 1000)
 
+SETTINGS_FILE = Path("axiom_studio_settings.json")
+MCP_TOOL_NAMES = [
+    "axiom_query_brain",
+    "axiom_get_entity",
+    "axiom_traverse",
+    "axiom_list_sources",
+    "axiom_record_action",
+    "axiom_check_policy",
+    "axiom_request_human_approval",
+]
+
 
 def create_app(
     *,
@@ -82,6 +94,15 @@ def create_app(
         app.state.warden_task = None
         app.state.organizer = None
         app.state.events_per_min = 0.0
+        app.state.studio_settings = {}
+        app.state.mcp_action_events = []
+        app.state.mcp_tool_counts = {name: 0 for name in MCP_TOOL_NAMES}
+        app.state.mcp_last_called = {name: None for name in MCP_TOOL_NAMES}
+        if SETTINGS_FILE.exists():
+            try:
+                app.state.studio_settings = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                app.state.studio_settings = {}
         previous_health: dict[str, str] = {}
         last_seq = broadcaster.current_seq
         last_seq_at = asyncio.get_running_loop().time()
@@ -210,6 +231,43 @@ def create_app(
             "events_emitted": live_source.events_emitted if live_source is not None else 0,
         }
 
+    @app.get("/api/internal/settings")
+    def get_studio_settings() -> dict[str, Any]:
+        return {"settings": dict(getattr(app.state, "studio_settings", {}))}
+
+    @app.put("/api/internal/settings")
+    def put_studio_settings(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        existing = dict(getattr(app.state, "studio_settings", {}))
+        existing.update(payload)
+        app.state.studio_settings = existing
+        try:
+            SETTINGS_FILE.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        return {"settings": existing}
+
+    @app.get("/api/internal/mcp-stats")
+    def get_mcp_stats() -> dict[str, Any]:
+        now_ms = datetime_now_ms()
+        one_hour_ago = now_ms - 3600_000
+        raw_events = list(getattr(app.state, "mcp_action_events", []))
+        events = [event for event in raw_events if int(event.get("timestamp", 0)) >= one_hour_ago]
+        active_agents = sorted({str(event.get("agent_name", "")).strip() for event in events if event.get("agent_name")})
+        return {
+            "tools": [
+                {
+                    "name": name,
+                    "calls": int(getattr(app.state, "mcp_tool_counts", {}).get(name, 0)),
+                    "last_called": getattr(app.state, "mcp_last_called", {}).get(name),
+                }
+                for name in MCP_TOOL_NAMES
+            ],
+            "connected_clients": len(active_agents),
+            "active_agents": active_agents,
+            "last_tool_call": max((event.get("timestamp") for event in raw_events), default=None),
+            "recent_actions": sorted(events, key=lambda item: int(item.get("timestamp", 0)), reverse=True)[:20],
+        }
+
     @app.get("/api/entities")
     def get_entities() -> list[dict[str, Any]]:
         with session_local() as session:
@@ -298,13 +356,35 @@ def create_app(
     async def publish_agent_action_events(batch: AgentActionEventsIn = Body(...)) -> dict[str, int]:
         emitted = 0
         for event in batch.events[:50]:
+            payload = event.get("payload", {}) if isinstance(event.get("payload", {}), dict) else {}
+            intent = str(payload.get("intent", ""))
+            proposed = str(payload.get("proposed_action", ""))
+            agent_name = str(payload.get("agent_name", ""))
+            timestamp = int(event.get("timestamp", datetime_now_ms()))
+            matched_tool = next((name for name in MCP_TOOL_NAMES if name in {intent, proposed}), None)
+            if matched_tool:
+                app.state.mcp_tool_counts[matched_tool] = int(app.state.mcp_tool_counts.get(matched_tool, 0)) + 1
+                app.state.mcp_last_called[matched_tool] = timestamp
+            app.state.mcp_action_events.append(
+                {
+                    "agent_name": agent_name,
+                    "intent": intent,
+                    "proposed_action": proposed,
+                    "decision": payload.get("decision"),
+                    "status": payload.get("decision") or "running",
+                    "action_id": payload.get("action_id"),
+                    "timestamp": timestamp,
+                    "duration_ms": payload.get("duration_ms"),
+                }
+            )
+            app.state.mcp_action_events = app.state.mcp_action_events[-250:]
             await broadcaster.publish(
                 {
                     "type": str(event.get("type", "agent_action")),
                     "source_id": event.get("source_id"),
                     "persisted_id": event.get("persisted_id"),
-                    "timestamp": int(event.get("timestamp", datetime_now_ms())),
-                    "payload": event.get("payload", {}),
+                    "timestamp": timestamp,
+                    "payload": payload,
                 }
             )
             emitted += 1

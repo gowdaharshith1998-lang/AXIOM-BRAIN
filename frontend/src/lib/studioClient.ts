@@ -1,0 +1,49 @@
+export type StudioSettings = Record<string, unknown>;
+
+export type MCPToolStat = {
+  name: string;
+  calls: number;
+  last_called: number | null;
+};
+
+export type MCPStats = {
+  tools: MCPToolStat[];
+  connected_clients: number;
+  active_agents: string[];
+  last_tool_call: number | null;
+  recent_actions: Array<{
+    agent_name: string;
+    intent: string;
+    status: string;
+    timestamp: number;
+    duration_ms?: number;
+  }>;
+};
+
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return (await response.json()) as T;
+}
+
+export async function getStudioSettings(): Promise<StudioSettings> {
+  const data = await request<{ settings: StudioSettings }>("http://127.0.0.1:8000/api/internal/settings");
+  return data.settings;
+}
+
+export async function saveStudioSettings(payload: StudioSettings): Promise<StudioSettings> {
+  const data = await request<{ settings: StudioSettings }>("http://127.0.0.1:8000/api/internal/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return data.settings;
+}
+
+export async function getMcpStats(): Promise<MCPStats> {
+  return request<MCPStats>("http://127.0.0.1:8000/api/internal/mcp-stats");
+}
+
+export async function getHealth(): Promise<{ status: string }> {
+  return request<{ status: string }>("http://127.0.0.1:8000/api/health");
+}

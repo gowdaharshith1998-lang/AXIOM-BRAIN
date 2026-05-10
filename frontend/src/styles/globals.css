@@ -10,72 +10,22 @@ body,
 
 body {
   margin: 0;
-  background: #05050a;
-  color: rgba(255, 255, 255, 0.85);
-  font-family: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas,
-    "Liberation Mono", "Courier New", monospace;
-  overflow: hidden;
+  background: radial-gradient(circle at 20% 0%, #0b1f43 0%, #030b1d 45%, #020711 100%);
+  color: rgba(255, 255, 255, 0.9);
+  font-family: "Segoe UI", "Avenir Next", "Helvetica Neue", sans-serif;
+}
+
+.studio-root {
+  background-image:
+    radial-gradient(circle at 10% 8%, rgba(0, 136, 255, 0.12), transparent 26%),
+    radial-gradient(circle at 84% 28%, rgba(0, 216, 255, 0.08), transparent 30%);
+  background-color: #020711;
+}
+
+.studio-rail {
+  background: linear-gradient(180deg, rgba(6, 19, 44, 0.96), rgba(3, 12, 31, 0.95));
 }
 
 .axiom-labels {
   padding: 16px;
-}
-
-.axiom-labels .axiom-cluster-bracket-label {
-  filter: drop-shadow(0 0 14px currentColor);
-}
-
-.axiom-labels .cluster-name {
-  color: currentColor;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-}
-
-.axiom-value-flash {
-  color: #00e5d8;
-  transition: color 200ms ease-out;
-}
-
-.axiom-health-shimmer {
-  background-image: linear-gradient(
-    90deg,
-    var(--health-color) 0%,
-    rgba(255, 255, 255, 0.3) 50%,
-    var(--health-color) 100%
-  );
-  background-size: 200% 100%;
-  animation: axiom-health-shimmer 3s linear infinite;
-}
-
-@keyframes axiom-health-shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
-}
-
-@keyframes axiom-health-flash {
-  0% {
-    filter: drop-shadow(0 0 0 rgba(255, 255, 255, 0));
-  }
-  30% {
-    filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.75));
-  }
-  100% {
-    filter: drop-shadow(0 0 0 rgba(255, 255, 255, 0));
-  }
-}
-
-@keyframes axiom-ledger-slide {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
