@@ -6,20 +6,21 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
-from uuid import uuid4
 from typing import Any, Literal
+from uuid import uuid4
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
-from sqlalchemy import func, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.api.search import _score_title
 from axiom.govern.ledger import demo_receipt
 from axiom.govern.policy_evaluator import CORRECT_IMPORTANCE_THRESHOLD, DemoPolicyEvaluator
+from axiom.govern.receipts import ReceiptInsert, chain_insert_receipt, ensure_receipts_schema
 from axiom.schema.dto import EntityDTO
-from axiom.schema.models import Edge, Entity
+from axiom.schema.models import Edge, Entity, Receipt
 from axiom.storage import crud
 from axiom.storage.db import init_engine
 from axiom.studio.sources import synthetic_sources_snapshot
@@ -132,6 +133,10 @@ class AxiomMCPService:
         self._idempotency: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
         self._action_history: dict[str, dict[str, Any]] = {}
         self._approval_queue: list[dict[str, Any]] = []
+        bind = session_factory.kw.get("bind")
+        if bind is not None:
+            ensure_receipts_schema(bind)
+        self._hydrate_action_history_from_receipts()
 
     @staticmethod
     def _utcnow_iso() -> str:
@@ -146,6 +151,31 @@ class AxiomMCPService:
         ]
         for key in stale:
             del self._idempotency[key]
+
+    @staticmethod
+    def _action_output_from_receipt(receipt: Receipt) -> dict[str, Any]:
+        return {
+            "action_id": receipt.action_id,
+            "decision": receipt.decision,
+            "receipt_id": receipt.id,
+            "signing_scheme": receipt.signing_scheme,
+            "reason": receipt.reason,
+            "policy_id": receipt.policy_id,
+            "guidance": receipt.guidance,
+            "suggested_alternative": receipt.suggested_alternative,
+            "demo": receipt.demo_flag,
+        }
+
+    def _hydrate_action_history_from_receipts(self) -> None:
+        with self._session_factory() as session:
+            rows = session.execute(
+                select(Receipt).order_by(desc(Receipt.created_at), desc(Receipt.id))
+            ).scalars().all()
+        self._action_history = {
+            row.action_id: self._action_output_from_receipt(row)
+            for row in rows
+        }
+        self._receipt_index = len(rows)
 
     def _entity_context(self, entity_id: str | None) -> tuple[str, float | None, str | None]:
         if entity_id is None:
@@ -223,17 +253,29 @@ class AxiomMCPService:
             agent_name=agent_name,
             index=self._receipt_index,
         )
-        out = {
-            "action_id": action_id,
-            "decision": evaluation["decision"],
-            "receipt_id": receipt["receipt_id"],
-            "signing_scheme": receipt["signing_scheme"],
-            "reason": evaluation["reason"],
-            "policy_id": evaluation["policy_id"],
-            "guidance": evaluation["guidance"],
-            "suggested_alternative": evaluation["suggested_alternative"],
-            "demo": True,
-        }
+        cluster_id, _entity_importance, _suggested_alternative = self._entity_context(
+            target_entity_id
+        )
+        persisted, _inserted = chain_insert_receipt(
+            self._session_factory,
+            ReceiptInsert(
+                id=str(receipt["receipt_id"]),
+                action_id=action_id,
+                agent_name=agent_name,
+                intent=intent,
+                target_entity_id=target_entity_id,
+                cluster_id=cluster_id,
+                decision=str(evaluation["decision"]),
+                reason=str(evaluation["reason"]),
+                policy_id=str(evaluation["policy_id"]),
+                guidance=evaluation["guidance"],
+                suggested_alternative=evaluation["suggested_alternative"],
+                signing_scheme=str(receipt["signing_scheme"]),
+                signature=str(receipt.get("signature") or receipt["merkle_root"]),
+                demo_flag=True,
+            ),
+        )
+        out = self._action_output_from_receipt(persisted)
         self._action_history[action_id] = out
         if idempotency_key:
             self._idempotency[(agent_name, idempotency_key)] = (time.monotonic(), out)

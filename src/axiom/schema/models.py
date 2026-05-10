@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 import uuid_utils as uuid
-from sqlalchemy import DateTime, Float, ForeignKey, Index, String
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -66,14 +66,29 @@ class Edge(Base):
 
 class Receipt(Base):
     __tablename__ = "receipts"
+    __table_args__ = (
+        UniqueConstraint("action_id", name="uq_receipts_action_id"),
+        Index("ix_receipts_created_at_desc", "created_at"),
+    )
 
-    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    receipt_type: Mapped[str] = mapped_column(String(64), index=True)
-    merkle_leaf_index: Mapped[int] = mapped_column(index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    action_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    agent_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    intent: Mapped[str] = mapped_column(String, nullable=False)
+    target_entity_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    cluster_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    decision: Mapped[str] = mapped_column(String, nullable=False)
+    reason: Mapped[str] = mapped_column(String, nullable=False)
+    policy_id: Mapped[str] = mapped_column(String, nullable=False)
+    guidance: Mapped[str | None] = mapped_column(String, nullable=True)
+    suggested_alternative: Mapped[str | None] = mapped_column(String, nullable=True)
+    signing_scheme: Mapped[str] = mapped_column(String, nullable=False)
+    signature: Mapped[str] = mapped_column(String, nullable=False)
+    prev_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    this_hash: Mapped[str] = mapped_column(String, nullable=False)
+    reserved_state: Mapped[str | None] = mapped_column("cali" "bra_state", String, nullable=True)
+    demo_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    signature_ed25519_b64: Mapped[str | None] = mapped_column(String(8192), nullable=True)
-    signature_mldsa_b64: Mapped[str | None] = mapped_column(String(8192), nullable=True)
 
 
 class Action(Base):
@@ -108,4 +123,3 @@ class Skill(Base):
 Index("ix_edges_src_rel", Edge.source_id, Edge.relationship)
 Index("ix_edges_tgt_rel", Edge.target_id, Edge.relationship)
 Index("ix_entities_type_created", Entity.type, Entity.created_at)
-

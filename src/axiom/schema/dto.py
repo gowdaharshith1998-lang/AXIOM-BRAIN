@@ -46,12 +46,22 @@ class ReceiptDTO(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    receipt_type: str
-    merkle_leaf_index: int
+    action_id: str
+    agent_name: str
+    intent: str
+    target_entity_id: str | None = None
+    cluster_id: str | None = None
+    decision: str
+    reason: str
+    policy_id: str
+    guidance: str | None = None
+    suggested_alternative: str | None = None
+    signing_scheme: str
+    signature: str
+    prev_hash: str | None = None
+    this_hash: str
+    demo_flag: bool
     created_at: datetime
-    payload: dict[str, Any]
-    signature_ed25519_b64: str | None = None
-    signature_mldsa_b64: str | None = None
 
 
 class ActionDTO(BaseModel):
@@ -79,4 +89,3 @@ class SkillDTO(BaseModel):
     emitted_at: datetime
     signed_metadata: dict[str, Any]
     markdown: str
-

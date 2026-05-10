@@ -3,20 +3,25 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from pathlib import Path
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
+from pathlib import Path
 from typing import Any, cast
 
-from fastapi import Body, FastAPI, Query, WebSocket
-from pydantic import BaseModel, Field
+from fastapi import Body, FastAPI, HTTPException, Query, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, desc, select
+from pydantic import BaseModel, Field
+from sqlalchemy import create_engine, desc, func, select
 from sqlalchemy.orm import sessionmaker
 
 from axiom.api.search import EntitySearchResult, search_entities
 from axiom.govern.agent_actions import emit_demo_agent_actions
+from axiom.govern.receipts import (
+    ensure_receipts_schema,
+    receipt_to_dict,
+    verify_receipt_chain,
+)
 from axiom.govern.warden import emit_demo_warden_insights
 from axiom.ingest.broadcaster import EventBroadcaster
 from axiom.ingest.pipeline import IngestPipeline
@@ -89,13 +94,20 @@ def _is_policy_entity(entity: Entity) -> bool:
     return entity.type.lower() in {"policy", "governance"} or (entity.cluster_id or "").lower() == "governance" or "policy" in haystack
 
 
-def _receipt_key(receipt: Receipt) -> str:
-    payload = receipt.payload or {}
-    return str(payload.get("receipt_id") or receipt.id)
-
-
 def _receipt_signed(receipt: Receipt) -> bool:
-    return bool(receipt.signature_ed25519_b64 or receipt.signature_mldsa_b64)
+    return bool(receipt.signature)
+
+
+def _receipt_row(receipt: Receipt) -> dict[str, Any]:
+    return {
+        **receipt_to_dict(receipt),
+        "receipt_id": receipt.id,
+        "receipt_type": "agent_action",
+        "merkle_root": receipt.this_hash,
+        "signed": _receipt_signed(receipt),
+        "demo": receipt.demo_flag,
+        "timestamp": _iso(receipt.created_at),
+    }
 
 SETTINGS_FILE = Path("axiom_studio_settings.json")
 MCP_TOOL_NAMES = [
@@ -118,6 +130,7 @@ def create_app(
     enable_organizer: bool = True,
 ) -> FastAPI:
     engine = create_engine(db_url, future=True)
+    ensure_receipts_schema(engine)
     session_local = sessionmaker(bind=engine, future=True)
     broadcaster = EventBroadcaster()
     cluster_health_monitor = ClusterHealthMonitor()
@@ -375,7 +388,9 @@ def create_app(
             all_edges = session.execute(select(Edge)).scalars().all()
             edges = sorted(all_edges, key=lambda item: item.created_at, reverse=True)[:50]
             sources = session.execute(select(Source).order_by(desc(Source.updated_at))).scalars().all()
-            receipts = session.execute(select(Receipt).order_by(desc(Receipt.created_at)).limit(50)).scalars().all()
+            receipts = session.execute(
+                select(Receipt).order_by(desc(Receipt.created_at), desc(Receipt.id)).limit(50)
+            ).scalars().all()
             all_receipts = session.execute(select(Receipt)).scalars().all()
             actions = session.execute(select(Action).order_by(desc(Action.created_at)).limit(50)).scalars().all()
             all_actions = session.execute(select(Action)).scalars().all()
@@ -424,23 +439,23 @@ def create_app(
             for item in cluster_snapshot.values()
         ]
 
-        receipt_rows = [
+        receipt_rows = [_receipt_row(receipt) for receipt in receipts]
+
+        audit_events: list[dict[str, Any]] = [
             {
-                "id": receipt.id,
-                "receipt_id": _receipt_key(receipt),
-                "receipt_type": receipt.receipt_type,
-                "action_id": _text((receipt.payload or {}).get("action_id")),
-                "decision": _text((receipt.payload or {}).get("decision")),
-                "agent_name": _text((receipt.payload or {}).get("agent_name")),
-                "signing_scheme": _text((receipt.payload or {}).get("signing_scheme")),
-                "merkle_root": _text((receipt.payload or {}).get("merkle_root")),
-                "signed": _receipt_signed(receipt),
-                "created_at": _iso(receipt.created_at),
+                "id": receipt.action_id,
+                "timestamp": _iso(receipt.created_at),
+                "actor": receipt.agent_name,
+                "action": receipt.intent,
+                "entity": receipt.target_entity_id,
+                "category": "persisted_action",
+                "result": receipt.decision,
+                "source": "receipts",
             }
             for receipt in receipts
         ]
-
-        audit_events: list[dict[str, Any]] = [
+        audit_events.extend(
+            [
             {
                 "id": action.id,
                 "timestamp": _iso(action.created_at),
@@ -452,7 +467,8 @@ def create_app(
                 "source": "actions",
             }
             for action in actions
-        ]
+            ]
+        )
         audit_events.extend(
             {
                 "id": str(event.get("action_id") or event.get("timestamp") or index),
@@ -481,17 +497,16 @@ def create_app(
         healthy_checks = sum(1 for item in cluster_snapshot.values() if item.status.value == "healthy")
         degraded_checks = sum(1 for item in cluster_snapshot.values() if item.status.value == "degraded")
         critical_checks = sum(1 for item in cluster_snapshot.values() if item.status.value == "critical")
-        denied_actions = sum(1 for action in all_actions if action.decision == "deny") + sum(
-            1 for event in raw_mcp_events if event.get("decision") == "deny" or event.get("status") == "deny"
+        denied_actions = (
+            sum(1 for receipt in all_receipts if receipt.decision == "deny")
+            + sum(1 for action in all_actions if action.decision == "deny")
+            + sum(
+                1
+                for event in raw_mcp_events
+                if event.get("decision") == "deny" or event.get("status") == "deny"
+            )
         )
-        current_merkle_root = next(
-            (
-                str(receipt.payload.get("merkle_root"))
-                for receipt in receipts
-                if isinstance(receipt.payload, dict) and receipt.payload.get("merkle_root")
-            ),
-            None,
-        )
+        current_merkle_root = receipts[0].this_hash if receipts else None
         active_policy_count = sum(
             1
             for entity in policy_entities
@@ -511,7 +526,7 @@ def create_app(
                 "critical_check_count": critical_checks,
                 "receipt_count": len(all_receipts),
                 "signed_receipt_count": signed_receipts,
-                "action_count": len(all_actions) + len(raw_mcp_events),
+                "action_count": len(all_receipts) + len(all_actions) + len(raw_mcp_events),
                 "denied_action_count": denied_actions,
                 "current_merkle_root": current_merkle_root,
                 "graph_entity_count": len(entities),
@@ -558,6 +573,94 @@ def create_app(
                     for edge in edges
                 ],
             },
+        }
+
+    @app.get("/api/internal/receipts")
+    def get_internal_receipts(
+        limit: int = Query(50, ge=1, le=200),
+        before: str | None = None,
+        agent: str | None = None,
+        decision: str | None = None,
+    ) -> dict[str, Any]:
+        before_dt: datetime | None = None
+        if before:
+            try:
+                before_dt = datetime.fromisoformat(before)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="invalid before timestamp") from exc
+
+        filters = []
+        if agent:
+            filters.append(Receipt.agent_name == agent)
+        if decision:
+            filters.append(Receipt.decision == decision)
+
+        with session_local() as session:
+            total_query = select(func.count(Receipt.id))
+            data_query = (
+                select(Receipt).order_by(desc(Receipt.created_at), desc(Receipt.id)).limit(limit)
+            )
+            head_query = (
+                select(Receipt).order_by(desc(Receipt.created_at), desc(Receipt.id)).limit(1)
+            )
+            for condition in filters:
+                total_query = total_query.where(condition)
+                data_query = data_query.where(condition)
+                head_query = head_query.where(condition)
+            if before_dt is not None:
+                data_query = data_query.where(Receipt.created_at < before_dt)
+            rows = session.execute(data_query).scalars().all()
+            total_count = int(session.execute(total_query).scalar_one())
+            head = session.execute(head_query).scalar_one_or_none()
+
+        return {
+            "receipts": [_receipt_row(row) for row in rows],
+            "total_count": total_count,
+            "merkle_head": head.this_hash if head is not None else None,
+        }
+
+    @app.get("/api/internal/receipts/{receipt_id}")
+    def get_internal_receipt(receipt_id: str) -> dict[str, Any]:
+        with session_local() as session:
+            receipt = session.get(Receipt, receipt_id)
+            if receipt is None:
+                raise HTTPException(status_code=404, detail="receipt not found")
+            try:
+                verification_status = verify_receipt_chain(session, receipt_id)
+            except LookupError as exc:
+                raise HTTPException(status_code=404, detail="receipt not found") from exc
+            return {
+                **_receipt_row(receipt),
+                "verification_status": verification_status,
+            }
+
+    @app.get("/api/internal/merkle-status")
+    def get_internal_merkle_status() -> dict[str, Any]:
+        with session_local() as session:
+            chain_length = int(session.execute(select(func.count(Receipt.id))).scalar_one())
+            head = session.execute(
+                select(Receipt).order_by(desc(Receipt.created_at), desc(Receipt.id)).limit(1)
+            ).scalar_one_or_none()
+            tail = session.execute(
+                select(Receipt).order_by(Receipt.created_at, Receipt.id).limit(1)
+            ).scalar_one_or_none()
+            scheme_rows = session.execute(
+                select(Receipt.signing_scheme, func.count(Receipt.id)).group_by(
+                    Receipt.signing_scheme
+                )
+            ).all()
+
+        distribution = {"ed25519": 0, "ml_dsa_65": 0, "hybrid": 0}
+        for scheme, count in scheme_rows:
+            if scheme in distribution:
+                distribution[str(scheme)] = int(count)
+
+        return {
+            "chain_length": chain_length,
+            "head_hash": head.this_hash if head is not None else None,
+            "tail_hash": tail.this_hash if tail is not None else None,
+            "last_appended_at": _iso(head.created_at) if head is not None else None,
+            "signing_schemes_distribution": distribution,
         }
 
     @app.websocket("/ws/brain")
