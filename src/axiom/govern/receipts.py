@@ -22,6 +22,7 @@ RECEIPT_COLUMNS = {
     "decision",
     "reason",
     "policy_id",
+    "passport_id",
     "guidance",
     "suggested_alternative",
     "signing_scheme",
@@ -49,6 +50,7 @@ class ReceiptInsert:
     suggested_alternative: str | None
     signing_scheme: str
     signature: str
+    passport_id: str | None = None
     demo_flag: bool = True
     reserved_state: str | None = None
 
@@ -61,6 +63,14 @@ def ensure_receipts_schema(engine: Engine) -> None:
 
     columns = {column["name"] for column in inspector.get_columns("receipts")}
     if RECEIPT_COLUMNS.issubset(columns):
+        return
+    legacy_with_only_missing_passport = RECEIPT_COLUMNS.difference({"passport_id"}).issubset(columns)
+    if legacy_with_only_missing_passport and "passport_id" not in columns:
+        with engine.begin() as conn:
+            conn.exec_driver_sql("ALTER TABLE receipts ADD COLUMN passport_id VARCHAR")
+            conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_receipts_passport_id ON receipts (passport_id)"
+            )
         return
 
     legacy_name = f"receipts_legacy_{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
@@ -86,6 +96,7 @@ def receipt_to_dict(receipt: Receipt) -> dict[str, Any]:
         "decision": receipt.decision,
         "reason": receipt.reason,
         "policy_id": receipt.policy_id,
+        "passport_id": receipt.passport_id,
         "guidance": receipt.guidance,
         "suggested_alternative": receipt.suggested_alternative,
         "signing_scheme": receipt.signing_scheme,
@@ -101,6 +112,8 @@ def receipt_to_dict(receipt: Receipt) -> dict[str, Any]:
 def canonical_receipt_payload(receipt: Receipt) -> dict[str, Any]:
     payload = receipt_to_dict(receipt)
     payload.pop("this_hash")
+    if payload.get("passport_id") is None:
+        payload.pop("passport_id", None)
     return payload
 
 
@@ -154,6 +167,7 @@ def chain_insert_receipt(
                 decision=payload.decision,
                 reason=payload.reason,
                 policy_id=payload.policy_id,
+                passport_id=payload.passport_id,
                 guidance=payload.guidance,
                 suggested_alternative=payload.suggested_alternative,
                 signing_scheme=payload.signing_scheme,

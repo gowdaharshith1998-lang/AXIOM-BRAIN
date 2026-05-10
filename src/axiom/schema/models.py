@@ -90,6 +90,9 @@ class Receipt(Base):
     decision: Mapped[str] = mapped_column(String, nullable=False)
     reason: Mapped[str] = mapped_column(String, nullable=False)
     policy_id: Mapped[str] = mapped_column(String, nullable=False)
+    passport_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("agent_passports.passport_id"), nullable=True, index=True
+    )
     guidance: Mapped[str | None] = mapped_column(String, nullable=True)
     suggested_alternative: Mapped[str | None] = mapped_column(String, nullable=True)
     signing_scheme: Mapped[str] = mapped_column(String, nullable=False)
@@ -133,6 +136,39 @@ class AgentRegistry(Base):
     last_action_id: Mapped[str | None] = mapped_column(String, nullable=True)
     agent_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     demo_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class AgentPassport(Base):
+    __tablename__ = "agent_passports"
+
+    passport_id: Mapped[str] = mapped_column(String, primary_key=True)
+    agent_name: Mapped[str] = mapped_column(String, nullable=False)
+    agent_class: Mapped[str] = mapped_column(String, nullable=False)
+    owner_email: Mapped[str] = mapped_column(String, nullable=False)
+    scope_clusters: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    scope_intents: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    scope_skills: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    not_before: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    kill_switch: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revocation_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    issuer_signature: Mapped[str] = mapped_column(String, nullable=False)
+    signing_scheme: Mapped[str] = mapped_column(String, nullable=False, default="demo")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class PassportCredential(Base):
+    __tablename__ = "passport_credentials"
+
+    credential_hash: Mapped[str] = mapped_column(String, primary_key=True)
+    passport_id: Mapped[str] = mapped_column(
+        String, ForeignKey("agent_passports.passport_id"), nullable=False, index=True
+    )
+    presented_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_presented_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class ClusterCheckRun(Base):

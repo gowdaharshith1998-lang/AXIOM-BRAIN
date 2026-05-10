@@ -34,6 +34,15 @@ from axiom.govern.cluster_checks import (
     summarize_cluster_check_runs,
 )
 from axiom.govern.llm_keys import ensure_llm_provider_keys_schema
+from axiom.govern.passports import (
+    ensure_passports_schema,
+    get_passport,
+    issue_passport,
+    list_passports,
+    passport_to_dict,
+    revoke_passport,
+    toggle_kill_switch,
+)
 from axiom.govern.receipts import (
     ensure_receipts_schema,
     receipt_to_dict,
@@ -116,6 +125,20 @@ class SkillIn(BaseModel):
 class SkillRunIn(BaseModel):
     input_payload: dict[str, Any] = Field(default_factory=dict)
     agent_name: str = "external_mcp_client"
+
+
+class PassportIn(BaseModel):
+    agent_name: str
+    agent_class: str
+    owner_email: str
+    scope_clusters: list[str] = Field(default_factory=lambda: ["*"])
+    scope_intents: list[str] = Field(default_factory=lambda: ["*"])
+    scope_skills: list[str] = Field(default_factory=lambda: ["*"])
+    ttl_hours: int = Field(default=1, gt=0)
+
+
+class KillSwitchIn(BaseModel):
+    enabled: bool
 
 
 def datetime_now_ms() -> int:
@@ -203,6 +226,7 @@ def create_app(
     enable_organizer: bool = True,
 ) -> FastAPI:
     engine = create_engine(db_url, future=True)
+    ensure_passports_schema(engine)
     ensure_receipts_schema(engine)
     ensure_agent_registry_schema(engine)
     ensure_cluster_check_runs_schema(engine)
@@ -494,6 +518,71 @@ def create_app(
             "last_tool_call": max((event.get("timestamp") for event in raw_events), default=None),
             "recent_actions": sorted(events, key=lambda item: int(item.get("timestamp", 0)), reverse=True)[:20],
         }
+
+    async def publish_passport_event(event_type: str, payload: dict[str, Any], persisted_id: str) -> None:
+        await broadcaster.publish(
+            {
+                "type": event_type,
+                "source_id": None,
+                "persisted_id": persisted_id,
+                "timestamp": datetime_now_ms(),
+                "payload": payload,
+            }
+        )
+
+    @app.post("/api/internal/passports")
+    async def post_internal_passport(body: PassportIn = Body(...)) -> dict[str, Any]:
+        try:
+            row, token = issue_passport(
+                session_local,
+                agent_name=body.agent_name,
+                agent_class=body.agent_class,
+                owner_email=body.owner_email,
+                scope_clusters=body.scope_clusters,
+                scope_intents=body.scope_intents,
+                scope_skills=body.scope_skills,
+                ttl_hours=body.ttl_hours,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        payload = passport_to_dict(row)
+        await publish_passport_event("passport_issued", payload, row.passport_id)
+        return {**payload, "bearer_token": token}
+
+    @app.get("/api/internal/passports")
+    def get_internal_passports(active_only: bool = True) -> dict[str, Any]:
+        rows = list_passports(session_local, active_only=active_only)
+        return {"passports": [passport_to_dict(row) for row in rows]}
+
+    @app.get("/api/internal/passports/{passport_id}")
+    def get_internal_passport(passport_id: str) -> dict[str, Any]:
+        try:
+            return passport_to_dict(get_passport(session_local, passport_id))
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="passport not found") from exc
+
+    @app.delete("/api/internal/passports/{passport_id}")
+    async def delete_internal_passport(passport_id: str, reason: str | None = None) -> dict[str, Any]:
+        try:
+            row = revoke_passport(session_local, passport_id, reason=reason)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="passport not found") from exc
+        payload = passport_to_dict(row)
+        await publish_passport_event("passport_revoked", payload, row.passport_id)
+        return payload
+
+    @app.post("/api/internal/passports/{passport_id}/kill-switch")
+    async def post_internal_passport_kill_switch(
+        passport_id: str,
+        body: KillSwitchIn = Body(...),
+    ) -> dict[str, Any]:
+        try:
+            row = toggle_kill_switch(session_local, passport_id, body.enabled)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="passport not found") from exc
+        payload = passport_to_dict(row)
+        await publish_passport_event("passport_kill_switch_toggled", payload, row.passport_id)
+        return payload
 
     @app.get("/api/internal/metrics-snapshots")
     def get_metrics_snapshots(days: int = Query(30, ge=1, le=365)) -> dict[str, Any]:

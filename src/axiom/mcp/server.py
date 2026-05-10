@@ -18,10 +18,17 @@ from sqlalchemy.orm import Session, sessionmaker
 from axiom.api.search import _score_title
 from axiom.govern.agent_registry import ensure_agent_registry_schema
 from axiom.govern.ledger import demo_receipt
+from axiom.govern.passports import (
+    PassportError,
+    check_scope,
+    ensure_passports_schema,
+    ensure_system_passport,
+    verify_passport,
+)
 from axiom.govern.policy_evaluator import CORRECT_IMPORTANCE_THRESHOLD, DemoPolicyEvaluator
 from axiom.govern.receipts import ReceiptInsert, chain_insert_receipt, ensure_receipts_schema, receipt_to_dict
 from axiom.schema.dto import EntityDTO
-from axiom.schema.models import Edge, Entity, Receipt
+from axiom.schema.models import AgentPassport, Edge, Entity, Receipt
 from axiom.skills.registry import (
     SkillNotFound,
     archive_skill_with_session,
@@ -146,9 +153,11 @@ class AxiomMCPService:
         self._approval_queue: list[dict[str, Any]] = []
         bind = session_factory.kw.get("bind")
         if bind is not None:
+            ensure_passports_schema(bind)
             ensure_receipts_schema(bind)
             ensure_agent_registry_schema(bind)
             ensure_skills_schema(bind)
+        ensure_system_passport(session_factory)
         self._hydrate_action_history_from_receipts()
 
     @staticmethod
@@ -176,8 +185,33 @@ class AxiomMCPService:
             "policy_id": receipt.policy_id,
             "guidance": receipt.guidance,
             "suggested_alternative": receipt.suggested_alternative,
+            "passport_id": receipt.passport_id,
             "demo": receipt.demo_flag,
         }
+
+    def _resolve_passport(self, passport_token: str | None) -> AgentPassport:
+        try:
+            if passport_token:
+                return verify_passport(self._session_factory, passport_token)
+            return ensure_system_passport(self._session_factory)
+        except PassportError as exc:
+            raise ToolError(str(exc)) from exc
+
+    def _require_passport_scope(
+        self,
+        *,
+        passport_token: str | None,
+        intent: str,
+        cluster_id: str | None,
+        skill_id: str | None = None,
+    ) -> AgentPassport:
+        passport = self._resolve_passport(passport_token)
+        if not check_scope(passport, intent, cluster_id, skill_id):
+            raise ToolError(
+                f"passport scope denied for intent={intent!r}, cluster_id={cluster_id!r}, "
+                f"skill_id={skill_id!r}"
+            )
+        return passport
 
     def _emit_action_events(self, events: list[dict[str, Any]]) -> None:
         if self._events is not None and events:
@@ -217,6 +251,7 @@ class AxiomMCPService:
                 suggested_alternative=evaluation["suggested_alternative"],
                 signing_scheme=str(receipt_seed["signing_scheme"]),
                 signature=str(receipt_seed.get("signature") or receipt_seed["merkle_root"]),
+                passport_id=evaluation.get("passport_id"),
                 demo_flag=demo_flag,
             ),
         )
@@ -232,9 +267,18 @@ class AxiomMCPService:
         target_entity_id: str | None,
         proposed_action: str,
         action_id: str | None = None,
+        passport_token: str | None = None,
+        scope_intent: str | None = None,
+        skill_id: str | None = None,
     ) -> tuple[str, str, dict[str, Any]]:
         resolved_action_id = action_id or f"act_{uuid4().hex[:12]}"
         cluster_id, entity_importance, suggested_alternative = self._entity_context(target_entity_id)
+        passport = self._require_passport_scope(
+            passport_token=passport_token,
+            intent=scope_intent or intent,
+            cluster_id=cluster_id,
+            skill_id=skill_id,
+        )
         decision = self._policy.evaluate(
             cluster_id,
             intent,
@@ -247,6 +291,7 @@ class AxiomMCPService:
             "policy_id": decision.policy_id,
             "guidance": decision.guidance or None,
             "suggested_alternative": decision.suggested_alternative,
+            "passport_id": passport.passport_id,
             "demo": True,
         }
 
@@ -272,6 +317,7 @@ class AxiomMCPService:
             "decision": evaluation["decision"],
             "reason": evaluation["reason"],
             "policy_id": evaluation["policy_id"],
+            "passport_id": evaluation.get("passport_id"),
             "guidance": evaluation["guidance"],
             "suggested_alternative": evaluation["suggested_alternative"],
             "timestamp": self._utcnow_iso(),
@@ -304,6 +350,9 @@ class AxiomMCPService:
         target_entity_id: str | None,
         proposed_action: str,
         action_id: str | None = None,
+        passport_token: str | None = None,
+        scope_intent: str | None = None,
+        skill_id: str | None = None,
     ) -> tuple[str, str, dict[str, Any]]:
         resolved_action_id, cluster_id, evaluation = self._policy_preflight(
             agent_name=agent_name,
@@ -311,6 +360,9 @@ class AxiomMCPService:
             target_entity_id=target_entity_id,
             proposed_action=proposed_action,
             action_id=action_id,
+            passport_token=passport_token,
+            scope_intent=scope_intent,
+            skill_id=skill_id,
         )
         decision = str(evaluation["decision"])
         if decision == "allow":
@@ -381,12 +433,15 @@ class AxiomMCPService:
         intent: str,
         target_entity_id: str | None,
         proposed_action: str,
+        passport_token: str | None = None,
     ) -> dict[str, Any]:
         _action_id, _cluster_id, evaluation = self._policy_preflight(
             agent_name=agent_name,
             intent=intent,
             target_entity_id=target_entity_id,
             proposed_action=proposed_action,
+            passport_token=passport_token,
+            scope_intent=intent,
         )
         return evaluation
 
@@ -398,6 +453,7 @@ class AxiomMCPService:
         target_entity_id: str | None,
         proposed_action: str,
         idempotency_key: str | None,
+        passport_token: str | None = None,
     ) -> dict[str, Any]:
         self._cleanup_idempotency()
         if idempotency_key:
@@ -410,6 +466,8 @@ class AxiomMCPService:
             intent=intent,
             target_entity_id=target_entity_id,
             proposed_action=proposed_action,
+            passport_token=passport_token,
+            scope_intent=intent,
         )
         persisted, out = self._persist_policy_receipt(
             action_id=action_id,
@@ -482,7 +540,14 @@ class AxiomMCPService:
             )
         return out
 
-    def request_human_approval(self, *, action_id: str, reason: str, agent_name: str) -> dict[str, Any]:
+    def request_human_approval(
+        self,
+        *,
+        action_id: str,
+        reason: str,
+        agent_name: str,
+        passport_token: str | None = None,
+    ) -> dict[str, Any]:
         if action_id not in self._action_history:
             raise LookupError(f"unknown action id: {action_id}")
         approval_action_id, cluster_id, evaluation = self._enforce_preflight(
@@ -490,6 +555,8 @@ class AxiomMCPService:
             intent="request_human_approval",
             target_entity_id=None,
             proposed_action=reason,
+            passport_token=passport_token,
+            scope_intent="write",
         )
         if str(evaluation["decision"]) == "correct":
             return {
@@ -548,12 +615,15 @@ class AxiomMCPService:
         llm_model: str,
         output_schema: dict[str, Any] | None = None,
         trigger_config: dict[str, Any] | None = None,
+        passport_token: str | None = None,
     ) -> dict[str, Any]:
         action_id, cluster_id, evaluation = self._enforce_preflight(
             agent_name="external_mcp_client",
             intent="register_skill",
             target_entity_id=None,
             proposed_action=name,
+            passport_token=passport_token,
+            scope_intent="write",
         )
         if str(evaluation["decision"]) == "correct":
             return {
@@ -608,6 +678,7 @@ class AxiomMCPService:
         skill_id: str,
         input_payload: dict[str, Any],
         idempotency_key: str | None = None,
+        passport_token: str | None = None,
     ) -> dict[str, Any]:
         self._cleanup_idempotency()
         if idempotency_key:
@@ -625,6 +696,9 @@ class AxiomMCPService:
             target_entity_id=None,
             proposed_action=f"axiom_run_skill:{skill_id}",
             action_id=f"skill_policy:{uuid4().hex[:12]}",
+            passport_token=passport_token,
+            scope_intent="invoke_skill",
+            skill_id=skill_id,
         )
         if str(evaluation["decision"]) == "correct":
             out = {
@@ -663,17 +737,20 @@ class AxiomMCPService:
             event_callback=emit,
             receipt_policy_id=str(evaluation["policy_id"]),
             receipt_reason=str(evaluation["reason"]),
+            receipt_passport_id=str(evaluation["passport_id"]),
         )
         if idempotency_key:
             self._idempotency[("skill_runner", idempotency_key)] = (time.monotonic(), out)
         return out
 
-    def archive_skill(self, skill_id: str) -> dict[str, Any]:
+    def archive_skill(self, skill_id: str, *, passport_token: str | None = None) -> dict[str, Any]:
         action_id, cluster_id, evaluation = self._enforce_preflight(
             agent_name="external_mcp_client",
             intent="archive_skill",
             target_entity_id=skill_id,
             proposed_action=f"axiom_archive_skill:{skill_id}",
+            passport_token=passport_token,
+            scope_intent="write",
         )
         if str(evaluation["decision"]) == "correct":
             return {
@@ -1049,7 +1126,13 @@ def build_mcp_server(
         max_results: int = 8,
         entity_types: list[str] | None = None,
         cluster_id: str | None = None,
+        passport_token: str | None = None,
     ) -> dict[str, Any]:
+        service._require_passport_scope(
+            passport_token=passport_token,
+            intent="read",
+            cluster_id=cluster_id or "external_mcp",
+        )
         return service.query_brain(query, max_results, entity_types, cluster_id)
 
     @mcp.tool(name="axiom_get_entity", description="Fetch one entity and optional neighbors")
@@ -1057,8 +1140,15 @@ def build_mcp_server(
         entity_id: str,
         include_neighbors: bool = False,
         hops: int = 1,
+        passport_token: str | None = None,
     ) -> dict[str, Any]:
         try:
+            cluster_id, _importance, _alternative = service._entity_context(entity_id)
+            service._require_passport_scope(
+                passport_token=passport_token,
+                intent="read",
+                cluster_id=cluster_id,
+            )
             return service.get_entity(entity_id, include_neighbors, hops)
         except LookupError as exc:
             raise ToolError(str(exc)) from exc
@@ -1069,14 +1159,26 @@ def build_mcp_server(
         edge_types: list[str] | None = None,
         max_depth: int = 2,
         direction: Direction = "both",
+        passport_token: str | None = None,
     ) -> dict[str, Any]:
         try:
+            cluster_id, _importance, _alternative = service._entity_context(from_id)
+            service._require_passport_scope(
+                passport_token=passport_token,
+                intent="read",
+                cluster_id=cluster_id,
+            )
             return service.traverse(from_id, edge_types, max_depth, direction)
         except LookupError as exc:
             raise ToolError(str(exc)) from exc
 
     @mcp.tool(name="axiom_list_sources", description="List connected sources")
-    def axiom_list_sources() -> dict[str, Any]:
+    def axiom_list_sources(passport_token: str | None = None) -> dict[str, Any]:
+        service._require_passport_scope(
+            passport_token=passport_token,
+            intent="read",
+            cluster_id="external_mcp",
+        )
         return service.list_sources()
 
     @mcp.tool(name="axiom_record_action", description="Record an external agent action with demo policy evaluation")
@@ -1086,6 +1188,7 @@ def build_mcp_server(
         target_entity_id: str | None = None,
         proposed_action: str = "",
         idempotency_key: str | None = None,
+        passport_token: str | None = None,
     ) -> dict[str, Any]:
         return service.record_action(
             agent_name=agent_name,
@@ -1093,6 +1196,7 @@ def build_mcp_server(
             target_entity_id=target_entity_id,
             proposed_action=proposed_action,
             idempotency_key=idempotency_key,
+            passport_token=passport_token,
         )
 
     @mcp.tool(name="axiom_check_policy", description="Pre-flight policy check for an action proposal")
@@ -1101,34 +1205,61 @@ def build_mcp_server(
         intent: str,
         target_entity_id: str | None = None,
         proposed_action: str = "",
+        passport_token: str | None = None,
     ) -> dict[str, Any]:
         return service.check_policy(
             agent_name=agent_name,
             intent=intent,
             target_entity_id=target_entity_id,
             proposed_action=proposed_action,
+            passport_token=passport_token,
         )
 
     @mcp.tool(
         name="axiom_request_human_approval",
         description="Escalate an action for human approval via in-memory queue",
     )
-    def axiom_request_human_approval(action_id: str, reason: str, agent_name: str) -> dict[str, Any]:
+    def axiom_request_human_approval(
+        action_id: str,
+        reason: str,
+        agent_name: str,
+        passport_token: str | None = None,
+    ) -> dict[str, Any]:
         try:
-            return service.request_human_approval(action_id=action_id, reason=reason, agent_name=agent_name)
+            return service.request_human_approval(
+                action_id=action_id,
+                reason=reason,
+                agent_name=agent_name,
+                passport_token=passport_token,
+            )
         except LookupError as exc:
             raise ToolError(str(exc)) from exc
 
     @mcp.tool(name="axiom_list_skills", description="List registered runnable skills")
-    def axiom_list_skills(status: str | None = None, intent: str | None = None) -> dict[str, Any]:
+    def axiom_list_skills(
+        status: str | None = None,
+        intent: str | None = None,
+        passport_token: str | None = None,
+    ) -> dict[str, Any]:
         try:
+            service._require_passport_scope(
+                passport_token=passport_token,
+                intent="read",
+                cluster_id="skills",
+            )
             return service.list_skills(status=status, intent=intent)
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
 
     @mcp.tool(name="axiom_get_skill", description="Fetch a registered skill by id")
-    def axiom_get_skill(skill_id: str) -> dict[str, Any]:
+    def axiom_get_skill(skill_id: str, passport_token: str | None = None) -> dict[str, Any]:
         try:
+            service._require_passport_scope(
+                passport_token=passport_token,
+                intent="read",
+                cluster_id="skills",
+                skill_id=skill_id,
+            )
             return service.get_skill(skill_id)
         except SkillNotFound as exc:
             raise ToolError(str(exc)) from exc
@@ -1138,12 +1269,14 @@ def build_mcp_server(
         skill_id: str,
         input_payload: dict[str, Any],
         idempotency_key: str | None = None,
+        passport_token: str | None = None,
     ) -> dict[str, Any]:
         try:
             return service.run_skill(
                 skill_id=skill_id,
                 input_payload=input_payload,
                 idempotency_key=idempotency_key,
+                passport_token=passport_token,
             )
         except SkillNotFound as exc:
             raise ToolError(str(exc)) from exc
@@ -1158,6 +1291,7 @@ def build_mcp_server(
         llm_model: str,
         output_schema: dict[str, Any] | None = None,
         trigger_config: dict[str, Any] | None = None,
+        passport_token: str | None = None,
     ) -> dict[str, Any]:
         try:
             return service.register_skill(
@@ -1169,14 +1303,15 @@ def build_mcp_server(
                 llm_model=llm_model,
                 output_schema=output_schema,
                 trigger_config=trigger_config,
+                passport_token=passport_token,
             )
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
 
     @mcp.tool(name="axiom_archive_skill", description="Archive a skill")
-    def axiom_archive_skill(skill_id: str) -> dict[str, Any]:
+    def axiom_archive_skill(skill_id: str, passport_token: str | None = None) -> dict[str, Any]:
         try:
-            return service.archive_skill(skill_id)
+            return service.archive_skill(skill_id, passport_token=passport_token)
         except SkillNotFound as exc:
             raise ToolError(str(exc)) from exc
 

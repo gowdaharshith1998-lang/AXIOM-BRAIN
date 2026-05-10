@@ -146,6 +146,7 @@ def _run_skill_with_session(
     event_callback: RunEventCallback | None = None,
     receipt_policy_id: str = "skill_runner",
     receipt_reason: str = "skill run completed",
+    receipt_passport_id: str | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     with session_factory() as session:
@@ -206,6 +207,7 @@ def _run_skill_with_session(
                 suggested_alternative=None,
                 signing_scheme="demo",
                 signature=uuid4().hex,
+                passport_id=receipt_passport_id,
                 demo_flag=False,
             ),
         )
@@ -251,6 +253,7 @@ def run_skill(
     event_callback: RunEventCallback | None = None,
     receipt_policy_id: str = "skill_runner",
     receipt_reason: str = "skill run completed",
+    receipt_passport_id: str | None = None,
 ) -> dict[str, Any]:
     sf = session_factory or SessionLocal
     if sf is None:
@@ -264,6 +267,7 @@ def run_skill(
             event_callback=event_callback,
             receipt_policy_id=receipt_policy_id,
             receipt_reason=receipt_reason,
+            receipt_passport_id=receipt_passport_id,
         )
     except SkillNotFound:
         raise

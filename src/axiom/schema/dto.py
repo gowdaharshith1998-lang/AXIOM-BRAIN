@@ -54,6 +54,7 @@ class ReceiptDTO(BaseModel):
     decision: str
     reason: str
     policy_id: str
+    passport_id: str | None = None
     guidance: str | None = None
     suggested_alternative: str | None = None
     signing_scheme: str
