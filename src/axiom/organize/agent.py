@@ -30,7 +30,9 @@ from axiom.organize.centrality import CentralityScorer
 from axiom.organize.classifier import HybridClassifier
 from axiom.organize.clusters import is_valid_cluster_id
 from axiom.organize.edge_proposer import EdgeProposer
+from axiom.retrieval.embeddings import canonical_content_hash, embed_entities_batch
 from axiom.schema.models import Entity
+from axiom.schema.models import EntityEmbedding
 
 logger = logging.getLogger("axiom.organize.agent")
 
@@ -38,6 +40,7 @@ CLASSIFY_INTERVAL_SEC: Final[float] = 5.0
 CLASSIFY_BATCH_SIZE: Final[int] = 20
 CENTRALITY_INTERVAL_SEC: Final[float] = 30.0
 EDGE_PROPOSAL_INTERVAL_SEC: Final[float] = 15.0
+EMBEDDING_DEBOUNCE_SEC: Final[float] = 1.0
 
 
 class _Broadcaster(Protocol):
@@ -66,6 +69,7 @@ class OrganizerAgent:
         classify_interval_sec: float = CLASSIFY_INTERVAL_SEC,
         centrality_interval_sec: float = CENTRALITY_INTERVAL_SEC,
         edge_proposal_interval_sec: float = EDGE_PROPOSAL_INTERVAL_SEC,
+        embedding_debounce_sec: float = EMBEDDING_DEBOUNCE_SEC,
         sleeper: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         self._session_factory: SessionFactory = (
@@ -78,6 +82,7 @@ class OrganizerAgent:
         self.classify_interval_sec = classify_interval_sec
         self.centrality_interval_sec = centrality_interval_sec
         self.edge_proposal_interval_sec = edge_proposal_interval_sec
+        self.embedding_debounce_sec = embedding_debounce_sec
         self._sleep: Callable[[float], Awaitable[None]] = sleeper or asyncio.sleep
         self._tasks: list[asyncio.Task[None]] = []
         self._stop = False
@@ -244,6 +249,30 @@ class OrganizerAgent:
         finally:
             session.close()
 
+    async def embed_changed_entities(self) -> int:
+        try:
+            session = self._session_factory()
+        except Exception:  # noqa: BLE001
+            logger.exception("organizer: failed to open db session for embeddings")
+            return 0
+        try:
+            rows = session.execute(select(Entity)).scalars().all()
+            changed: list[Entity] = []
+            for entity in rows:
+                existing = session.get(EntityEmbedding, entity.id)
+                if existing is None or existing.content_hash != canonical_content_hash(entity):
+                    changed.append(entity)
+            if not changed:
+                return 0
+            embed_entities_batch(session, changed)
+            return len(changed)
+        except Exception:  # noqa: BLE001
+            logger.exception("organizer: embedding batch failed")
+            session.rollback()
+            return 0
+        finally:
+            session.close()
+
     async def backfill_once(self) -> int:
         """Drain every unclassified entity in batches. Used at app boot."""
 
@@ -281,6 +310,14 @@ class OrganizerAgent:
                 logger.exception("organizer: edge_proposal_loop iteration failed")
             await self._sleep(self.edge_proposal_interval_sec)
 
+    async def embedding_loop(self) -> None:
+        while not self._stop:
+            await self._sleep(self.embedding_debounce_sec)
+            try:
+                await self.embed_changed_entities()
+            except Exception:  # noqa: BLE001
+                logger.exception("organizer: embedding_loop iteration failed")
+
     def start(self) -> list[asyncio.Task[None]]:
         if self._tasks:
             return self._tasks
@@ -289,6 +326,7 @@ class OrganizerAgent:
             asyncio.create_task(self.classify_loop(), name="organizer.classify"),
             asyncio.create_task(self.centrality_loop(), name="organizer.centrality"),
             asyncio.create_task(self.edge_proposal_loop(), name="organizer.edge_proposal"),
+            asyncio.create_task(self.embedding_loop(), name="organizer.embedding"),
         ]
         return self._tasks
 

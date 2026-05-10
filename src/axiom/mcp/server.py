@@ -27,6 +27,7 @@ from axiom.govern.passports import (
 )
 from axiom.govern.policy_evaluator import CORRECT_IMPORTANCE_THRESHOLD, DemoPolicyEvaluator
 from axiom.govern.receipts import ReceiptInsert, chain_insert_receipt, ensure_receipts_schema, receipt_to_dict
+from axiom.retrieval.search import SearchMode, hybrid_search
 from axiom.schema.dto import EntityDTO
 from axiom.schema.models import AgentPassport, Edge, Entity, Receipt
 from axiom.skills.registry import (
@@ -905,6 +906,7 @@ class AxiomMCPService:
         max_results: int,
         entity_types: list[str] | None = None,
         cluster_id: str | None = None,
+        mode: SearchMode = "hybrid",
     ) -> dict[str, Any]:
         q = query.strip()
         if not q:
@@ -913,6 +915,23 @@ class AxiomMCPService:
         safe_limit = min(max(max_results, 1), 50)
         with self._session_factory() as session:
             self._refresh_cache_if_needed(session)
+            out = hybrid_search(
+                session,
+                q,
+                mode=mode,
+                top_k=safe_limit,
+                entity_types=entity_types,
+                cluster_id=cluster_id,
+            )
+
+        for row in out["results"]:
+            methods = row.get("methods", [])
+            row["matched_on"] = row.get("matched_on") or (
+                "query_match"
+                if "lexical" in methods or "semantic" in methods
+                else "graph_match"
+            )
+        return out
 
         fts_query = _safe_fts_query(q)
         seed_ids: list[str] = []
@@ -1126,6 +1145,7 @@ def build_mcp_server(
         max_results: int = 8,
         entity_types: list[str] | None = None,
         cluster_id: str | None = None,
+        mode: SearchMode = "hybrid",
         passport_token: str | None = None,
     ) -> dict[str, Any]:
         service._require_passport_scope(
@@ -1133,7 +1153,7 @@ def build_mcp_server(
             intent="read",
             cluster_id=cluster_id or "external_mcp",
         )
-        return service.query_brain(query, max_results, entity_types, cluster_id)
+        return service.query_brain(query, max_results, entity_types, cluster_id, mode)
 
     @mcp.tool(name="axiom_get_entity", description="Fetch one entity and optional neighbors")
     def axiom_get_entity(

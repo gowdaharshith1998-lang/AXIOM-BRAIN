@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     UniqueConstraint,
 )
@@ -72,6 +73,24 @@ class Edge(Base):
     relationship: Mapped[str] = mapped_column(String(64), index=True)  # free-text; NOT enum
     data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class EntityEmbedding(Base):
+    __tablename__ = "entity_embeddings"
+    __table_args__ = (Index("ix_entity_embeddings_content_hash", "content_hash"),)
+
+    entity_id: Mapped[str] = mapped_column(
+        String(32),
+        ForeignKey("entities.id"),
+        primary_key=True,
+    )
+    embedding: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
 
 
 class Receipt(Base):

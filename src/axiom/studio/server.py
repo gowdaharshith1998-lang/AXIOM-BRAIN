@@ -63,6 +63,8 @@ from axiom.organize.cluster_health import (
     compute_brain_health_score,
     health_status_for_score,
 )
+from axiom.retrieval.embeddings import bootstrap_embeddings, ensure_entity_embeddings_schema
+from axiom.retrieval.search import SearchMode, hybrid_search
 from axiom.schema.dto import EdgeDTO, EntityDTO
 from axiom.schema.models import (
     Action,
@@ -139,6 +141,13 @@ class PassportIn(BaseModel):
 
 class KillSwitchIn(BaseModel):
     enabled: bool
+
+
+class InternalSearchIn(BaseModel):
+    query: str = ""
+    mode: SearchMode = "hybrid"
+    top_k: int = Field(default=8, ge=1, le=50)
+    weights: dict[str, float] | None = None
 
 
 def datetime_now_ms() -> int:
@@ -233,6 +242,7 @@ def create_app(
     ensure_snapshots_schema(engine)
     ensure_llm_provider_keys_schema(engine)
     ensure_skills_schema(engine)
+    ensure_entity_embeddings_schema(engine)
     session_local = sessionmaker(bind=engine, future=True)
     broadcaster = EventBroadcaster()
     cluster_health_monitor = ClusterHealthMonitor()
@@ -333,6 +343,12 @@ def create_app(
         try:
             with session_local() as session:
                 backfill_agent_registry_from_receipts(session)
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            with session_local() as session:
+                bootstrap_embeddings(session)
         except Exception:  # noqa: BLE001
             pass
 
@@ -795,6 +811,20 @@ def create_app(
     ) -> list[EntitySearchResult]:
         with session_local() as session:
             return search_entities(session, q, limit=limit)
+
+    @app.post("/api/internal/search")
+    def post_internal_search(body: InternalSearchIn = Body(...)) -> dict[str, Any]:
+        try:
+            with session_local() as session:
+                return hybrid_search(
+                    session,
+                    body.query,
+                    mode=body.mode,
+                    top_k=body.top_k,
+                    weights=body.weights,
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/edges")
     def get_edges() -> list[dict[str, Any]]:
