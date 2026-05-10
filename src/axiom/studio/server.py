@@ -147,6 +147,15 @@ class PassportIn(BaseModel):
     ttl_hours: int = Field(default=1, gt=0)
 
 
+class AgentRegisterIn(BaseModel):
+    name: str
+    agent_class: str
+    owner_email: str
+    passport_id: str | None = None
+    issue_new_passport: bool = False
+    ttl_hours: int = Field(default=24, gt=0)
+
+
 class KillSwitchIn(BaseModel):
     enabled: bool
 
@@ -204,6 +213,21 @@ def _is_policy_entity(entity: Entity) -> bool:
 
 def _receipt_signed(receipt: Receipt) -> bool:
     return bool(receipt.signature)
+
+
+def _passport_status(payload: dict[str, Any]) -> str:
+    if payload.get("revoked_at"):
+        return "revoked"
+    if payload.get("kill_switch"):
+        return "kill_switch"
+    expires_at = payload.get("expires_at")
+    if isinstance(expires_at, str):
+        try:
+            if datetime.fromisoformat(expires_at) < datetime.utcnow():
+                return "expired"
+        except ValueError:
+            pass
+    return "active"
 
 
 def _receipt_row(receipt: Receipt) -> dict[str, Any]:
@@ -527,11 +551,101 @@ def create_app(
     ) -> dict[str, Any]:
         with session_local() as session:
             rows = get_agents(session, days=days, agent_type=type)
+        passports = list_passports(session_local, active_only=False)
+        passports_by_agent = {}
+        for passport in passports:
+            existing = passports_by_agent.get(passport.agent_name)
+            if existing is None or passport.issued_at > existing.issued_at:
+                passports_by_agent[passport.agent_name] = passport
+        enriched = []
+        for row in rows:
+            payload = agent_registry_row(row)
+            passport = passports_by_agent.get(row.agent_name)
+            if passport is not None:
+                passport_payload = passport_to_dict(passport)
+                payload.update(
+                    {
+                        "name": row.agent_name,
+                        "agent_class": passport.agent_class,
+                        "owner_email": passport.owner_email,
+                        "passport_id": passport.passport_id,
+                        "passport_status": _passport_status(passport_payload),
+                    }
+                )
+            else:
+                payload.update(
+                    {
+                        "name": row.agent_name,
+                        "agent_class": "unknown",
+                        "owner_email": None,
+                        "passport_id": None,
+                        "passport_status": "missing",
+                    }
+                )
+            enriched.append(payload)
         return {
-            "agents": [agent_registry_row(row) for row in rows],
+            "agents": enriched,
             "range_days": days,
             "type": type,
         }
+
+    @app.post("/api/internal/agent-registry")
+    async def post_agent_registry(body: AgentRegisterIn = Body(...)) -> dict[str, Any]:
+        name = body.name.strip()
+        agent_class = body.agent_class.strip()
+        owner_email = body.owner_email.strip()
+        if not name or not agent_class or not owner_email:
+            raise HTTPException(status_code=422, detail="name, class, and owner_email are required")
+
+        issued_token: str | None = None
+        passport_payload: dict[str, Any] | None = None
+        if body.issue_new_passport or not body.passport_id:
+            row, issued_token = issue_passport(
+                session_local,
+                agent_name=name,
+                agent_class=agent_class,
+                owner_email=owner_email,
+                scope_clusters=["*"],
+                scope_intents=["*"],
+                scope_skills=["*"],
+                ttl_hours=body.ttl_hours,
+            )
+            passport_payload = passport_to_dict(row)
+            await publish_passport_event("passport_issued", passport_payload, row.passport_id)
+        else:
+            try:
+                passport_payload = passport_to_dict(get_passport(session_local, body.passport_id))
+            except LookupError as exc:
+                raise HTTPException(status_code=404, detail="passport not found") from exc
+
+        with session_local() as session:
+            registry = session.get(AgentRegistry, name)
+            now = datetime.utcnow()
+            if registry is None:
+                registry = AgentRegistry(
+                    agent_name=name,
+                    first_seen=now,
+                    last_seen=now,
+                    agent_type="external_mcp",
+                    demo_flag=False,
+                )
+            registry.last_seen = now
+            registry.demo_flag = False
+            session.add(registry)
+            session.commit()
+            session.refresh(registry)
+            payload = agent_registry_row(registry)
+        payload.update(
+            {
+                "name": name,
+                "agent_class": passport_payload.get("agent_class", agent_class),
+                "owner_email": passport_payload.get("owner_email", owner_email),
+                "passport_id": passport_payload.get("passport_id"),
+                "passport_status": _passport_status(passport_payload),
+                "bearer_token": issued_token,
+            }
+        )
+        return payload
 
     @app.get("/api/internal/mcp-stats")
     def get_mcp_stats() -> dict[str, Any]:
@@ -850,13 +964,15 @@ def create_app(
             _raise_skill_error(exc)
 
     @app.post("/api/internal/skills/{skill_id}/archive")
-    def post_internal_skill_archive(skill_id: str) -> dict[str, Any]:
+    async def post_internal_skill_archive(skill_id: str) -> dict[str, Any]:
         try:
             with session_local() as session:
                 row = archive_skill_with_session(session, skill_id)
-                return skill_to_dict(row)
+                payload = skill_to_dict(row)
         except Exception as exc:  # noqa: BLE001
             _raise_skill_error(exc)
+        await publish_skill_event("skill_archived", {"skill": payload}, skill_id)
+        return payload
 
     @app.get("/api/entities")
     def get_entities() -> list[dict[str, Any]]:

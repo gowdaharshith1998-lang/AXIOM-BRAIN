@@ -155,6 +155,34 @@ def test_agent_registry_endpoint_filters_by_type_and_days(tmp_path: Path) -> Non
     assert payload["agents"][0]["correct_count"] == 1
 
 
+def test_agent_registry_register_endpoint_issues_passport(tmp_path: Path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'register_endpoint.db'}"
+    engine = create_engine(db_url, future=True)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    app = create_app(db_url=db_url, enable_organizer=False)
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/internal/agent-registry",
+            json={
+                "name": "builder",
+                "agent_class": "external_mcp",
+                "owner_email": "ops@example.com",
+                "issue_new_passport": True,
+            },
+        )
+        assert created.status_code == 200
+        payload = created.json()
+        assert payload["agent_name"] == "builder"
+        assert payload["passport_status"] == "active"
+        assert payload["bearer_token"]
+
+        listed = client.get("/api/internal/agent-registry").json()["agents"]
+        assert listed[0]["agent_name"] == "builder"
+        assert listed[0]["owner_email"] == "ops@example.com"
+
+
 def test_mcp_stats_includes_observed_agents_from_registry(tmp_path: Path) -> None:
     db_url = f"sqlite:///{tmp_path / 'stats.db'}"
     engine = create_engine(db_url, future=True)

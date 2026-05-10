@@ -15,6 +15,7 @@ import { GovernancePage } from "@/pages/GovernancePage";
 import { InsightsPage } from "@/pages/InsightsPage";
 import { PassportsPage } from "@/pages/PassportsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { SkillsPage } from "@/pages/SkillsPage";
 import { useBrainStore } from "@/state/brain.store";
 
 const navItems = [
@@ -23,6 +24,7 @@ const navItems = [
   ["/insights", "Insights"],
   ["/governance", "Governance"],
   ["/agents", "Agents"],
+  ["/skills", "Skills"],
   ["/settings", "Settings"],
 ] as const;
 
@@ -32,6 +34,7 @@ const agentNavItems = [
   ["/insights", "Insights"],
   ["/governance", "Governance"],
   ["/agents", "Agents"],
+  ["/skills", "Skills"],
   ["/agents/schedules", "Schedules"],
   ["/agents/triggers", "Triggers"],
   ["/agents/runtime", "Runtime"],
@@ -43,6 +46,7 @@ function NavIcon({ label }: { label: string }) {
   const common = "h-5 w-5 text-current";
   if (label === "Graph") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M6 6h.01M18 6h.01M6 18h.01M18 18h.01M7 6h10M6 7v10M18 7v10M7 18h10" /></svg>;
   if (label === "Agents") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M16 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4ZM8 13a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm8 1c-3.3 0-6 1.6-6 3.5V20h12v-2.5c0-1.9-2.7-3.5-6-3.5ZM8 14c-2.8 0-5 1.2-5 2.8V19h5" /></svg>;
+  if (label === "Skills") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 3 4 7v10l8 4 8-4V7l-8-4Zm0 8 8-4M12 11 4 7m8 4v10" /><path d="M8.5 13.5 12 15l3.5-1.5" /></svg>;
   if (label === "Explore") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="8"/><path d="m15 9-2 5-5 2 2-5 5-2Z"/></svg>;
   if (label === "Insights") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 19V8m5 11V5m5 14v-8m6 8H3"/></svg>;
   if (label === "Governance") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m12 3 7 3v5c0 4.2-2.7 7.3-7 9-4.3-1.7-7-4.8-7-9V6l7-3Z"/></svg>;
@@ -66,6 +70,7 @@ function StudioShell() {
   const navigate = useNavigate();
   const isGraphRoute = location.pathname === "/graph";
   const isAgentsRoute = location.pathname.startsWith("/agents");
+  const isSkillsRoute = location.pathname.startsWith("/skills");
   const isExploreRoute = location.pathname.startsWith("/explore");
   const isGovernanceRoute = location.pathname === "/governance";
   const isInsightsRoute = location.pathname === "/insights";
@@ -146,7 +151,7 @@ function StudioShell() {
         )}
       </aside>
 
-      {!isExploreRoute && !isAgentsRoute ? (
+      {!isExploreRoute && !isAgentsRoute && !isSkillsRoute ? (
         <header className={`fixed left-[228px] right-0 top-0 z-30 flex items-start justify-between border-b border-[#132339] px-8 ${hasCompactHeader ? "h-[60px] pt-4" : "h-[112px] pt-7"}`}>
           {hasCompactHeader ? (
             <div className="absolute left-1/2 top-5 -translate-x-1/2 text-[15px] text-[#b9c1cf]">
@@ -169,7 +174,7 @@ function StudioShell() {
         className={
           isGraphRoute
             ? "fixed inset-y-0 right-0 left-[228px] z-0 overflow-hidden"
-            : isAgentsRoute
+            : isAgentsRoute || isSkillsRoute
               ? "fixed inset-0 left-[228px] z-0 overflow-y-auto"
             : isExploreRoute
               ? "fixed inset-0 left-[228px] z-0 overflow-y-auto"
@@ -233,6 +238,7 @@ export function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/settings/passports" element={<PassportsPage />} />
           <Route path="/agents/*" element={<AgentsPage />} />
+          <Route path="/skills" element={<SkillsPage />} />
           <Route path="/explore/*" element={<ExplorePage />} />
           <Route path="/insights" element={<InsightsPage />} />
           <Route path="/governance" element={<GovernancePage />} />

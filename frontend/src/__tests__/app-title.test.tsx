@@ -12,6 +12,9 @@ vi.mock("@/components/StatusFooter", () => ({ StatusFooter: () => <div /> }));
 vi.mock("@/components/CommandPalette", () => ({ CommandPalette: () => <div /> }));
 vi.mock("@/lib/websocket", () => ({
   BrainSocket: class {
+    on() {
+      return () => {};
+    }
     onStatus() {
       return () => {};
     }

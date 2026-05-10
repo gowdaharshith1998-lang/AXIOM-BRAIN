@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from axiom.govern.watchdog import WatchdogAgent, detect_for_entity
+from axiom.govern.watchdog import WatchdogAgent, detect_for_entity, list_open_alerts
 from axiom.schema.models import Base, Edge, Entity, EntityEmbedding, Receipt
 from axiom.studio.server import create_app
 
@@ -275,3 +275,28 @@ def test_watchdog_ack_and_resolve_endpoints(watchdog_sf: tuple[sessionmaker[Sess
         assert resolved.status_code == 200
         assert resolved.json()["status"] == "resolved"
         assert resolved.json()["evidence"]["resolution_note"] == "Linked to DEC-1"
+
+
+def test_watchdog_deduplicates_active_alerts(db_session: Session) -> None:
+    db_session.add(_entity("bill_change", cluster_id="billing_payments"))
+    db_session.commit()
+
+    first = detect_for_entity(db_session, "bill_change")
+    second = detect_for_entity(db_session, "bill_change")
+
+    assert len(first) == 1
+    assert second == []
+
+
+def test_watchdog_lists_open_alerts_by_cluster(db_session: Session) -> None:
+    db_session.add_all([
+        _entity("bill_change", cluster_id="billing_payments"),
+        _entity("ticket_p1", type_="ticket", cluster_id="incidents_ops", data={"priority": "p1"}),
+    ])
+    db_session.commit()
+    detect_for_entity(db_session, "bill_change")
+    detect_for_entity(db_session, "ticket_p1")
+
+    rows = list_open_alerts(db_session, cluster_id="billing_payments")
+
+    assert [row.entity_id for row in rows] == ["bill_change"]

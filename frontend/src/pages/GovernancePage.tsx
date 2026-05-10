@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
+
+import {
+  acknowledgeWatchdogAlert,
+  listWatchdogAlerts,
+  resolveWatchdogAlert,
+} from "@/lib/watchdogClient";
+import type { BrainEvent } from "@/lib/websocket";
+import type { WatchdogAlert } from "@/state/brain.store";
 
 type Tab = "overview" | "policies" | "checks" | "receipts" | "lineage" | "audit-log";
 type Accent = "cyan" | "blue" | "green" | "amber" | "red" | "purple";
@@ -220,6 +228,12 @@ function HexIcon({ icon, accent = "cyan" }: { icon: string; accent?: Accent }) {
 
 function StatusPill({ children, tone = "green" }: { children: ReactNode; tone?: Accent }) {
   return <span className={cx("gov-pill", `gov-${tone}`)}>{children}</span>;
+}
+
+function severityTone(severity: string): Accent {
+  if (severity === "critical") return "red";
+  if (severity === "warning") return "amber";
+  return "blue";
 }
 
 function Panel({ title, action, children, className }: { title: string; action?: ReactNode; children: ReactNode; className?: string }) {
@@ -717,6 +731,85 @@ function Timeline({ items, compact }: { items: string[]; compact?: boolean }) {
   );
 }
 
+function WatchdogFeedPanel() {
+  const [alerts, setAlerts] = useState<WatchdogAlert[]>([]);
+  const [resolving, setResolving] = useState<WatchdogAlert | null>(null);
+  const [note, setNote] = useState("");
+
+  useEffect(() => {
+    listWatchdogAlerts().then(setAlerts).catch(() => setAlerts([]));
+  }, []);
+
+  useEffect(() => {
+    function onBrainEvent(event: Event) {
+      const detail = (event as CustomEvent<BrainEvent>).detail;
+      if (!detail) return;
+      const payload = detail.payload as WatchdogAlert;
+      if (detail.type === "watchdog_alert_raised" && payload.alert_id) {
+        setAlerts((current) => [payload, ...current.filter((alert) => alert.alert_id !== payload.alert_id)]);
+      }
+      if ((detail.type === "watchdog_alert_acknowledged" || detail.type === "watchdog_alert_resolved") && payload.alert_id) {
+        setAlerts((current) =>
+          current
+            .map((alert) => (alert.alert_id === payload.alert_id ? payload : alert))
+            .filter((alert) => alert.status === "open"),
+        );
+      }
+    }
+    window.addEventListener("axiom:brain-event", onBrainEvent);
+    return () => window.removeEventListener("axiom:brain-event", onBrainEvent);
+  }, []);
+
+  async function acknowledge(alert: WatchdogAlert) {
+    const updated = await acknowledgeWatchdogAlert(alert.alert_id);
+    setAlerts((current) =>
+      current
+        .map((item) => (item.alert_id === alert.alert_id ? updated : item))
+        .filter((item) => item.status === "open"),
+    );
+  }
+
+  async function resolveCurrent(event: FormEvent) {
+    event.preventDefault();
+    if (!resolving) return;
+    const updated = await resolveWatchdogAlert(resolving.alert_id, note);
+    setAlerts((current) =>
+      current
+        .map((item) => (item.alert_id === resolving.alert_id ? updated : item))
+        .filter((item) => item.status === "open"),
+    );
+    setResolving(null);
+    setNote("");
+  }
+
+  return (
+    <aside className="watchdog-feed-panel" aria-label="Watchdog feed">
+      <div className="watchdog-feed-head">
+        <h2>Watchdog</h2>
+        <StatusPill tone={alerts.length ? "amber" : "green"}>{alerts.length ? `${alerts.length} open` : "Clear"}</StatusPill>
+      </div>
+      {alerts.length ? alerts.slice(0, 5).map((alert) => (
+        <div className="watchdog-feed-row" key={alert.alert_id}>
+          <StatusPill tone={severityTone(alert.severity)}>{titleCase(alert.severity)}</StatusPill>
+          <p>{alert.reason}</p>
+          <div>
+            <button type="button" onClick={() => acknowledge(alert)}>Acknowledge</button>
+            <button type="button" onClick={() => setResolving(alert)}>Resolve</button>
+          </div>
+        </div>
+      )) : <p className="gov-muted">No open watchdog alerts.</p>}
+      {resolving ? (
+        <form className="watchdog-resolve-modal" aria-label="Resolve watchdog alert" onSubmit={resolveCurrent}>
+          <h3>Resolve Alert</h3>
+          <textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Resolution note" />
+          <button type="submit">Resolve</button>
+          <button type="button" onClick={() => setResolving(null)}>Cancel</button>
+        </form>
+      ) : null}
+    </aside>
+  );
+}
+
 export function GovernancePage() {
   const [params, setParams] = useSearchParams();
   const requested = params.get("tab") as Tab | null;
@@ -763,6 +856,7 @@ export function GovernancePage() {
           <Icon name="shield" className="h-9 w-9 text-[#b6c9ea]" />
           <h1>Governance</h1>
         </div>
+        <WatchdogFeedPanel />
         <nav className="governance-tabs" aria-label="Governance sections">
           {tabs.map((tab) => (
             <button key={tab.id} type="button" className={activeTab === tab.id ? "is-active" : ""} onClick={() => setParams(tab.id === "overview" ? {} : { tab: tab.id })}>

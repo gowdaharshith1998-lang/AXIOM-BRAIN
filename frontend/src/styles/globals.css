@@ -777,6 +777,7 @@ body {
 }
 
 .governance-shell {
+  position: relative;
   min-height: calc(100vh - 74px);
   border: 1px solid #29425f;
   border-radius: 12px;
@@ -829,6 +830,81 @@ body {
   line-height: 1;
   font-weight: 600;
   letter-spacing: 0.18em;
+}
+
+.watchdog-feed-panel {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  z-index: 2;
+  width: 360px;
+  border: 1px solid #284666;
+  border-radius: 8px;
+  background: rgba(4, 15, 31, 0.94);
+  padding: 12px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.3);
+}
+
+.watchdog-feed-head,
+.watchdog-feed-row div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.watchdog-feed-head h2,
+.watchdog-resolve-modal h3 {
+  margin: 0;
+  color: #f0f6ff;
+  font-size: 14px;
+}
+
+.watchdog-feed-row {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid rgba(44, 74, 108, 0.72);
+  padding: 10px 0 0;
+  margin-top: 10px;
+}
+
+.watchdog-feed-row p {
+  margin: 0;
+  color: #c8d7eb;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.watchdog-feed-row button,
+.watchdog-resolve-modal button {
+  border: 1px solid #24476d;
+  border-radius: 6px;
+  padding: 6px 9px;
+  color: #dcecff;
+  font-size: 12px;
+}
+
+.watchdog-resolve-modal {
+  position: fixed;
+  top: 130px;
+  right: 44px;
+  z-index: 40;
+  display: grid;
+  gap: 10px;
+  width: 320px;
+  border: 1px solid #31577d;
+  border-radius: 8px;
+  background: #071426;
+  padding: 14px;
+}
+
+.watchdog-resolve-modal textarea {
+  min-height: 84px;
+  border: 1px solid #24476d;
+  border-radius: 6px;
+  background: #030b17;
+  padding: 9px;
+  color: #edf5ff;
 }
 
 .governance-tabs {
@@ -2897,6 +2973,20 @@ body {
   min-width: 0;
 }
 
+.agents-title-block h1 {
+  margin: 0;
+  color: #f4f8ff;
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 650;
+}
+
+.agents-title-block p {
+  margin: 9px 0 0;
+  color: #aab7ca;
+  font-size: 14px;
+}
+
 .agents-detail-heading {
   display: flex;
   align-items: center;
@@ -3351,6 +3441,142 @@ body {
 .agents-table a {
   color: #2f9cff;
   text-decoration: none;
+}
+
+.agents-registry-table .agents-table-head,
+.agents-registry-table .agents-table-row {
+  grid-template-columns: 1fr .8fr 1.2fr .8fr .7fr 1fr .55fr;
+}
+
+.skills-table .agents-table-head,
+.skills-table .agents-table-row {
+  grid-template-columns: 1.2fr .75fr 1.25fr .7fr .6fr .55fr;
+}
+
+.agents-search input,
+.agents-modal input,
+.agents-modal select,
+.agents-modal textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #24476d;
+  border-radius: 6px;
+  background: rgba(3, 12, 26, 0.94);
+  padding: 9px 10px;
+  color: #edf5ff;
+  font-size: 13px;
+}
+
+.agents-search input {
+  width: 220px;
+}
+
+.agents-link-button {
+  border: 1px solid #235586;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #89c7ff;
+  font-size: 12px;
+}
+
+.agents-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.52);
+}
+
+.agents-modal,
+.agents-drawer {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #2b527a;
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(35, 130, 255, 0.14), transparent 34%),
+    #061426;
+  padding: 16px;
+  color: #dce9ff;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+}
+
+.agents-modal {
+  width: min(520px, calc(100vw - 42px));
+}
+
+.agents-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.agents-modal-head h2 {
+  margin: 0;
+  color: #f4f8ff;
+  font-size: 18px;
+}
+
+.agents-modal label {
+  display: grid;
+  gap: 6px;
+  color: #aab7ca;
+  font-size: 12px;
+}
+
+.agents-checkbox {
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+}
+
+.agents-checkbox input {
+  width: 16px;
+}
+
+.agents-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 45;
+  width: 420px;
+  height: 100vh;
+  overflow-y: auto;
+  border-radius: 0;
+}
+
+.agents-drawer h3 {
+  margin: 10px 0 0;
+  color: #f0f6ff;
+  font-size: 14px;
+}
+
+.agents-drawer-summary,
+.agents-drawer-row {
+  display: grid;
+  gap: 8px;
+}
+
+.agents-drawer-row {
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  border-top: 1px solid rgba(38, 70, 106, 0.72);
+  padding-top: 10px;
+  color: #d8e5f7;
+  font-size: 12px;
+}
+
+.agents-drawer-row code,
+.agents-code-block {
+  overflow: auto;
+  max-height: 150px;
+  border: 1px solid #213d5e;
+  border-radius: 6px;
+  background: #030b17;
+  padding: 8px;
+  color: #b9d7ff;
+  font-size: 11px;
 }
 
 .agents-name-cell {

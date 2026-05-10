@@ -175,6 +175,35 @@ def test_skill_api_endpoints(skill_db: tuple[sessionmaker[Session], str]) -> Non
         assert archived["status"] == "archived"
 
 
+def test_skill_archive_ws_broadcasts(skill_db: tuple[sessionmaker[Session], str]) -> None:
+    _sf, db_url = skill_db
+    from axiom.studio.server import create_app
+
+    app = create_app(db_url=db_url, enable_organizer=False)
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/internal/skills",
+            json={
+                "name": "archive_me",
+                "description": "Archive me",
+                "intent": "summarize",
+                "prompt_template": "Summarize {text}",
+                "llm_provider": "openai",
+                "llm_model": "gpt-4o-mini",
+            },
+        )
+        skill_id = created.json()["id"]
+        client.post(f"/api/internal/skills/{skill_id}/archive")
+        with client.websocket_connect("/ws/brain?since=0") as ws:
+            seen: set[str] = set()
+            for _ in range(3):
+                event = json.loads(ws.receive_text())
+                seen.add(event["type"])
+                if "skill_archived" in seen:
+                    break
+        assert "skill_archived" in seen
+
+
 def test_skill_ws_broadcasts(
     skill_db: tuple[sessionmaker[Session], str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
