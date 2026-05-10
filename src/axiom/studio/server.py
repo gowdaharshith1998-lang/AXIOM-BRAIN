@@ -65,6 +65,19 @@ from axiom.schema.models import (
     Receipt,
     Source,
 )
+from axiom.skills.registry import (
+    SkillNotFound,
+    activate_skill_with_session,
+    archive_skill_with_session,
+    ensure_skills_schema,
+    get_skill_with_session,
+    list_skill_runs_with_session,
+    list_skills_with_session,
+    register_skill_with_session,
+    skill_run_to_dict,
+    skill_to_dict,
+)
+from axiom.skills.runner import run_skill
 from axiom.sources.base import IngestEvent
 from axiom.sources.live_synthetic import LiveSyntheticSource
 from axiom.studio.sources import synthetic_sources_snapshot
@@ -85,6 +98,24 @@ class NavigationBatchIn(BaseModel):
 
 class AgentActionEventsIn(BaseModel):
     events: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class SkillIn(BaseModel):
+    name: str
+    description: str = ""
+    intent: str
+    prompt_template: str
+    llm_provider: str
+    llm_model: str
+    output_schema: dict[str, Any] = Field(default_factory=dict)
+    trigger_config: dict[str, Any] = Field(default_factory=dict)
+    trigger_type: str = "manual"
+    created_by: str = "external_mcp_client"
+
+
+class SkillRunIn(BaseModel):
+    input_payload: dict[str, Any] = Field(default_factory=dict)
+    agent_name: str = "external_mcp_client"
 
 
 def datetime_now_ms() -> int:
@@ -151,6 +182,11 @@ MCP_TOOL_NAMES = [
     "axiom_record_action",
     "axiom_check_policy",
     "axiom_request_human_approval",
+    "axiom_list_skills",
+    "axiom_get_skill",
+    "axiom_run_skill",
+    "axiom_register_skill",
+    "axiom_archive_skill",
 ]
 
 
@@ -172,6 +208,7 @@ def create_app(
     ensure_cluster_check_runs_schema(engine)
     ensure_snapshots_schema(engine)
     ensure_llm_provider_keys_schema(engine)
+    ensure_skills_schema(engine)
     session_local = sessionmaker(bind=engine, future=True)
     broadcaster = EventBroadcaster()
     cluster_health_monitor = ClusterHealthMonitor()
@@ -515,6 +552,112 @@ def create_app(
             "clusters": summary,
             "window_hours": 24,
         }
+
+    async def publish_skill_event(event_type: str, payload: dict[str, Any], persisted_id: str | None = None) -> None:
+        await broadcaster.publish(
+            {
+                "type": event_type,
+                "source_id": None,
+                "persisted_id": persisted_id,
+                "timestamp": datetime_now_ms(),
+                "payload": payload,
+            }
+        )
+
+    def _raise_skill_error(exc: Exception) -> None:
+        if isinstance(exc, SkillNotFound):
+            raise HTTPException(status_code=404, detail="skill not found") from exc
+        if isinstance(exc, ValueError):
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/internal/skills")
+    def get_internal_skills(
+        status: str | None = None,
+        intent: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            with session_local() as session:
+                rows = list_skills_with_session(session, status=status, intent=intent)
+        except Exception as exc:  # noqa: BLE001
+            _raise_skill_error(exc)
+        return {"skills": [skill_to_dict(row) for row in rows]}
+
+    @app.get("/api/internal/skills/{skill_id}")
+    def get_internal_skill(skill_id: str) -> dict[str, Any]:
+        try:
+            with session_local() as session:
+                row = get_skill_with_session(session, skill_id)
+                return skill_to_dict(row)
+        except Exception as exc:  # noqa: BLE001
+            _raise_skill_error(exc)
+
+    @app.get("/api/internal/skills/{skill_id}/runs")
+    def get_internal_skill_runs(skill_id: str) -> dict[str, Any]:
+        try:
+            with session_local() as session:
+                rows = list_skill_runs_with_session(session, skill_id, limit=50)
+        except Exception as exc:  # noqa: BLE001
+            _raise_skill_error(exc)
+        return {"runs": [skill_run_to_dict(row) for row in rows]}
+
+    @app.post("/api/internal/skills")
+    async def post_internal_skill(body: SkillIn = Body(...)) -> dict[str, Any]:
+        try:
+            with session_local() as session:
+                row = register_skill_with_session(
+                    session,
+                    name=body.name,
+                    description=body.description,
+                    intent=body.intent,
+                    prompt_template=body.prompt_template,
+                    llm_provider=body.llm_provider,
+                    llm_model=body.llm_model,
+                    output_schema=body.output_schema,
+                    trigger_config=body.trigger_config,
+                    trigger_type=body.trigger_type,
+                    created_by=body.created_by,
+                )
+                payload = skill_to_dict(row)
+        except Exception as exc:  # noqa: BLE001
+            _raise_skill_error(exc)
+        await publish_skill_event("skill_registered", {"skill": payload}, payload["id"])
+        return payload
+
+    @app.post("/api/internal/skills/{skill_id}/activate")
+    def post_internal_skill_activate(skill_id: str) -> dict[str, Any]:
+        try:
+            with session_local() as session:
+                return skill_to_dict(activate_skill_with_session(session, skill_id))
+        except Exception as exc:  # noqa: BLE001
+            _raise_skill_error(exc)
+
+    @app.post("/api/internal/skills/{skill_id}/run")
+    def post_internal_skill_run(skill_id: str, body: SkillRunIn = Body(...)) -> dict[str, Any]:
+        def publish_sync(event_type: str, payload: dict[str, Any]) -> None:
+            import anyio
+
+            anyio.from_thread.run(publish_skill_event, event_type, payload, skill_id)
+
+        try:
+            return run_skill(
+                skill_id,
+                body.input_payload,
+                body.agent_name,
+                session_factory=session_local,
+                event_callback=publish_sync,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _raise_skill_error(exc)
+
+    @app.post("/api/internal/skills/{skill_id}/archive")
+    def post_internal_skill_archive(skill_id: str) -> dict[str, Any]:
+        try:
+            with session_local() as session:
+                row = archive_skill_with_session(session, skill_id)
+                return skill_to_dict(row)
+        except Exception as exc:  # noqa: BLE001
+            _raise_skill_error(exc)
 
     @app.get("/api/entities")
     def get_entities() -> list[dict[str, Any]]:

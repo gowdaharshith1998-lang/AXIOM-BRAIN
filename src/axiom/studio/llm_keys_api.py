@@ -36,7 +36,10 @@ def _raise_error(exc: Exception) -> None:
     if isinstance(exc, VaultLocked):
         raise HTTPException(status_code=503, detail="vault key unavailable") from exc
     if isinstance(exc, VaultCorrupt):
-        raise HTTPException(status_code=500, detail="stored provider key cannot be decrypted") from exc
+        raise HTTPException(
+            status_code=500,
+            detail="stored provider key cannot be decrypted",
+        ) from exc
     if isinstance(exc, ValueError):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     raise HTTPException(status_code=500, detail=str(exc)) from exc

@@ -180,18 +180,46 @@ class Action(Base):
 
 class Skill(Base):
     __tablename__ = "skills"
+    __table_args__ = (
+        Index("ix_skills_status_intent", "status", "intent"),
+    )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    skill_id: Mapped[str] = mapped_column(String(256), index=True)
-    version: Mapped[int] = mapped_column(index=True)
-    scope: Mapped[str] = mapped_column(String(64), index=True)
-    skill_hash: Mapped[str] = mapped_column(String(128), index=True)
-    process_entity_id: Mapped[str] = mapped_column(
-        String(32), ForeignKey("entities.id"), index=True
+    name: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    description: Mapped[str] = mapped_column(String, nullable=False, default="")
+    intent: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    trigger_type: Mapped[str] = mapped_column(String(32), nullable=False, default="manual")
+    trigger_config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    prompt_template: Mapped[str] = mapped_column(String, nullable=False)
+    output_schema: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    llm_provider: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    llm_model: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", index=True)
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True
     )
-    emitted_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-    signed_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    markdown: Mapped[str] = mapped_column(String, default="")
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    total_runs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class SkillRun(Base):
+    __tablename__ = "skill_runs"
+    __table_args__ = (
+        Index("ix_skill_runs_skill_run_at", "skill_id", "run_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    skill_id: Mapped[str] = mapped_column(String(32), ForeignKey("skills.id"), nullable=False, index=True)
+    run_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    input_payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    output_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    receipt_id: Mapped[str | None] = mapped_column(String, ForeignKey("receipts.id"), nullable=True, index=True)
+    error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    agent_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
 
 
 Index("ix_edges_src_rel", Edge.source_id, Edge.relationship)

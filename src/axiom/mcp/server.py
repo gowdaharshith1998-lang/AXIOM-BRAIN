@@ -22,6 +22,16 @@ from axiom.govern.policy_evaluator import CORRECT_IMPORTANCE_THRESHOLD, DemoPoli
 from axiom.govern.receipts import ReceiptInsert, chain_insert_receipt, ensure_receipts_schema
 from axiom.schema.dto import EntityDTO
 from axiom.schema.models import Edge, Entity, Receipt
+from axiom.skills.registry import (
+    SkillNotFound,
+    archive_skill_with_session,
+    ensure_skills_schema,
+    get_skill_with_session,
+    list_skills_with_session,
+    register_skill_with_session,
+    skill_to_dict,
+)
+from axiom.skills.runner import run_skill
 from axiom.storage import crud
 from axiom.storage.db import init_engine
 from axiom.studio.sources import synthetic_sources_snapshot
@@ -138,6 +148,7 @@ class AxiomMCPService:
         if bind is not None:
             ensure_receipts_schema(bind)
             ensure_agent_registry_schema(bind)
+            ensure_skills_schema(bind)
         self._hydrate_action_history_from_receipts()
 
     @staticmethod
@@ -348,6 +359,100 @@ class AxiomMCPService:
             "action_id": item["action_id"],
             "demo": item["demo"],
         }
+
+    def list_skills(self, status: str | None = None, intent: str | None = None) -> dict[str, Any]:
+        with self._session_factory() as session:
+            rows = list_skills_with_session(session, status=status, intent=intent)
+        return {"skills": [skill_to_dict(row) for row in rows], "count": len(rows)}
+
+    def get_skill(self, skill_id: str) -> dict[str, Any]:
+        with self._session_factory() as session:
+            return {"skill": skill_to_dict(get_skill_with_session(session, skill_id))}
+
+    def register_skill(
+        self,
+        *,
+        name: str,
+        description: str,
+        intent: str,
+        prompt_template: str,
+        llm_provider: str,
+        llm_model: str,
+        output_schema: dict[str, Any] | None = None,
+        trigger_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        with self._session_factory() as session:
+            row = register_skill_with_session(
+                session,
+                name=name,
+                description=description,
+                intent=intent,
+                prompt_template=prompt_template,
+                llm_provider=llm_provider,
+                llm_model=llm_model,
+                output_schema=output_schema,
+                trigger_config=trigger_config,
+                created_by="external_mcp_client",
+            )
+            out = {"skill": skill_to_dict(row)}
+        if self._events is not None:
+            now_ms = int(datetime.utcnow().timestamp() * 1000)
+            self._events.emit_action_events(
+                events=[
+                    {
+                        "type": "skill_registered",
+                        "source_id": None,
+                        "persisted_id": out["skill"]["id"],
+                        "payload": out,
+                        "timestamp": now_ms,
+                    }
+                ]
+            )
+        return out
+
+    def run_skill(
+        self,
+        *,
+        skill_id: str,
+        input_payload: dict[str, Any],
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        self._cleanup_idempotency()
+        if idempotency_key:
+            existing = self._idempotency.get(("skill_runner", idempotency_key))
+            if existing is not None:
+                return existing[1]
+
+        def emit(event_type: str, payload: dict[str, Any]) -> None:
+            if self._events is None:
+                return
+            self._events.emit_action_events(
+                events=[
+                    {
+                        "type": event_type,
+                        "source_id": None,
+                        "persisted_id": skill_id,
+                        "payload": payload,
+                        "timestamp": int(datetime.utcnow().timestamp() * 1000),
+                    }
+                ]
+            )
+
+        out = run_skill(
+            skill_id,
+            input_payload,
+            "external_mcp_client",
+            session_factory=self._session_factory,
+            event_callback=emit,
+        )
+        if idempotency_key:
+            self._idempotency[("skill_runner", idempotency_key)] = (time.monotonic(), out)
+        return out
+
+    def archive_skill(self, skill_id: str) -> dict[str, Any]:
+        with self._session_factory() as session:
+            row = archive_skill_with_session(session, skill_id)
+            return {"skill": skill_to_dict(row)}
 
     def _refresh_cache_if_needed(self, session: Session) -> None:
         now = time.monotonic()
@@ -768,6 +873,67 @@ def build_mcp_server(
         try:
             return service.request_human_approval(action_id=action_id, reason=reason, agent_name=agent_name)
         except LookupError as exc:
+            raise ToolError(str(exc)) from exc
+
+    @mcp.tool(name="axiom_list_skills", description="List registered runnable skills")
+    def axiom_list_skills(status: str | None = None, intent: str | None = None) -> dict[str, Any]:
+        try:
+            return service.list_skills(status=status, intent=intent)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+
+    @mcp.tool(name="axiom_get_skill", description="Fetch a registered skill by id")
+    def axiom_get_skill(skill_id: str) -> dict[str, Any]:
+        try:
+            return service.get_skill(skill_id)
+        except SkillNotFound as exc:
+            raise ToolError(str(exc)) from exc
+
+    @mcp.tool(name="axiom_run_skill", description="Run a registered skill with an input payload")
+    def axiom_run_skill(
+        skill_id: str,
+        input_payload: dict[str, Any],
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return service.run_skill(
+                skill_id=skill_id,
+                input_payload=input_payload,
+                idempotency_key=idempotency_key,
+            )
+        except SkillNotFound as exc:
+            raise ToolError(str(exc)) from exc
+
+    @mcp.tool(name="axiom_register_skill", description="Register a draft skill")
+    def axiom_register_skill(
+        name: str,
+        description: str,
+        intent: str,
+        prompt_template: str,
+        llm_provider: str,
+        llm_model: str,
+        output_schema: dict[str, Any] | None = None,
+        trigger_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return service.register_skill(
+                name=name,
+                description=description,
+                intent=intent,
+                prompt_template=prompt_template,
+                llm_provider=llm_provider,
+                llm_model=llm_model,
+                output_schema=output_schema,
+                trigger_config=trigger_config,
+            )
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+
+    @mcp.tool(name="axiom_archive_skill", description="Archive a skill")
+    def axiom_archive_skill(skill_id: str) -> dict[str, Any]:
+        try:
+            return service.archive_skill(skill_id)
+        except SkillNotFound as exc:
             raise ToolError(str(exc)) from exc
 
     return mcp

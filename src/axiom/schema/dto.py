@@ -81,11 +81,18 @@ class SkillDTO(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    skill_id: str
-    version: int
-    scope: str
-    skill_hash: str
-    process_entity_id: str
-    emitted_at: datetime
-    signed_metadata: dict[str, Any]
-    markdown: str
+    name: str
+    description: str
+    intent: str
+    trigger_type: str
+    trigger_config: dict[str, Any]
+    prompt_template: str
+    output_schema: dict[str, Any]
+    llm_provider: str
+    llm_model: str
+    status: str
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+    last_run_at: datetime | None = None
+    total_runs: int

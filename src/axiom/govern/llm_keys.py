@@ -30,11 +30,11 @@ _LOG = logging.getLogger(__name__)
 _HTTP_TIMEOUT = 5.0
 
 
-class UnknownLLMProvider(ValueError):
+class UnknownLLMProvider(ValueError):  # noqa: N818
     pass
 
 
-class LLMProviderKeyNotFound(LookupError):
+class LLMProviderKeyNotFound(LookupError):  # noqa: N818
     pass
 
 
