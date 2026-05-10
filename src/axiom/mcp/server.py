@@ -6,6 +6,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
+from uuid import uuid4
 from typing import Any, Literal
 
 import httpx
@@ -15,6 +16,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.api.search import _score_title
+from axiom.govern.ledger import demo_receipt
+from axiom.govern.policy_evaluator import CORRECT_IMPORTANCE_THRESHOLD, DemoPolicyEvaluator
 from axiom.schema.dto import EntityDTO
 from axiom.schema.models import Edge, Entity
 from axiom.storage import crud
@@ -92,6 +95,18 @@ class NavigationEventForwarder:
         except Exception:
             return
 
+    def emit_action_events(self, *, events: list[dict[str, Any]]) -> None:
+        if not events:
+            return
+        try:
+            with httpx.Client(timeout=0.5) as client:
+                client.post(
+                    self._url.replace("/agent-navigation", "/agent-action-events"),
+                    json={"events": events},
+                )
+        except Exception:
+            return
+
 
 class AxiomMCPService:
     def __init__(
@@ -111,6 +126,184 @@ class AxiomMCPService:
             "CREATE VIRTUAL TABLE IF NOT EXISTS entities_fts USING fts5(entity_id UNINDEXED, searchable)"
         )
         self._sync_state = _SyncState()
+        self._policy = DemoPolicyEvaluator()
+        self._receipt_index = 0
+        self._idempotency_ttl_sec = 3600.0
+        self._idempotency: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+        self._action_history: dict[str, dict[str, Any]] = {}
+        self._approval_queue: list[dict[str, Any]] = []
+
+    @staticmethod
+    def _utcnow_iso() -> str:
+        return datetime.utcnow().isoformat()
+
+    def _cleanup_idempotency(self) -> None:
+        now = time.monotonic()
+        stale = [
+            key
+            for key, (created_at, _response) in self._idempotency.items()
+            if now - created_at >= self._idempotency_ttl_sec
+        ]
+        for key in stale:
+            del self._idempotency[key]
+
+    def _entity_context(self, entity_id: str | None) -> tuple[str, float | None, str | None]:
+        if entity_id is None:
+            return "external_mcp", None, None
+        with self._session_factory() as session:
+            self._refresh_cache_if_needed(session)
+        entity = self._cache.entities.get(entity_id)
+        if entity is None:
+            return "external_mcp", None, None
+        suggested_alternative: str | None = None
+        if entity.composite_importance >= CORRECT_IMPORTANCE_THRESHOLD:
+            neighbors = self._cache.outgoing.get(entity_id, []) + self._cache.incoming.get(entity_id, [])
+            ranked_neighbors = sorted(
+                (
+                    self._cache.entities[nid]
+                    for nid, _edge_id, _rel in neighbors
+                    if nid in self._cache.entities and nid != entity_id
+                ),
+                key=lambda item: (-item.composite_importance, item.id),
+            )
+            if ranked_neighbors:
+                suggested_alternative = ranked_neighbors[0].id
+        return entity.cluster_id or "external_mcp", entity.composite_importance, suggested_alternative
+
+    def check_policy(
+        self,
+        *,
+        agent_name: str,
+        intent: str,
+        target_entity_id: str | None,
+        proposed_action: str,
+    ) -> dict[str, Any]:
+        cluster_id, entity_importance, suggested_alternative = self._entity_context(target_entity_id)
+        decision = self._policy.evaluate(
+            cluster_id,
+            intent,
+            entity_importance=entity_importance,
+            suggested_alternative=suggested_alternative,
+        )
+        return {
+            "decision": decision.decision,
+            "reason": decision.reason,
+            "policy_id": decision.policy_id,
+            "guidance": decision.guidance or None,
+            "suggested_alternative": decision.suggested_alternative,
+            "demo": True,
+        }
+
+    def record_action(
+        self,
+        *,
+        agent_name: str,
+        intent: str,
+        target_entity_id: str | None,
+        proposed_action: str,
+        idempotency_key: str | None,
+    ) -> dict[str, Any]:
+        self._cleanup_idempotency()
+        if idempotency_key:
+            existing = self._idempotency.get((agent_name, idempotency_key))
+            if existing is not None:
+                return existing[1]
+
+        action_id = f"act_{uuid4().hex[:12]}"
+        evaluation = self.check_policy(
+            agent_name=agent_name,
+            intent=intent,
+            target_entity_id=target_entity_id,
+            proposed_action=proposed_action,
+        )
+        self._receipt_index += 1
+        receipt = demo_receipt(
+            action_id=action_id,
+            decision=str(evaluation["decision"]),
+            agent_name=agent_name,
+            index=self._receipt_index,
+        )
+        out = {
+            "action_id": action_id,
+            "decision": evaluation["decision"],
+            "receipt_id": receipt["receipt_id"],
+            "signing_scheme": receipt["signing_scheme"],
+            "reason": evaluation["reason"],
+            "policy_id": evaluation["policy_id"],
+            "guidance": evaluation["guidance"],
+            "suggested_alternative": evaluation["suggested_alternative"],
+            "demo": True,
+        }
+        self._action_history[action_id] = out
+        if idempotency_key:
+            self._idempotency[(agent_name, idempotency_key)] = (time.monotonic(), out)
+
+        if self._events is not None:
+            now_ms = int(datetime.utcnow().timestamp() * 1000)
+            base_payload: dict[str, Any] = {
+                "action_id": action_id,
+                "agent_name": agent_name,
+                "intent": intent,
+                "target_entity_id": target_entity_id,
+                "proposed_action": proposed_action,
+                "timestamp": self._utcnow_iso(),
+                "demo": True,
+            }
+            evaluated_payload = {
+                **base_payload,
+                "decision": out["decision"],
+                "reason": out["reason"],
+                "policy_id": out["policy_id"],
+                "guidance": out["guidance"],
+                "suggested_alternative": out["suggested_alternative"],
+            }
+            self._events.emit_action_events(
+                events=[
+                    {
+                        "type": "agent_action",
+                        "source_id": None,
+                        "persisted_id": action_id,
+                        "payload": base_payload,
+                        "timestamp": now_ms,
+                    },
+                    {
+                        "type": "agent_action_evaluated",
+                        "source_id": None,
+                        "persisted_id": action_id,
+                        "payload": evaluated_payload,
+                        "timestamp": now_ms,
+                    },
+                    {
+                        "type": "receipt_added",
+                        "source_id": None,
+                        "persisted_id": action_id,
+                        "payload": receipt,
+                        "timestamp": now_ms,
+                    },
+                ]
+            )
+        return out
+
+    def request_human_approval(self, *, action_id: str, reason: str, agent_name: str) -> dict[str, Any]:
+        if action_id not in self._action_history:
+            raise LookupError(f"unknown action id: {action_id}")
+        item = {
+            "queue_id": f"qa_{uuid4().hex[:12]}",
+            "status": "pending",
+            "created_at": self._utcnow_iso(),
+            "action_id": action_id,
+            "reason": reason,
+            "agent_name": agent_name,
+            "demo": False,
+        }
+        self._approval_queue.append(item)
+        return {
+            "queue_id": item["queue_id"],
+            "status": item["status"],
+            "created_at": item["created_at"],
+            "action_id": item["action_id"],
+            "demo": item["demo"],
+        }
 
     def _refresh_cache_if_needed(self, session: Session) -> None:
         now = time.monotonic()
@@ -492,6 +685,46 @@ def build_mcp_server(
     @mcp.tool(name="axiom_list_sources", description="List connected sources")
     def axiom_list_sources() -> dict[str, Any]:
         return service.list_sources()
+
+    @mcp.tool(name="axiom_record_action", description="Record an external agent action with demo policy evaluation")
+    def axiom_record_action(
+        agent_name: str,
+        intent: str,
+        target_entity_id: str | None = None,
+        proposed_action: str = "",
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        return service.record_action(
+            agent_name=agent_name,
+            intent=intent,
+            target_entity_id=target_entity_id,
+            proposed_action=proposed_action,
+            idempotency_key=idempotency_key,
+        )
+
+    @mcp.tool(name="axiom_check_policy", description="Pre-flight policy check for an action proposal")
+    def axiom_check_policy(
+        agent_name: str,
+        intent: str,
+        target_entity_id: str | None = None,
+        proposed_action: str = "",
+    ) -> dict[str, Any]:
+        return service.check_policy(
+            agent_name=agent_name,
+            intent=intent,
+            target_entity_id=target_entity_id,
+            proposed_action=proposed_action,
+        )
+
+    @mcp.tool(
+        name="axiom_request_human_approval",
+        description="Escalate an action for human approval via in-memory queue",
+    )
+    def axiom_request_human_approval(action_id: str, reason: str, agent_name: str) -> dict[str, Any]:
+        try:
+            return service.request_human_approval(action_id=action_id, reason=reason, agent_name=agent_name)
+        except LookupError as exc:
+            raise ToolError(str(exc)) from exc
 
     return mcp
 

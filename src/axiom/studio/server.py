@@ -44,6 +44,10 @@ class NavigationBatchIn(BaseModel):
     steps: list[NavigationStepIn] = Field(default_factory=list)
 
 
+class AgentActionEventsIn(BaseModel):
+    events: list[dict[str, Any]] = Field(default_factory=list)
+
+
 def datetime_now_ms() -> int:
     return int(datetime.utcnow().timestamp() * 1000)
 
@@ -285,6 +289,22 @@ def create_app(
                         "timestamp": now_ms,
                         "demo": False,
                     },
+                }
+            )
+            emitted += 1
+        return {"emitted": emitted}
+
+    @app.post("/api/internal/agent-action-events")
+    async def publish_agent_action_events(batch: AgentActionEventsIn = Body(...)) -> dict[str, int]:
+        emitted = 0
+        for event in batch.events[:50]:
+            await broadcaster.publish(
+                {
+                    "type": str(event.get("type", "agent_action")),
+                    "source_id": event.get("source_id"),
+                    "persisted_id": event.get("persisted_id"),
+                    "timestamp": int(event.get("timestamp", datetime_now_ms())),
+                    "payload": event.get("payload", {}),
                 }
             )
             emitted += 1
