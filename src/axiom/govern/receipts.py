@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import Engine, desc, inspect, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from axiom.govern.agent_registry import upsert_agent_observation
 from axiom.schema.models import Receipt
 
 RECEIPT_COLUMNS = {
@@ -165,6 +166,15 @@ def chain_insert_receipt(
             )
             receipt.this_hash = compute_receipt_hash(receipt)
             session.add(receipt)
+            upsert_agent_observation(
+                session,
+                agent_name=payload.agent_name,
+                decision=payload.decision,
+                intent=payload.intent,
+                action_id=payload.action_id,
+                observed_at=created_at,
+                demo_flag=payload.demo_flag,
+            )
             session.flush()
             session.expunge(receipt)
             conn.commit() if transaction is None else transaction.commit()

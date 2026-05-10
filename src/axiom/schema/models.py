@@ -119,6 +119,22 @@ class MetricsSnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class AgentRegistry(Base):
+    __tablename__ = "agent_registry"
+
+    agent_name: Mapped[str] = mapped_column(String(128), primary_key=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    last_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    total_actions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    allow_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    correct_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    deny_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_intent: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_action_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    agent_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    demo_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
 class Action(Base):
     __tablename__ = "actions"
 

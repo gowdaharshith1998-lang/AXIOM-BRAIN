@@ -16,6 +16,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.api.search import _score_title
+from axiom.govern.agent_registry import ensure_agent_registry_schema
 from axiom.govern.ledger import demo_receipt
 from axiom.govern.policy_evaluator import CORRECT_IMPORTANCE_THRESHOLD, DemoPolicyEvaluator
 from axiom.govern.receipts import ReceiptInsert, chain_insert_receipt, ensure_receipts_schema
@@ -136,6 +137,7 @@ class AxiomMCPService:
         bind = session_factory.kw.get("bind")
         if bind is not None:
             ensure_receipts_schema(bind)
+            ensure_agent_registry_schema(bind)
         self._hydrate_action_history_from_receipts()
 
     @staticmethod

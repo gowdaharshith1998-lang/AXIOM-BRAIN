@@ -5,7 +5,7 @@ import json
 import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -17,6 +17,13 @@ from sqlalchemy.orm import sessionmaker
 
 from axiom.api.search import EntitySearchResult, search_entities
 from axiom.govern.agent_actions import emit_demo_agent_actions
+from axiom.govern.agent_registry import (
+    AgentType,
+    agent_registry_row,
+    backfill_agent_registry_from_receipts,
+    ensure_agent_registry_schema,
+    get_agents,
+)
 from axiom.govern.receipts import (
     ensure_receipts_schema,
     receipt_to_dict,
@@ -38,7 +45,15 @@ from axiom.organize.cluster_health import (
     health_status_for_score,
 )
 from axiom.schema.dto import EdgeDTO, EntityDTO
-from axiom.schema.models import Action, Edge, Entity, MetricsSnapshot, Receipt, Source
+from axiom.schema.models import (
+    Action,
+    AgentRegistry,
+    Edge,
+    Entity,
+    MetricsSnapshot,
+    Receipt,
+    Source,
+)
 from axiom.sources.base import IngestEvent
 from axiom.sources.live_synthetic import LiveSyntheticSource
 from axiom.studio.sources import synthetic_sources_snapshot
@@ -141,6 +156,7 @@ def create_app(
 ) -> FastAPI:
     engine = create_engine(db_url, future=True)
     ensure_receipts_schema(engine)
+    ensure_agent_registry_schema(engine)
     ensure_snapshots_schema(engine)
     session_local = sessionmaker(bind=engine, future=True)
     broadcaster = EventBroadcaster()
@@ -225,6 +241,12 @@ def create_app(
         app.state.cluster_health_task = health_task
         app.state.agent_action_task = agent_action_task
         app.state.warden_task = warden_task
+
+        try:
+            with session_local() as session:
+                backfill_agent_registry_from_receipts(session)
+        except Exception:  # noqa: BLE001
+            pass
 
         snapshot_task: asyncio.Task[None] | None = None
         if snapshots_enabled:
@@ -356,6 +378,19 @@ def create_app(
             pass
         return {"settings": existing}
 
+    @app.get("/api/internal/agent-registry")
+    def get_agent_registry(
+        days: int = Query(30, ge=1, le=365),
+        type: AgentType | None = Query(None),  # noqa: A002
+    ) -> dict[str, Any]:
+        with session_local() as session:
+            rows = get_agents(session, days=days, agent_type=type)
+        return {
+            "agents": [agent_registry_row(row) for row in rows],
+            "range_days": days,
+            "type": type,
+        }
+
     @app.get("/api/internal/mcp-stats")
     def get_mcp_stats() -> dict[str, Any]:
         now_ms = datetime_now_ms()
@@ -363,6 +398,16 @@ def create_app(
         raw_events = list(getattr(app.state, "mcp_action_events", []))
         events = [event for event in raw_events if int(event.get("timestamp", 0)) >= one_hour_ago]
         active_agents = sorted({str(event.get("agent_name", "")).strip() for event in events if event.get("agent_name")})
+        one_hour_ago_dt = datetime.utcnow() - timedelta(hours=1)
+        with session_local() as session:
+            observed_agents = [
+                row.agent_name
+                for row in session.execute(
+                    select(AgentRegistry)
+                    .where(AgentRegistry.last_seen >= one_hour_ago_dt)
+                    .order_by(desc(AgentRegistry.last_seen), AgentRegistry.agent_name)
+                ).scalars()
+            ]
         return {
             "tools": [
                 {
@@ -374,6 +419,7 @@ def create_app(
             ],
             "connected_clients": len(active_agents),
             "active_agents": active_agents,
+            "observed_agents": observed_agents,
             "last_tool_call": max((event.get("timestamp") for event in raw_events), default=None),
             "recent_actions": sorted(events, key=lambda item: int(item.get("timestamp", 0)), reverse=True)[:20],
         }
