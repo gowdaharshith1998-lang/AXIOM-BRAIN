@@ -24,6 +24,15 @@ from axiom.govern.agent_registry import (
     ensure_agent_registry_schema,
     get_agents,
 )
+from axiom.govern.cluster_checks import (
+    cleanup_cluster_check_runs,
+    cluster_check_run_row,
+    ensure_cluster_check_runs_schema,
+    get_cluster_check_runs,
+    record_cluster_check_runs,
+    retention_limit_from_env,
+    summarize_cluster_check_runs,
+)
 from axiom.govern.receipts import (
     ensure_receipts_schema,
     receipt_to_dict,
@@ -48,6 +57,7 @@ from axiom.schema.dto import EdgeDTO, EntityDTO
 from axiom.schema.models import (
     Action,
     AgentRegistry,
+    ClusterCheckRun,
     Edge,
     Entity,
     MetricsSnapshot,
@@ -157,6 +167,7 @@ def create_app(
     engine = create_engine(db_url, future=True)
     ensure_receipts_schema(engine)
     ensure_agent_registry_schema(engine)
+    ensure_cluster_check_runs_schema(engine)
     ensure_snapshots_schema(engine)
     session_local = sessionmaker(bind=engine, future=True)
     broadcaster = EventBroadcaster()
@@ -178,6 +189,7 @@ def create_app(
         app.state.agent_action_task = None
         app.state.warden_task = None
         app.state.snapshot_task = None
+        app.state.cluster_check_retention_task = None
         app.state.organizer = None
         app.state.events_per_min = 0.0
         app.state.studio_settings = {}
@@ -199,6 +211,7 @@ def create_app(
             while True:
                 with session_local() as session:
                     snapshot = cluster_health_monitor.snapshot(session)
+                    record_cluster_check_runs(session, snapshot)
                 for cluster_id, item in snapshot.items():
                     status = item.status.value
                     if previous_health.get(cluster_id) not in {None, status}:
@@ -229,7 +242,17 @@ def create_app(
                 except Exception:  # noqa: BLE001
                     pass
 
+        async def cluster_check_retention_loop() -> None:
+            while True:
+                try:
+                    with session_local() as session:
+                        cleanup_cluster_check_runs(session, retention_limit_from_env())
+                except Exception:  # noqa: BLE001
+                    pass
+                await asyncio.sleep(21_600)
+
         health_task = asyncio.create_task(cluster_health_loop())
+        cluster_check_retention_task = asyncio.create_task(cluster_check_retention_loop())
         agent_action_task = (
             asyncio.create_task(
                 emit_demo_agent_actions(broadcaster, session_factory=session_local)
@@ -239,6 +262,7 @@ def create_app(
         )
         warden_task = asyncio.create_task(emit_demo_warden_insights(broadcaster, session_local))
         app.state.cluster_health_task = health_task
+        app.state.cluster_check_retention_task = cluster_check_retention_task
         app.state.agent_action_task = agent_action_task
         app.state.warden_task = warden_task
 
@@ -291,6 +315,7 @@ def create_app(
                 health_task.cancel()
                 if agent_action_task is not None:
                     agent_action_task.cancel()
+                cluster_check_retention_task.cancel()
                 warden_task.cancel()
                 if snapshot_task is not None:
                     snapshot_task.cancel()
@@ -299,6 +324,8 @@ def create_app(
                 if agent_action_task is not None:
                     with suppress(asyncio.CancelledError):
                         await agent_action_task
+                with suppress(asyncio.CancelledError):
+                    await cluster_check_retention_task
                 with suppress(asyncio.CancelledError):
                     await warden_task
                 if snapshot_task is not None:
@@ -330,6 +357,7 @@ def create_app(
                     health_task.cancel()
                     if agent_action_task is not None:
                         agent_action_task.cancel()
+                    cluster_check_retention_task.cancel()
                     warden_task.cancel()
                     if snapshot_task is not None:
                         snapshot_task.cancel()
@@ -338,6 +366,8 @@ def create_app(
                     if agent_action_task is not None:
                         with suppress(asyncio.CancelledError):
                             await agent_action_task
+                    with suppress(asyncio.CancelledError):
+                        await cluster_check_retention_task
                     with suppress(asyncio.CancelledError):
                         await warden_task
                     if snapshot_task is not None:
@@ -450,6 +480,36 @@ def create_app(
                 for row in rows
             ],
             "range_days": days,
+        }
+
+    @app.get("/api/internal/cluster-checks")
+    def get_internal_cluster_checks(
+        cluster: str | None = None,
+        severity: str | None = None,
+        limit: int = Query(200, ge=1, le=1000),
+    ) -> dict[str, Any]:
+        with session_local() as session:
+            rows = get_cluster_check_runs(
+                session,
+                cluster=cluster,
+                severity=severity,
+                limit=limit,
+            )
+            total = int(session.execute(select(func.count(ClusterCheckRun.id))).scalar_one())
+        return {
+            "checks": [cluster_check_run_row(row) for row in rows],
+            "total_count": total,
+            "cluster": cluster,
+            "severity": severity,
+        }
+
+    @app.get("/api/internal/cluster-checks/summary")
+    def get_internal_cluster_checks_summary() -> dict[str, Any]:
+        with session_local() as session:
+            summary = summarize_cluster_check_runs(session)
+        return {
+            "clusters": summary,
+            "window_hours": 24,
         }
 
     @app.get("/api/entities")

@@ -135,6 +135,24 @@ class AgentRegistry(Base):
     demo_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
+class ClusterCheckRun(Base):
+    __tablename__ = "cluster_check_runs"
+    __table_args__ = (
+        Index("ix_cluster_check_runs_cluster_run_at", "cluster_id", "run_at"),
+        Index("ix_cluster_check_runs_severity_run_at", "severity", "run_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    run_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    cluster_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    check_type: Mapped[str] = mapped_column(String(64), nullable=False, default="cluster_health")
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    entity_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_ingest_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    owner: Mapped[str] = mapped_column(String(64), nullable=False, default="organizer")
+    reason: Mapped[str] = mapped_column(String, nullable=False)
+
+
 class Action(Base):
     __tablename__ = "actions"
 
