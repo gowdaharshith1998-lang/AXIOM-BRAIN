@@ -41,7 +41,7 @@ export async function saveStudioSettings(payload: StudioSettings): Promise<Studi
 }
 
 export async function getMcpStats(): Promise<MCPStats> {
-  return request<MCPStats>("http://127.0.0.1:8000/api/internal/mcp-stats");
+  return request<MCPStats>("/api/internal/mcp-stats");
 }
 
 export async function getHealth(): Promise<{ status: string }> {

@@ -12,7 +12,7 @@ from typing import Any, cast
 from fastapi import Body, FastAPI, Query, WebSocket
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, desc, select
 from sqlalchemy.orm import sessionmaker
 
 from axiom.api.search import EntitySearchResult, search_entities
@@ -27,7 +27,7 @@ from axiom.organize.cluster_health import (
     health_status_for_score,
 )
 from axiom.schema.dto import EdgeDTO, EntityDTO
-from axiom.schema.models import Edge, Entity
+from axiom.schema.models import Action, Edge, Entity, Receipt, Source
 from axiom.sources.base import IngestEvent
 from axiom.sources.live_synthetic import LiveSyntheticSource
 from axiom.studio.sources import synthetic_sources_snapshot
@@ -51,6 +51,51 @@ class AgentActionEventsIn(BaseModel):
 
 def datetime_now_ms() -> int:
     return int(datetime.utcnow().timestamp() * 1000)
+
+
+def _iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _text(value: Any) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _entity_name(entity: Entity) -> str:
+    data = entity.data or {}
+    return (
+        _text(data.get("title"))
+        or _text(data.get("name"))
+        or _text(data.get("label"))
+        or entity.id
+    )
+
+
+def _is_policy_entity(entity: Entity) -> bool:
+    data = entity.data or {}
+    haystack = " ".join(
+        str(value).lower()
+        for value in (
+            entity.type,
+            entity.cluster_id,
+            data.get("title"),
+            data.get("name"),
+            data.get("category"),
+        )
+        if value is not None
+    )
+    return entity.type.lower() in {"policy", "governance"} or (entity.cluster_id or "").lower() == "governance" or "policy" in haystack
+
+
+def _receipt_key(receipt: Receipt) -> str:
+    payload = receipt.payload or {}
+    return str(payload.get("receipt_id") or receipt.id)
+
+
+def _receipt_signed(receipt: Receipt) -> bool:
+    return bool(receipt.signature_ed25519_b64 or receipt.signature_mldsa_b64)
 
 SETTINGS_FILE = Path("axiom_studio_settings.json")
 MCP_TOOL_NAMES = [
@@ -321,6 +366,199 @@ def create_app(
         with session_local() as session:
             rows = session.execute(select(Edge)).scalars().all()
             return [EdgeDTO.model_validate(r).model_dump(mode="json") for r in rows]
+
+    @app.get("/api/governance")
+    def get_governance() -> dict[str, Any]:
+        now_ms = datetime_now_ms()
+        with session_local() as session:
+            entities = session.execute(select(Entity)).scalars().all()
+            all_edges = session.execute(select(Edge)).scalars().all()
+            edges = sorted(all_edges, key=lambda item: item.created_at, reverse=True)[:50]
+            sources = session.execute(select(Source).order_by(desc(Source.updated_at))).scalars().all()
+            receipts = session.execute(select(Receipt).order_by(desc(Receipt.created_at)).limit(50)).scalars().all()
+            all_receipts = session.execute(select(Receipt)).scalars().all()
+            actions = session.execute(select(Action).order_by(desc(Action.created_at)).limit(50)).scalars().all()
+            all_actions = session.execute(select(Action)).scalars().all()
+            cluster_snapshot = cluster_health_monitor.snapshot(session)
+
+        raw_mcp_events = list(getattr(app.state, "mcp_action_events", []))
+        mcp_events = sorted(
+            raw_mcp_events,
+            key=lambda item: int(item.get("timestamp", 0)),
+            reverse=True,
+        )[:50]
+
+        policy_entities = sorted(
+            [entity for entity in entities if _is_policy_entity(entity)],
+            key=lambda entity: entity.updated_at,
+            reverse=True,
+        )
+        policies = [
+            {
+                "id": entity.id,
+                "name": _entity_name(entity),
+                "type": entity.type,
+                "scope": _text((entity.data or {}).get("scope")) or entity.cluster_id or entity.type,
+                "owner": _text((entity.data or {}).get("owner")),
+                "team": _text((entity.data or {}).get("team")),
+                "mode": _text((entity.data or {}).get("mode")),
+                "status": _text((entity.data or {}).get("status")) or "recorded",
+                "updated_at": _iso(entity.updated_at),
+                "source_id": entity.source_id,
+            }
+            for entity in policy_entities[:50]
+        ]
+
+        checks = [
+            {
+                "id": item.cluster_id,
+                "entity": item.cluster_id,
+                "type": "cluster_health",
+                "severity": item.status.value,
+                "result": item.status.value,
+                "last_run": _iso(item.last_ingest_at),
+                "owner": "organizer",
+                "ingest_rate_per_min": item.ingest_rate_per_min,
+                "total_entities": item.total_entities,
+            }
+            for item in cluster_snapshot.values()
+        ]
+
+        receipt_rows = [
+            {
+                "id": receipt.id,
+                "receipt_id": _receipt_key(receipt),
+                "receipt_type": receipt.receipt_type,
+                "action_id": _text((receipt.payload or {}).get("action_id")),
+                "decision": _text((receipt.payload or {}).get("decision")),
+                "agent_name": _text((receipt.payload or {}).get("agent_name")),
+                "signing_scheme": _text((receipt.payload or {}).get("signing_scheme")),
+                "merkle_root": _text((receipt.payload or {}).get("merkle_root")),
+                "signed": _receipt_signed(receipt),
+                "created_at": _iso(receipt.created_at),
+            }
+            for receipt in receipts
+        ]
+
+        audit_events: list[dict[str, Any]] = [
+            {
+                "id": action.id,
+                "timestamp": _iso(action.created_at),
+                "actor": action.agent_id,
+                "action": action.tool,
+                "entity": _text((action.params or {}).get("target_entity_id")) or action.task_id,
+                "category": "persisted_action",
+                "result": action.decision,
+                "source": "actions",
+            }
+            for action in actions
+        ]
+        audit_events.extend(
+            {
+                "id": str(event.get("action_id") or event.get("timestamp") or index),
+                "timestamp_ms": int(event.get("timestamp", 0)),
+                "actor": _text(event.get("agent_name")),
+                "action": _text(event.get("proposed_action")) or _text(event.get("intent")),
+                "entity": _text(event.get("action_id")),
+                "category": "mcp_event",
+                "result": _text(event.get("decision")) or _text(event.get("status")),
+                "source": "mcp_event_buffer",
+            }
+            for index, event in enumerate(mcp_events)
+        )
+        audit_events.sort(
+            key=lambda item: (
+                int(item["timestamp_ms"])
+                if item.get("timestamp_ms") is not None
+                else int(datetime.fromisoformat(item["timestamp"]).timestamp() * 1000)
+                if item.get("timestamp")
+                else 0
+            ),
+            reverse=True,
+        )
+
+        signed_receipts = sum(1 for receipt in all_receipts if _receipt_signed(receipt))
+        healthy_checks = sum(1 for item in cluster_snapshot.values() if item.status.value == "healthy")
+        degraded_checks = sum(1 for item in cluster_snapshot.values() if item.status.value == "degraded")
+        critical_checks = sum(1 for item in cluster_snapshot.values() if item.status.value == "critical")
+        denied_actions = sum(1 for action in all_actions if action.decision == "deny") + sum(
+            1 for event in raw_mcp_events if event.get("decision") == "deny" or event.get("status") == "deny"
+        )
+        current_merkle_root = next(
+            (
+                str(receipt.payload.get("merkle_root"))
+                for receipt in receipts
+                if isinstance(receipt.payload, dict) and receipt.payload.get("merkle_root")
+            ),
+            None,
+        )
+        active_policy_count = sum(
+            1
+            for entity in policy_entities
+            if str((entity.data or {}).get("status") or "recorded").lower()
+            not in {"archived", "inactive"}
+        )
+
+        return {
+            "generated_at": datetime.utcnow().isoformat(),
+            "source": "database",
+            "summary": {
+                "policy_count": len(policy_entities),
+                "active_policy_count": active_policy_count,
+                "check_count": len(checks),
+                "healthy_check_count": healthy_checks,
+                "degraded_check_count": degraded_checks,
+                "critical_check_count": critical_checks,
+                "receipt_count": len(all_receipts),
+                "signed_receipt_count": signed_receipts,
+                "action_count": len(all_actions) + len(raw_mcp_events),
+                "denied_action_count": denied_actions,
+                "current_merkle_root": current_merkle_root,
+                "graph_entity_count": len(entities),
+                "graph_edge_count": len(all_edges),
+                "source_count": len(sources),
+                "latest_event_at": max((event.get("timestamp") for event in raw_mcp_events), default=None),
+                "current_seq": broadcaster.current_seq,
+                "generated_at_ms": now_ms,
+            },
+            "policies": policies,
+            "checks": checks,
+            "receipts": receipt_rows,
+            "audit_events": audit_events[:50],
+            "sources": [
+                {
+                    "id": source.id,
+                    "source_type": source.source_type,
+                    "display_name": source.display_name,
+                    "connected": source.connected,
+                    "created_at": _iso(source.created_at),
+                    "updated_at": _iso(source.updated_at),
+                }
+                for source in sources
+            ],
+            "lineage": {
+                "entities": [
+                    {
+                        "id": entity.id,
+                        "name": _entity_name(entity),
+                        "type": entity.type,
+                        "cluster_id": entity.cluster_id,
+                        "updated_at": _iso(entity.updated_at),
+                    }
+                    for entity in sorted(entities, key=lambda item: item.updated_at, reverse=True)[:25]
+                ],
+                "edges": [
+                    {
+                        "id": edge.id,
+                        "source_id": edge.source_id,
+                        "target_id": edge.target_id,
+                        "relationship": edge.relationship,
+                        "created_at": _iso(edge.created_at),
+                    }
+                    for edge in edges
+                ],
+            },
+        }
 
     @app.websocket("/ws/brain")
     async def ws_brain(ws: WebSocket, since: int = Query(0)) -> None:
