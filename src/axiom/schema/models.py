@@ -153,6 +153,18 @@ class ClusterCheckRun(Base):
     reason: Mapped[str] = mapped_column(String, nullable=False)
 
 
+class LLMProviderKey(Base):
+    __tablename__ = "llm_provider_keys"
+
+    provider: Mapped[str] = mapped_column(String(32), primary_key=True)
+    encrypted_key: Mapped[str] = mapped_column(String(8192), nullable=False)
+    key_fingerprint: Mapped[str] = mapped_column(String(4), nullable=False)
+    connected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_test_status: Mapped[str] = mapped_column(String(16), nullable=False, default="untested")
+    demo_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
 class Action(Base):
     __tablename__ = "actions"
 

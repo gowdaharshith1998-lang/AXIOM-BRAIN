@@ -17,6 +17,7 @@ axiom.db
 axiom.db-shm
 axiom.db-wal
 axiom_studio_settings.json
+.axiom_vault_key
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm

@@ -33,6 +33,7 @@ from axiom.govern.cluster_checks import (
     retention_limit_from_env,
     summarize_cluster_check_runs,
 )
+from axiom.govern.llm_keys import ensure_llm_provider_keys_schema
 from axiom.govern.receipts import (
     ensure_receipts_schema,
     receipt_to_dict,
@@ -67,6 +68,7 @@ from axiom.schema.models import (
 from axiom.sources.base import IngestEvent
 from axiom.sources.live_synthetic import LiveSyntheticSource
 from axiom.studio.sources import synthetic_sources_snapshot
+from axiom.studio.llm_keys_api import router as llm_keys_router
 from axiom.studio.vault_api import router as vault_router
 
 
@@ -169,6 +171,7 @@ def create_app(
     ensure_agent_registry_schema(engine)
     ensure_cluster_check_runs_schema(engine)
     ensure_snapshots_schema(engine)
+    ensure_llm_provider_keys_schema(engine)
     session_local = sessionmaker(bind=engine, future=True)
     broadcaster = EventBroadcaster()
     cluster_health_monitor = ClusterHealthMonitor()
@@ -383,6 +386,7 @@ def create_app(
         allow_headers=["*"],
     )
     app.include_router(vault_router)
+    app.include_router(llm_keys_router)
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
