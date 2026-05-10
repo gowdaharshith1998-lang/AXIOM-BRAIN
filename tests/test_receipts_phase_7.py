@@ -4,13 +4,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine, inspect, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.govern.receipts import (
     ReceiptInsert,
     chain_insert_receipt,
     compute_receipt_hash,
+    ensure_receipts_schema,
     verify_receipt_chain,
 )
 from axiom.mcp.server import AxiomMCPService
@@ -70,6 +71,32 @@ def test_receipts_chain_first_row_has_null_prev_hash(tmp_path: Path) -> None:
     assert inserted is True
     assert receipt.prev_hash is None
     assert receipt.this_hash == compute_receipt_hash(receipt)
+
+
+def test_receipts_schema_upgrade_drops_legacy_indexes(tmp_path: Path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy_receipts.db'}", future=True)
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE receipts (
+                id VARCHAR(32) NOT NULL PRIMARY KEY,
+                receipt_type VARCHAR(64) NOT NULL,
+                merkle_leaf_index INTEGER NOT NULL,
+                created_at DATETIME NOT NULL,
+                payload JSON NOT NULL
+            )
+            """
+        )
+        conn.exec_driver_sql("CREATE INDEX ix_receipts_created_at ON receipts (created_at)")
+        conn.exec_driver_sql(
+            "CREATE INDEX ix_receipts_merkle_leaf_index ON receipts (merkle_leaf_index)"
+        )
+        conn.exec_driver_sql("CREATE INDEX ix_receipts_receipt_type ON receipts (receipt_type)")
+
+    ensure_receipts_schema(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("receipts")}
+    assert {"action_id", "agent_name", "decision", "this_hash"}.issubset(columns)
 
 
 def test_receipts_chain_subsequent_rows_link_to_previous(tmp_path: Path) -> None:

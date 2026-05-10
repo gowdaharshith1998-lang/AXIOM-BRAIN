@@ -22,6 +22,12 @@ from axiom.govern.receipts import (
     receipt_to_dict,
     verify_receipt_chain,
 )
+from axiom.govern.snapshots import (
+    backfill_snapshots_from_receipts,
+    ensure_snapshots_schema,
+    get_snapshots,
+    take_snapshot,
+)
 from axiom.govern.warden import emit_demo_warden_insights
 from axiom.ingest.broadcaster import EventBroadcaster
 from axiom.ingest.pipeline import IngestPipeline
@@ -32,7 +38,7 @@ from axiom.organize.cluster_health import (
     health_status_for_score,
 )
 from axiom.schema.dto import EdgeDTO, EntityDTO
-from axiom.schema.models import Action, Edge, Entity, Receipt, Source
+from axiom.schema.models import Action, Edge, Entity, MetricsSnapshot, Receipt, Source
 from axiom.sources.base import IngestEvent
 from axiom.sources.live_synthetic import LiveSyntheticSource
 from axiom.studio.sources import synthetic_sources_snapshot
@@ -121,6 +127,10 @@ MCP_TOOL_NAMES = [
 ]
 
 
+def _snapshots_enabled() -> bool:
+    return os.environ.get("AXIOM_SNAPSHOT_ENABLED", "1").lower() not in {"0", "false", "no", "off"}
+
+
 def create_app(
     *,
     db_url: str = "sqlite:///./axiom.db",
@@ -131,6 +141,7 @@ def create_app(
 ) -> FastAPI:
     engine = create_engine(db_url, future=True)
     ensure_receipts_schema(engine)
+    ensure_snapshots_schema(engine)
     session_local = sessionmaker(bind=engine, future=True)
     broadcaster = EventBroadcaster()
     cluster_health_monitor = ClusterHealthMonitor()
@@ -150,6 +161,7 @@ def create_app(
         app.state.cluster_health_task = None
         app.state.agent_action_task = None
         app.state.warden_task = None
+        app.state.snapshot_task = None
         app.state.organizer = None
         app.state.events_per_min = 0.0
         app.state.studio_settings = {}
@@ -164,6 +176,7 @@ def create_app(
         previous_health: dict[str, str] = {}
         last_seq = broadcaster.current_seq
         last_seq_at = asyncio.get_running_loop().time()
+        snapshots_enabled = _snapshots_enabled()
 
         async def cluster_health_loop() -> None:
             nonlocal last_seq, last_seq_at
@@ -191,6 +204,15 @@ def create_app(
                 last_seq_at = now
                 await asyncio.sleep(15)
 
+        async def snapshot_loop() -> None:
+            while True:
+                await asyncio.sleep(3600)
+                try:
+                    with session_local() as session:
+                        take_snapshot(session)
+                except Exception:  # noqa: BLE001
+                    pass
+
         health_task = asyncio.create_task(cluster_health_loop())
         agent_action_task = (
             asyncio.create_task(
@@ -203,6 +225,26 @@ def create_app(
         app.state.cluster_health_task = health_task
         app.state.agent_action_task = agent_action_task
         app.state.warden_task = warden_task
+
+        snapshot_task: asyncio.Task[None] | None = None
+        if snapshots_enabled:
+            try:
+                with session_local() as session:
+                    snapshot_count = int(
+                        session.execute(select(func.count(MetricsSnapshot.id))).scalar_one()
+                    )
+                    receipt_count = int(
+                        session.execute(select(func.count(Receipt.id))).scalar_one()
+                    )
+                    if snapshot_count == 0 and receipt_count > 0:
+                        backfill_snapshots_from_receipts(session)
+                    today_id = datetime.utcnow().date().isoformat()
+                    if session.get(MetricsSnapshot, today_id) is None:
+                        take_snapshot(session)
+            except Exception:  # noqa: BLE001
+                pass
+            snapshot_task = asyncio.create_task(snapshot_loop())
+            app.state.snapshot_task = snapshot_task
 
         organizer: OrganizerAgent | None = None
         if enable_organizer:
@@ -228,6 +270,8 @@ def create_app(
                 if agent_action_task is not None:
                     agent_action_task.cancel()
                 warden_task.cancel()
+                if snapshot_task is not None:
+                    snapshot_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await health_task
                 if agent_action_task is not None:
@@ -235,6 +279,9 @@ def create_app(
                         await agent_action_task
                 with suppress(asyncio.CancelledError):
                     await warden_task
+                if snapshot_task is not None:
+                    with suppress(asyncio.CancelledError):
+                        await snapshot_task
                 engine.dispose()
             return
 
@@ -262,6 +309,8 @@ def create_app(
                     if agent_action_task is not None:
                         agent_action_task.cancel()
                     warden_task.cancel()
+                    if snapshot_task is not None:
+                        snapshot_task.cancel()
                     with suppress(asyncio.CancelledError):
                         await health_task
                     if agent_action_task is not None:
@@ -269,6 +318,9 @@ def create_app(
                             await agent_action_task
                     with suppress(asyncio.CancelledError):
                         await warden_task
+                    if snapshot_task is not None:
+                        with suppress(asyncio.CancelledError):
+                            await snapshot_task
                     engine.dispose()
 
     app = FastAPI(title="AXIOM Studio API", lifespan=lifespan)
@@ -324,6 +376,34 @@ def create_app(
             "active_agents": active_agents,
             "last_tool_call": max((event.get("timestamp") for event in raw_events), default=None),
             "recent_actions": sorted(events, key=lambda item: int(item.get("timestamp", 0)), reverse=True)[:20],
+        }
+
+    @app.get("/api/internal/metrics-snapshots")
+    def get_metrics_snapshots(days: int = Query(30, ge=1, le=365)) -> dict[str, Any]:
+        with session_local() as session:
+            if _snapshots_enabled():
+                try:
+                    take_snapshot(session)
+                except Exception:  # noqa: BLE001
+                    pass
+            rows = get_snapshots(session, days=days)
+
+        return {
+            "snapshots": [
+                {
+                    "date": row.snapshot_date.isoformat(),
+                    "entity_count": row.entity_count,
+                    "edge_count": row.edge_count,
+                    "receipt_count": row.receipt_count,
+                    "allow_count": row.allow_count,
+                    "correct_count": row.correct_count,
+                    "deny_count": row.deny_count,
+                    "agent_count": row.agent_count,
+                    "created_at": _iso(row.created_at),
+                }
+                for row in rows
+            ],
+            "range_days": days,
         }
 
     @app.get("/api/entities")

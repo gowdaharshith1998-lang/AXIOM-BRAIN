@@ -1,10 +1,20 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import uuid_utils as uuid
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -91,6 +101,24 @@ class Receipt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
+class MetricsSnapshot(Base):
+    __tablename__ = "metrics_snapshots"
+    __table_args__ = (
+        UniqueConstraint("snapshot_date", name="uq_metrics_snapshots_snapshot_date"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    entity_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    edge_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    receipt_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    allow_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    correct_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    deny_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    agent_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class Action(Base):
     __tablename__ = "actions"
 
@@ -123,3 +151,4 @@ class Skill(Base):
 Index("ix_edges_src_rel", Edge.source_id, Edge.relationship)
 Index("ix_edges_tgt_rel", Edge.target_id, Edge.relationship)
 Index("ix_entities_type_created", Entity.type, Entity.created_at)
+Index("ix_metrics_snapshots_snapshot_date_desc", MetricsSnapshot.snapshot_date.desc())

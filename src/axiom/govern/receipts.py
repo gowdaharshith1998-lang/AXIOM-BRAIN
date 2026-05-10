@@ -65,6 +65,12 @@ def ensure_receipts_schema(engine: Engine) -> None:
     legacy_name = f"receipts_legacy_{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
     with engine.begin() as conn:
         conn.exec_driver_sql(f"ALTER TABLE receipts RENAME TO {legacy_name}")
+        for index_name in (
+            "ix_receipts_created_at",
+            "ix_receipts_merkle_leaf_index",
+            "ix_receipts_receipt_type",
+        ):
+            conn.exec_driver_sql(f"DROP INDEX IF EXISTS {index_name}")
     Receipt.__table__.create(bind=engine, checkfirst=True)
 
 
