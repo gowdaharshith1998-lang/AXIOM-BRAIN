@@ -307,7 +307,9 @@ export function Brain() {
 
   useEffect(() => {
     const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
-    const url = `${wsScheme}://${window.location.host}/ws/brain`;
+    // Bypass Vite WS proxy in dev; production will be single-origin via reverse proxy (Phase 11).
+    const wsHost = window.location.hostname;
+    const url = `${wsScheme}://${wsHost}:8000/ws/brain`;
     const ws = new BrainSocket(url);
     setConnectionStatus("syncing");
     const off = ws.on((event) => {
