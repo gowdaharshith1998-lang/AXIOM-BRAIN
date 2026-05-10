@@ -10,20 +10,88 @@ body,
 
 body {
   margin: 0;
-  background: radial-gradient(circle at 20% 0%, #0b1f43 0%, #030b1d 45%, #020711 100%);
+  background: #020711;
   color: rgba(255, 255, 255, 0.9);
-  font-family: "Segoe UI", "Avenir Next", "Helvetica Neue", sans-serif;
+  font-family: Inter, "Avenir Next", "Helvetica Neue", sans-serif;
+  overflow: hidden;
 }
 
 .studio-root {
   background-image:
-    radial-gradient(circle at 10% 8%, rgba(0, 136, 255, 0.12), transparent 26%),
-    radial-gradient(circle at 84% 28%, rgba(0, 216, 255, 0.08), transparent 30%);
+    linear-gradient(rgba(0, 149, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 149, 255, 0.018) 1px, transparent 1px),
+    radial-gradient(circle at 76% 2%, rgba(0, 139, 255, 0.07), transparent 24%);
+  background-size: 24px 24px, 24px 24px, auto;
   background-color: #020711;
 }
 
 .studio-rail {
-  background: linear-gradient(180deg, rgba(6, 19, 44, 0.96), rgba(3, 12, 31, 0.95));
+  background:
+    radial-gradient(circle at 50% 62%, rgba(0, 102, 255, 0.14), transparent 28%),
+    linear-gradient(180deg, rgba(5, 15, 31, 0.98), rgba(3, 11, 25, 0.98));
+}
+
+.settings-stage {
+  width: 1408px;
+  padding: 0 0 32px 20px;
+}
+
+.settings-tabs {
+  display: flex;
+  align-items: center;
+  gap: 36px;
+  height: 22px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid #132f51;
+  color: #8da2bd;
+  font-size: 14px;
+}
+
+.settings-tab,
+.settings-tab-active {
+  height: 23px;
+  border-bottom: 2px solid transparent;
+  padding: 0 8px 12px;
+}
+
+.settings-tab-active {
+  border-color: #2c8cff;
+  color: #edf5ff;
+  text-shadow: 0 0 16px rgba(44, 140, 255, 0.28);
+}
+
+.settings-panel {
+  min-height: 0;
+  border: 1px solid #15509a;
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 92% 0%, rgba(0, 139, 255, 0.07), transparent 32%),
+    linear-gradient(180deg, rgba(5, 20, 43, 0.96), rgba(3, 13, 29, 0.98));
+  padding: 20px;
+  box-shadow:
+    inset 0 1px 0 rgba(64, 140, 230, 0.13),
+    0 0 0 1px rgba(21, 80, 154, 0.16);
+}
+
+.settings-panel-title {
+  color: #f0f6ff;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.settings-panel-subtitle {
+  margin-top: 5px;
+  color: #8ea3bd;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.settings-panel-body {
+  margin-top: 22px;
+  color: #d2def0;
+  font-size: 14px;
+  line-height: 1.35;
 }
 
 .axiom-labels {

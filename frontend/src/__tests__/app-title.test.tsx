@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "@/App";
@@ -19,6 +19,14 @@ vi.mock("@/lib/websocket", () => ({
     close() {}
   },
 }));
+vi.mock("@/lib/vaultClient", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/vaultClient")>("@/lib/vaultClient");
+  return {
+    ...actual,
+    listProviders: vi.fn().mockResolvedValue([]),
+    listSecrets: vi.fn().mockResolvedValue([]),
+  };
+});
 
 describe("App shell", () => {
   beforeEach(() => {
@@ -28,6 +36,16 @@ describe("App shell", () => {
   it("renders studio nav and settings heading", () => {
     render(<App />);
     expect(screen.getByText("AXIOM")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Settings/i })).toBeInTheDocument();
+  });
+
+  it("does not trigger route hotkeys while typing in form fields", () => {
+    render(<App />);
+    const companyName = screen.getByLabelText("Company Name");
+    companyName.focus();
+
+    fireEvent.keyDown(companyName, { key: "g" });
+
+    expect(window.location.pathname).toBe("/settings");
   });
 });

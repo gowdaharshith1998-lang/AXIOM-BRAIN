@@ -16,6 +16,7 @@ build/
 axiom.db
 axiom.db-shm
 axiom.db-wal
+axiom_studio_settings.json
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
