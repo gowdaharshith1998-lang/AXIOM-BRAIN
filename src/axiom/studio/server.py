@@ -10,8 +10,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
-from fastapi import Body, FastAPI, HTTPException, Query, WebSocket
+from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, desc, func, select
 from sqlalchemy.orm import sessionmaker
@@ -98,7 +99,9 @@ from axiom.skills.registry import (
     skill_run_to_dict,
     skill_to_dict,
 )
+from axiom.skills.emitter import compile_skills_from_processes, manifest_to_dict
 from axiom.skills.runner import run_skill
+from axiom.skills.skill_md import SkillManifestError, parse_skill_md, serialize_skill_md
 from axiom.sources.base import IngestEvent
 from axiom.sources.live_synthetic import LiveSyntheticSource
 from axiom.studio.sources import ensure_sources_schema, real_sources_snapshot
@@ -137,6 +140,16 @@ class SkillIn(BaseModel):
 class SkillRunIn(BaseModel):
     input_payload: dict[str, Any] = Field(default_factory=dict)
     agent_name: str = "external_mcp_client"
+    idempotency_key: str | None = None
+
+
+class SkillMdIn(BaseModel):
+    content: str
+
+
+class CompileSkillsIn(BaseModel):
+    dry_run: bool = False
+    process_ids: list[str] | None = None
 
 
 class PassportIn(BaseModel):
@@ -906,6 +919,8 @@ def create_app(
     def _raise_skill_error(exc: Exception) -> None:
         if isinstance(exc, SkillNotFound):
             raise HTTPException(status_code=404, detail="skill not found") from exc
+        if isinstance(exc, SkillManifestError):
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         if isinstance(exc, ValueError):
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -934,6 +949,18 @@ def create_app(
             with session_local() as session:
                 row = get_skill_with_session(session, skill_id)
                 return skill_to_dict(row)
+        except Exception as exc:  # noqa: BLE001
+            _raise_skill_error(exc)
+
+    @app.get("/api/internal/skills/{skill_id}/md", response_class=PlainTextResponse)
+    def get_internal_skill_md(skill_id: str) -> PlainTextResponse:
+        try:
+            with session_local() as session:
+                row = get_skill_with_session(session, skill_id)
+                return PlainTextResponse(
+                    serialize_skill_md(row),
+                    media_type="text/markdown; charset=utf-8",
+                )
         except Exception as exc:  # noqa: BLE001
             _raise_skill_error(exc)
 
@@ -969,6 +996,66 @@ def create_app(
         await publish_skill_event("skill_registered", {"skill": payload}, payload["id"])
         return payload
 
+    @app.post("/api/internal/skills/upload-md")
+    async def post_internal_skill_upload_md(request: Request) -> dict[str, Any]:
+        try:
+            content_type = request.headers.get("content-type", "")
+            if "multipart/form-data" in content_type:
+                form = await request.form()
+                file = form.get("file")
+                if file is None or not hasattr(file, "read"):
+                    raise SkillManifestError("line 1: multipart upload requires file=SKILL.md")
+                raw = await file.read()
+                content = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+            else:
+                body = SkillMdIn.model_validate(await request.json())
+                content = body.content
+            manifest = parse_skill_md(content)
+            with session_local() as session:
+                row = register_skill_with_session(
+                    session,
+                    name=manifest.name,
+                    description=manifest.description,
+                    intent=manifest.intent,
+                    prompt_template=manifest.prompt_template,
+                    llm_provider=manifest.llm_provider,
+                    llm_model=manifest.llm_model,
+                    output_schema=manifest.output_schema,
+                    trigger_config={
+                        **manifest.trigger_config,
+                        "scope_clusters": manifest.scope_clusters,
+                    },
+                    trigger_type=manifest.trigger_type,
+                    created_by="skill_md_upload",
+                )
+                payload = skill_to_dict(row)
+        except Exception as exc:  # noqa: BLE001
+            _raise_skill_error(exc)
+        await publish_skill_event("skill_registered", {"skill": payload}, payload["id"])
+        return payload
+
+    @app.post("/api/internal/skills/compile-from-processes")
+    async def post_internal_skills_compile_from_processes(
+        body: CompileSkillsIn = Body(default_factory=CompileSkillsIn),
+    ) -> dict[str, Any]:
+        try:
+            with session_local() as session:
+                rows = compile_skills_from_processes(
+                    session,
+                    dry_run=body.dry_run,
+                    process_ids=body.process_ids,
+                )
+                if body.dry_run:
+                    compiled = [manifest_to_dict(row) for row in rows]
+                else:
+                    compiled = [skill_to_dict(row) for row in rows]
+        except Exception as exc:  # noqa: BLE001
+            _raise_skill_error(exc)
+        if not body.dry_run:
+            for payload in compiled:
+                await publish_skill_event("skill_compiled", {"skill": payload}, str(payload["id"]))
+        return {"compiled": compiled, "dry_run": body.dry_run, "count": len(compiled)}
+
     @app.post("/api/internal/skills/{skill_id}/activate")
     def post_internal_skill_activate(skill_id: str) -> dict[str, Any]:
         try:
@@ -991,6 +1078,7 @@ def create_app(
                 body.agent_name,
                 session_factory=session_local,
                 event_callback=publish_sync,
+                idempotency_key=body.idempotency_key,
             )
         except Exception as exc:  # noqa: BLE001
             _raise_skill_error(exc)
@@ -1007,9 +1095,12 @@ def create_app(
         return payload
 
     @app.get("/api/entities")
-    def get_entities() -> list[dict[str, Any]]:
+    def get_entities(type: str | None = None) -> list[dict[str, Any]]:  # noqa: A002
         with session_local() as session:
-            rows = session.execute(select(Entity)).scalars().all()
+            stmt = select(Entity)
+            if type is not None:
+                stmt = stmt.where(Entity.type == type)
+            rows = session.execute(stmt).scalars().all()
             return [EntityDTO.model_validate(r).model_dump(mode="json") for r in rows]
 
     @app.get("/api/cluster_health")

@@ -76,6 +76,7 @@ def skill_run_to_dict(row: SkillRun) -> dict[str, Any]:
         "error_message": row.error_message,
         "duration_ms": row.duration_ms,
         "agent_name": row.agent_name,
+        "idempotency_key": row.idempotency_key,
     }
 
 
@@ -118,6 +119,16 @@ def ensure_skills_schema(engine: Engine) -> None:
         Skill.__table__.create(bind=engine, checkfirst=True)
     if not inspector.has_table("skill_runs"):
         SkillRun.__table__.create(bind=engine, checkfirst=True)
+    else:
+        run_columns = {column["name"] for column in inspector.get_columns("skill_runs")}
+        if "idempotency_key" not in run_columns:
+            with engine.begin() as conn:
+                conn.exec_driver_sql("ALTER TABLE skill_runs ADD COLUMN idempotency_key VARCHAR(256)")
+        with engine.begin() as conn:
+            conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_skill_runs_skill_idempotency "
+                "ON skill_runs (skill_id, idempotency_key)"
+            )
 
 
 def register_skill_with_session(

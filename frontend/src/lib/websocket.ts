@@ -18,8 +18,10 @@ export type BrainEvent = {
     | "watchdog_alert_acknowledged"
     | "watchdog_alert_resolved"
     | "skill_registered"
+    | "skill_compiled"
     | "skill_run_started"
     | "skill_run_completed"
+    | "skill_run_failed"
     | "skill_archived"
     | "agent_navigation_step"
     | "confidence_changed";

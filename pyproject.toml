@@ -12,6 +12,8 @@ dependencies = [
     "alembic",
     "pydantic>=2.5",
     "python-dotenv",
+    "python-multipart",
+    "PyYAML",
     "httpx",
     "uuid-utils",
     "networkx>=3.0",

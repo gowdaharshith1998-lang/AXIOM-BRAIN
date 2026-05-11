@@ -264,6 +264,7 @@ class SkillRun(Base):
     __tablename__ = "skill_runs"
     __table_args__ = (
         Index("ix_skill_runs_skill_run_at", "skill_id", "run_at"),
+        Index("ix_skill_runs_skill_idempotency", "skill_id", "idempotency_key", unique=True),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -276,6 +277,7 @@ class SkillRun(Base):
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     agent_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
 
 class WatchdogAlert(Base):

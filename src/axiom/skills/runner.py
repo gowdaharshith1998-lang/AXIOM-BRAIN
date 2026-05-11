@@ -8,6 +8,7 @@ from string import Formatter
 from typing import Any
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.govern.llm_keys import get_provider_key_plaintext_with_session
@@ -136,6 +137,62 @@ def _mark_skill_run_stats(session: Session, skill: Skill, run: SkillRun) -> None
     session.add(skill)
 
 
+def _skill_snapshot(skill: Skill) -> dict[str, Any]:
+    return {
+        "id": skill.id,
+        "name": skill.name,
+        "description": skill.description,
+        "intent": skill.intent,
+        "trigger_type": skill.trigger_type,
+        "trigger_config": skill.trigger_config or {},
+        "prompt_template": skill.prompt_template,
+        "output_schema": skill.output_schema or {},
+        "llm_provider": skill.llm_provider,
+        "llm_model": skill.llm_model,
+        "status": skill.status,
+        "created_by": skill.created_by,
+        "created_at": skill.created_at.isoformat(),
+        "updated_at": skill.updated_at.isoformat(),
+        "last_run_at": skill.last_run_at.isoformat() if skill.last_run_at is not None else None,
+        "total_runs": skill.total_runs,
+    }
+
+
+def _chain_skill_run_receipt(
+    session_factory: sessionmaker[Session],
+    *,
+    run_id: str,
+    agent_name: str,
+    skill_name: str,
+    decision: str,
+    reason: str,
+    policy_id: str,
+    passport_id: str | None,
+    demo_flag: bool,
+) -> str:
+    receipt, _inserted = chain_insert_receipt(
+        session_factory,
+        ReceiptInsert(
+            id=f"receipt_{run_id}",
+            action_id=f"skill_run:{run_id}",
+            agent_name=agent_name,
+            intent=f"skill:{skill_name}",
+            target_entity_id=None,
+            cluster_id="skills",
+            decision=decision,
+            reason=reason,
+            policy_id=policy_id,
+            guidance=None,
+            suggested_alternative=None,
+            signing_scheme="ed25519",
+            signature="",
+            passport_id=passport_id,
+            demo_flag=demo_flag,
+        ),
+    )
+    return receipt.id
+
+
 def _run_skill_with_session(
     session_factory: sessionmaker[Session],
     skill_id: str,
@@ -147,26 +204,32 @@ def _run_skill_with_session(
     receipt_reason: str = "skill run completed",
     receipt_passport_id: str | None = None,
     receipt_demo_flag: bool = False,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     with session_factory() as session:
         skill = get_skill_with_session(session, skill_id)
+        skill_snapshot = _skill_snapshot(skill)
+        if idempotency_key:
+            existing = session.execute(
+                select(SkillRun)
+                .where(SkillRun.skill_id == skill.id)
+                .where(SkillRun.idempotency_key == idempotency_key)
+                .order_by(SkillRun.run_at.desc(), SkillRun.id.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if existing is not None:
+                return {"run": skill_run_to_dict(existing), "skill": skill_snapshot}
         run = SkillRun(
             skill_id=skill.id,
             status="running",
             input_payload=input_payload,
             agent_name=agent_name,
+            idempotency_key=idempotency_key,
         )
         session.add(run)
         session.commit()
         session.refresh(run)
-        skill_snapshot = {
-            "id": skill.id,
-            "name": skill.name,
-            "intent": skill.intent,
-            "llm_provider": skill.llm_provider,
-            "llm_model": skill.llm_model,
-        }
         if event_callback is not None:
             event_callback(
                 "skill_run_started",
@@ -191,30 +254,21 @@ def _run_skill_with_session(
             session.commit()
             session.refresh(run)
 
-        receipt, _inserted = chain_insert_receipt(
+        receipt_id = _chain_skill_run_receipt(
             session_factory,
-            ReceiptInsert(
-                id=f"receipt_{run.id}",
-                action_id=f"skill_run:{run.id}",
-                agent_name=agent_name,
-                intent=f"skill:{skill_snapshot['name']}",
-                target_entity_id=None,
-                cluster_id="skills",
-                decision="allow",
-                reason=receipt_reason,
-                policy_id=receipt_policy_id,
-                guidance=None,
-                suggested_alternative=None,
-                signing_scheme="ed25519",
-                signature="",
-                passport_id=receipt_passport_id,
-                demo_flag=receipt_demo_flag,
-            ),
+            run_id=run.id,
+            agent_name=agent_name,
+            skill_name=str(skill_snapshot["name"]),
+            decision="allow",
+            reason=receipt_reason,
+            policy_id=receipt_policy_id,
+            passport_id=receipt_passport_id,
+            demo_flag=receipt_demo_flag,
         )
         with session_factory() as session:
             persisted_run = session.get(SkillRun, run.id)
             if persisted_run is not None:
-                persisted_run.receipt_id = receipt.id
+                persisted_run.receipt_id = receipt_id
                 session.add(persisted_run)
                 session.commit()
                 session.refresh(persisted_run)
@@ -238,6 +292,27 @@ def _run_skill_with_session(
             session.add(failed)
             session.commit()
             session.refresh(failed)
+            failed_id = failed.id
+            failure_reason = str(exc)
+        receipt_id = _chain_skill_run_receipt(
+            session_factory,
+            run_id=failed_id,
+            agent_name=agent_name,
+            skill_name=str(skill_snapshot["name"]),
+            decision="error",
+            reason=failure_reason,
+            policy_id=receipt_policy_id,
+            passport_id=receipt_passport_id,
+            demo_flag=receipt_demo_flag,
+        )
+        with session_factory() as session:
+            failed = session.get(SkillRun, failed_id)
+            if failed is None:
+                raise
+            failed.receipt_id = receipt_id
+            session.add(failed)
+            session.commit()
+            session.refresh(failed)
             result = skill_run_to_dict(failed)
         if event_callback is not None:
             event_callback("skill_run_failed", {"run": result, "skill": skill_snapshot})
@@ -255,6 +330,7 @@ def run_skill(
     receipt_reason: str = "skill run completed",
     receipt_passport_id: str | None = None,
     receipt_demo_flag: bool = False,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     sf = session_factory or SessionLocal
     if sf is None:
@@ -270,6 +346,7 @@ def run_skill(
             receipt_reason=receipt_reason,
             receipt_passport_id=receipt_passport_id,
             receipt_demo_flag=receipt_demo_flag,
+            idempotency_key=idempotency_key,
         )
     except SkillNotFound:
         raise

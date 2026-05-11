@@ -21,6 +21,10 @@ const skillsApi = vi.hoisted(() => ({
   registerSkill: vi.fn(),
   archiveSkill: vi.fn(),
   listSkillRuns: vi.fn(),
+  runSkill: vi.fn(),
+  uploadSkillMd: vi.fn(),
+  downloadSkillMd: vi.fn(),
+  compileSkillsFromProcesses: vi.fn(),
 }));
 const watchdogApi = vi.hoisted(() => ({
   listWatchdogAlerts: vi.fn(),
@@ -72,7 +76,19 @@ const skill = {
   name: "summarize_policy",
   description: "Summarize policy",
   intent: "summarize",
+  trigger_type: "manual",
+  trigger_config: {},
   prompt_template: "Summarize {text}",
+  output_schema: {
+    type: "object",
+    required: ["summary", "confidence", "approved", "metadata"],
+    properties: {
+      summary: { type: "string" },
+      confidence: { type: "number" },
+      approved: { type: "boolean" },
+      metadata: { type: "object" },
+    },
+  },
   llm_provider: "openai",
   llm_model: "gpt-4o-mini",
   status: "draft",
@@ -96,6 +112,19 @@ const run = {
   agent_name: "researcher",
 };
 
+const skillMd = `---
+name: summarize_thread
+description: Summarize thread
+intent: summarize
+llm_provider: anthropic
+llm_model: claude-3-haiku-20240307
+scope_clusters: [support]
+trigger_type: manual
+output_schema:
+  type: object
+---
+Summarize {thread}`;
+
 const alert = {
   alert_id: "al_1",
   entity_id: "ticket_1",
@@ -108,6 +137,17 @@ const alert = {
   detected_at: "2026-05-10T00:00:00",
   resolved_at: null,
   resolved_by: null,
+};
+
+const processEntity = {
+  id: "process_refund",
+  type: "process",
+  data: { name: "Refund Review", description: "Review refunds" },
+  source_id: "synthetic-default",
+  created_at: "2026-05-10T00:00:00",
+  updated_at: "2026-05-10T00:00:00",
+  cluster_id: "customer_support",
+  composite_importance: 0.5,
 };
 
 const governanceSnapshot = {
@@ -151,6 +191,14 @@ describe("Phase 13.B UI", () => {
     skillsApi.registerSkill.mockResolvedValue({ ...skill, id: "sk_2", name: "extract_company", intent: "extract" });
     skillsApi.archiveSkill.mockResolvedValue({ ...skill, status: "archived" });
     skillsApi.listSkillRuns.mockResolvedValue([run]);
+    skillsApi.runSkill.mockResolvedValue({ run: { ...run, id: "run_submit" }, skill });
+    skillsApi.uploadSkillMd.mockResolvedValue({ ...skill, id: "sk_md", name: "summarize_thread" });
+    skillsApi.downloadSkillMd.mockResolvedValue(skillMd);
+    skillsApi.compileSkillsFromProcesses.mockResolvedValue({
+      compiled: [{ ...skill, id: "sk_compiled", name: "refund_review" }],
+      dry_run: false,
+      count: 1,
+    });
     watchdogApi.listWatchdogAlerts.mockResolvedValue([alert]);
     watchdogApi.acknowledgeWatchdogAlert.mockResolvedValue({ ...alert, status: "acknowledged" });
     watchdogApi.resolveWatchdogAlert.mockResolvedValue({ ...alert, status: "resolved", resolved_at: "2026-05-10T00:10:00" });
@@ -187,11 +235,42 @@ describe("Phase 13.B UI", () => {
   it("register-skill modal posts to backend", async () => {
     render(<SkillsPage />);
     fireEvent.click(screen.getByRole("button", { name: /Register Skill/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Form" }));
     const dialog = await screen.findByRole("form", { name: "Register Skill" });
     fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "extract_company" } });
     fireEvent.change(within(dialog).getByLabelText("Prompt Template"), { target: { value: "Extract {text}" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Register" }));
     await waitFor(() => expect(skillsApi.registerSkill).toHaveBeenCalledWith(expect.objectContaining({ name: "extract_company" })));
+  });
+
+  it("upload_md_tab_renders_drag_drop_zone", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Register Skill/ }));
+    expect(await screen.findByText("Upload SKILL.md")).toBeInTheDocument();
+    expect(screen.getByText("Drop a SKILL.md file here or paste content below.")).toBeInTheDocument();
+  });
+
+  it("upload_md_tab_parses_pasted_content_to_preview", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Register Skill/ }));
+    fireEvent.change(await screen.findByLabelText("SKILL.md content"), { target: { value: skillMd } });
+    expect(await screen.findByText("summarize_thread")).toBeInTheDocument();
+    expect(screen.getByText("anthropic / claude-3-haiku-20240307")).toBeInTheDocument();
+  });
+
+  it("upload_md_tab_shows_validation_errors_inline", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Register Skill/ }));
+    fireEvent.change(await screen.findByLabelText("SKILL.md content"), { target: { value: "---\\nname: broken\\n---\\nBody" } });
+    expect(await screen.findByText(/line 2/)).toBeInTheDocument();
+  });
+
+  it("upload_md_tab_submit_calls_upload_endpoint", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Register Skill/ }));
+    fireEvent.change(await screen.findByLabelText("SKILL.md content"), { target: { value: skillMd } });
+    fireEvent.click(screen.getByRole("button", { name: "Register SKILL.md" }));
+    await waitFor(() => expect(skillsApi.uploadSkillMd).toHaveBeenCalledWith(skillMd));
   });
 
   it("skills table renders and filters", async () => {
@@ -201,11 +280,123 @@ describe("Phase 13.B UI", () => {
     expect(await screen.findByText("No skills registered yet.")).toBeInTheDocument();
   });
 
+  it("skills_page_renders_run_button_per_skill", async () => {
+    render(<SkillsPage />);
+    expect(await screen.findByText("summarize_policy")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run summarize_policy" })).toBeInTheDocument();
+  });
+
+  it("run_skill_modal_generates_form_from_output_schema", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Run summarize_policy" }));
+    const dialog = await screen.findByRole("form", { name: "Run summarize_policy" });
+    expect(within(dialog).getByLabelText("summary")).toHaveAttribute("type", "text");
+    expect(within(dialog).getByLabelText("confidence")).toHaveAttribute("type", "number");
+    expect(within(dialog).getByLabelText("approved")).toHaveAttribute("type", "checkbox");
+    expect(within(dialog).getByLabelText("metadata")).toHaveValue("{}");
+  });
+
+  it("run_skill_modal_submits_and_shows_output", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Run summarize_policy" }));
+    const dialog = await screen.findByRole("form", { name: "Run summarize_policy" });
+    fireEvent.change(within(dialog).getByLabelText("summary"), { target: { value: "ship it" } });
+    fireEvent.change(within(dialog).getByLabelText("confidence"), { target: { value: "0.91" } });
+    fireEvent.click(within(dialog).getByLabelText("approved"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Run Skill" }));
+    await waitFor(() => expect(skillsApi.runSkill).toHaveBeenCalledWith("sk_1", expect.objectContaining({ summary: "ship it", confidence: 0.91, approved: true, metadata: {} }), expect.any(String)));
+    expect(await screen.findByText(/run_submit/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy output" })).toBeInTheDocument();
+  });
+
+  it("run_skill_modal_shows_error_on_failure", async () => {
+    skillsApi.runSkill.mockRejectedValueOnce(new Error("provider offline"));
+    render(<SkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Run summarize_policy" }));
+    fireEvent.click((await screen.findByRole("form", { name: "Run summarize_policy" })).querySelector("button[type='submit']")!);
+    expect(await screen.findByText("provider offline")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("run_skill_modal_retry_uses_same_input", async () => {
+    skillsApi.runSkill.mockRejectedValueOnce(new Error("provider offline")).mockResolvedValueOnce({ run: { ...run, id: "run_retry" }, skill });
+    render(<SkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Run summarize_policy" }));
+    const dialog = await screen.findByRole("form", { name: "Run summarize_policy" });
+    fireEvent.change(within(dialog).getByLabelText("summary"), { target: { value: "retry me" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Run Skill" }));
+    await screen.findByText("provider offline");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(skillsApi.runSkill).toHaveBeenNthCalledWith(2, "sk_1", expect.objectContaining({ summary: "retry me" }), expect.any(String)));
+  });
+
   it("archive button confirms then archives", async () => {
     render(<SkillsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Open" }));
     fireEvent.click(await screen.findByRole("button", { name: /Archive/ }));
     await waitFor(() => expect(skillsApi.archiveSkill).toHaveBeenCalledWith("sk_1"));
+  });
+
+  it("download_skill_md_button_triggers_download", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Download SKILL.md" }));
+    await waitFor(() => expect(skillsApi.downloadSkillMd).toHaveBeenCalledWith("sk_1"));
+  });
+
+  it("compile_from_processes_modal_lists_all_processes", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify([processEntity])));
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Compile from Processes" }));
+    expect(await screen.findByText("Refund Review")).toBeInTheDocument();
+  });
+
+  it("compile_from_processes_dry_run_shows_manifests", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify([processEntity])));
+    skillsApi.compileSkillsFromProcesses.mockResolvedValueOnce({
+      compiled: [{ name: "refund_review", intent: "classify", description: "Review refunds" }],
+      dry_run: true,
+      count: 1,
+    });
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Compile from Processes" }));
+    fireEvent.click(await screen.findByLabelText("Dry run"));
+    fireEvent.click(screen.getByRole("button", { name: "Compile" }));
+    expect(await screen.findByText("refund_review")).toBeInTheDocument();
+  });
+
+  it("compile_from_processes_register_calls_endpoint", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify([processEntity])));
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Compile from Processes" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Compile" }));
+    await waitFor(() => expect(skillsApi.compileSkillsFromProcesses).toHaveBeenCalledWith({ dryRun: false, processIds: ["process_refund"] }));
+  });
+
+  it("skill_compiled_ws_event_updates_table_live", async () => {
+    render(<SkillsPage />);
+    await screen.findByText("summarize_policy");
+    window.dispatchEvent(new CustomEvent("axiom:brain-event", { detail: { type: "skill_compiled", payload: { skill: { ...skill, id: "sk_live", name: "compiled_live" } } } }));
+    expect(await screen.findByText("compiled_live")).toBeInTheDocument();
+  });
+
+  it("compile_results_table_shows_status_per_process", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify([processEntity])));
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Compile from Processes" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Compile" }));
+    expect(await screen.findByText("compiled")).toBeInTheDocument();
+  });
+
+  it("form_tab_still_works_for_fallback_registration", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Register Skill/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Form" }));
+    const dialog = await screen.findByRole("form", { name: "Register Skill" });
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "extract_company" } });
+    fireEvent.change(within(dialog).getByLabelText("Prompt Template"), { target: { value: "Extract {text}" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Register" }));
+    await waitFor(() => expect(skillsApi.registerSkill).toHaveBeenCalledWith(expect.objectContaining({ name: "extract_company" })));
   });
 
   it("agent drawer shows recent receipts and can revoke passport", async () => {
@@ -235,6 +426,27 @@ describe("Phase 13.B UI", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open" }));
     window.dispatchEvent(new CustomEvent("axiom:brain-event", { detail: { type: "skill_run_completed", payload: { run: { ...run, id: "run_ws", status: "failed", error_message: "bad input" } } } }));
     expect(await screen.findByText("failed")).toBeInTheDocument();
+  });
+
+  it("skill_run_failed_ws_event_updates_table_status", async () => {
+    render(<SkillsPage />);
+    await screen.findByText("summarize_policy");
+    window.dispatchEvent(new CustomEvent("axiom:brain-event", { detail: { type: "skill_run_failed", payload: { run: { ...run, id: "run_fail_ws", status: "failed", error_message: "bad input" } } } }));
+    expect(await screen.findByText("skill_run_failed: bad input")).toBeInTheDocument();
+  });
+
+  it("skill_run_completed_ws_event_renders_output_in_drawer", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    window.dispatchEvent(new CustomEvent("axiom:brain-event", { detail: { type: "skill_run_completed", payload: { run: { ...run, id: "run_ws_output", output_payload: { summary: "live output" } } } } }));
+    expect(await screen.findByText(/live output/)).toBeInTheDocument();
+  });
+
+  it("rerun_with_same_input_button_calls_run_endpoint", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Re-run with same input" }));
+    await waitFor(() => expect(skillsApi.runSkill).toHaveBeenCalledWith("sk_1", { text: "hello" }, expect.any(String)));
   });
 
   it("websocket agent_action increments total_actions counter", async () => {
