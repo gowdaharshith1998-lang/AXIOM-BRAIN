@@ -4,6 +4,7 @@ import asyncio
 import random
 
 from axiom.govern.agent_actions import demo_action_payload
+from axiom.govern.ledger import demo_receipt
 from axiom.govern.policy_evaluator import DemoPolicyEvaluator
 from axiom.organize.clusters import CLUSTER_IDS
 
@@ -27,6 +28,18 @@ def test_demo_action_payload_contains_demo_contract() -> None:
     assert str(payload["action_id"]).startswith("act_")
     assert payload["cluster_id"] in CLUSTER_IDS
     assert str(payload["skill_called"]).startswith("skills.")
+    assert payload["demo"] is True
+
+
+def test_demo_simulator_receipts_still_marked_demo() -> None:
+    receipt = demo_receipt(
+        action_id="act_demo",
+        decision="allow",
+        agent_name="claude",
+        index=1,
+    )
+    assert receipt["demo"] is True
+    assert receipt["signing_scheme"] == "demo"
 
 
 def test_agent_action_payload_is_async_safe() -> None:

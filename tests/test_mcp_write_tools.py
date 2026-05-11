@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 from axiom.mcp.server import AxiomMCPService, build_mcp_server
 from axiom.govern.policy_evaluator import DemoPolicyEvaluator, PolicyDecision
-from axiom.schema.models import Base, Edge, Entity, Receipt, Skill, SkillRun
+from axiom.schema.models import Base, Edge, Entity, Receipt, Skill, SkillRun, Source
 from axiom.skills.registry import get_skill_with_session, register_skill_with_session
 from axiom.studio.server import create_app
 
@@ -142,6 +142,93 @@ def test_record_action_allow_branch(write_service: AxiomMCPService) -> None:
     batches = _events_stub(write_service).action_batches
     assert len(batches) == 1
     assert [e["type"] for e in batches[0]] == ["agent_action", "agent_action_evaluated", "receipt_added"]
+
+
+def test_record_action_against_real_entity_marked_real(write_service: AxiomMCPService) -> None:
+    with write_service._session_factory() as session:  # type: ignore[attr-defined]
+        session.add(Source(id="linear-main", source_type="linear", display_name="Linear", connected=True))
+        session.add(
+            Entity(
+                id="linear_ticket_1",
+                type="ticket",
+                source_id="linear-main",
+                cluster_id="engineering_code",
+                composite_importance=0.2,
+                data={"title": "Real Linear Ticket"},
+            )
+        )
+        session.commit()
+
+    out = write_service.record_action(
+        agent_name="agent_real",
+        intent="read",
+        target_entity_id="linear_ticket_1",
+        proposed_action="read real ticket",
+        idempotency_key=None,
+    )
+
+    assert out["demo"] is False
+    with write_service._session_factory() as session:  # type: ignore[attr-defined]
+        receipt = session.query(Receipt).filter_by(action_id=out["action_id"]).one()
+    assert receipt.demo_flag is False
+
+
+def test_record_action_against_synthetic_entity_stays_demo(write_service: AxiomMCPService) -> None:
+    with write_service._session_factory() as session:  # type: ignore[attr-defined]
+        session.add(
+            Entity(
+                id="synthetic_ticket_1",
+                type="ticket",
+                source_id="synthetic-default",
+                cluster_id="engineering_code",
+                composite_importance=0.2,
+                data={"title": "Synthetic Ticket"},
+            )
+        )
+        session.commit()
+
+    out = write_service.record_action(
+        agent_name="agent_synth",
+        intent="read",
+        target_entity_id="synthetic_ticket_1",
+        proposed_action="read synthetic ticket",
+        idempotency_key=None,
+    )
+
+    assert out["demo"] is True
+    with write_service._session_factory() as session:  # type: ignore[attr-defined]
+        receipt = session.query(Receipt).filter_by(action_id=out["action_id"]).one()
+    assert receipt.demo_flag is True
+
+
+def test_blocked_real_entity_event_marked_real(write_service: AxiomMCPService) -> None:
+    with write_service._session_factory() as session:  # type: ignore[attr-defined]
+        session.add(Source(id="jira-main", source_type="jira", display_name="Jira", connected=True))
+        session.add(
+            Entity(
+                id="jira_ticket_1",
+                type="ticket",
+                source_id="jira-main",
+                cluster_id="engineering_code",
+                composite_importance=0.2,
+                data={"title": "Blocked Real Ticket"},
+            )
+        )
+        session.commit()
+    write_service._policy = _StaticPolicy("deny")  # type: ignore[attr-defined]
+
+    with pytest.raises(ToolError):
+        write_service.record_action(
+            agent_name="agent_blocked_real",
+            intent="write",
+            target_entity_id="jira_ticket_1",
+            proposed_action="blocked write",
+            idempotency_key=None,
+        )
+
+    batch = _events_stub(write_service).action_batches[0]
+    assert batch[0]["payload"]["demo"] is False  # type: ignore[index]
+    assert batch[1]["payload"]["demo_flag"] is False  # type: ignore[index]
 
 
 def test_record_action_correct_branch(write_service: AxiomMCPService, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -386,6 +473,41 @@ def test_run_skill_correct_returns_alternative_no_llm_call(
         receipt = session.query(Receipt).one()
     assert receipt.decision == "correct"
     assert receipt.suggested_alternative == "safe_summary"
+
+
+def test_skill_run_receipt_demo_flag_follows_input(
+    write_service: AxiomMCPService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skill_id = _register_test_skill(write_service)
+    with write_service._session_factory() as session:  # type: ignore[attr-defined]
+        session.add(Source(id="linear-main", source_type="linear", display_name="Linear", connected=True))
+        session.add(
+            Entity(
+                id="linear_ticket_2",
+                type="ticket",
+                source_id="linear-main",
+                cluster_id="engineering_code",
+                composite_importance=0.2,
+                data={"title": "Another Real Ticket"},
+            )
+        )
+        session.commit()
+
+    monkeypatch.setattr("axiom.skills.runner.get_provider_key_plaintext_with_session", lambda *_args: "key")
+    monkeypatch.setattr("axiom.skills.runner._call_provider", lambda *_args: "summary")
+
+    out = write_service.run_skill(
+        skill_id=skill_id,
+        input_payload={"note": "x", "target_entity_id": "linear_ticket_2"},
+    )
+
+    with write_service._session_factory() as session:  # type: ignore[attr-defined]
+        run = session.get(SkillRun, out["run"]["id"])
+        assert run is not None
+        receipt = session.get(Receipt, run.receipt_id)
+    assert receipt is not None
+    assert receipt.demo_flag is False
 
 
 def test_register_skill_deny_blocks_creation(write_service: AxiomMCPService) -> None:

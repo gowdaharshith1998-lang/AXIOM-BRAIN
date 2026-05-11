@@ -10,6 +10,7 @@ from typing import Any, Protocol
 from sqlalchemy import Engine, desc, inspect, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from axiom.govern.demo_flag import is_demo_target
 from axiom.govern.receipts import ReceiptInsert, chain_insert_receipt
 from axiom.govern.watchdog_rules import DEFAULT_RULES, WatchdogRule
 from axiom.schema.models import Entity, WatchdogAlert
@@ -128,6 +129,7 @@ def detect_for_entity(
         return []
     detected_at = now or datetime.utcnow()
     created: list[WatchdogAlert] = []
+    demo_flag = is_demo_target(session, entity.id)
     for rule in rules or tuple(_registered_rules):
         candidate = rule(session, entity, detected_at)
         if candidate is None:
@@ -143,7 +145,7 @@ def detect_for_entity(
             suggested_action=candidate.suggested_action,
             status="open",
             detected_at=detected_at,
-            demo_flag=True,
+            demo_flag=demo_flag,
         )
         session.add(alert)
         created.append(alert)
@@ -344,7 +346,7 @@ class WatchdogAgent:
                     suggested_alternative=None,
                     signing_scheme="ed25519",
                     signature="",
-                    demo_flag=True,
+                    demo_flag=alert.demo_flag,
                 ),
             )
         except Exception:  # noqa: BLE001

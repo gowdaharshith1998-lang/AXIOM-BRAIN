@@ -11,8 +11,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from axiom.govern.demo_flag import is_demo_target
 from axiom.govern.watchdog import WatchdogAgent, detect_for_entity, list_open_alerts
-from axiom.schema.models import Base, Edge, Entity, EntityEmbedding, Receipt
+from axiom.schema.models import Base, Edge, Entity, EntityEmbedding, Receipt, Source
 from axiom.studio.server import create_app
 
 
@@ -46,6 +47,7 @@ def _entity(
     *,
     type_: str = "document",
     cluster_id: str | None = None,
+    source_id: str | None = None,
     data: dict[str, Any] | None = None,
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
@@ -56,6 +58,7 @@ def _entity(
         id=entity_id,
         type=type_,
         cluster_id=cluster_id,
+        source_id=source_id,
         data=data or {"title": entity_id},
         created_at=created_at or now,
         updated_at=updated_at or created_at or now,
@@ -253,6 +256,36 @@ async def test_watchdog_loop_emits_ws_and_receipt(
     assert any(event["type"] == "watchdog_alert_raised" for event in broadcaster.envelopes)
     with sf() as session:
         assert session.execute(select(Receipt)).scalar_one().decision == "advise"
+
+
+@pytest.mark.asyncio
+async def test_watchdog_receipt_demo_flag_follows_entity_source(
+    watchdog_sf: tuple[sessionmaker[Session], str],
+) -> None:
+    sf, _db_url = watchdog_sf
+    with sf() as session:
+        session.add(Source(id="linear-main", source_type="linear", display_name="Linear", connected=True))
+        session.add(
+            _entity(
+                "bill_change_real",
+                cluster_id="billing_payments",
+                source_id="linear-main",
+            )
+        )
+        session.commit()
+
+    broadcaster = _FakeBroadcaster()
+    agent = WatchdogAgent(session_factory=sf, broadcaster=broadcaster)
+    created = await agent.detect_entity("bill_change_real")
+
+    assert created == 1
+    with sf() as session:
+        alert = session.execute(select(Receipt)).scalar_one()
+    assert alert.demo_flag is False
+
+
+def test_is_demo_target_handles_missing_entity(db_session: Session) -> None:
+    assert is_demo_target(db_session, "missing") is True
 
 
 def test_watchdog_ack_and_resolve_endpoints(watchdog_sf: tuple[sessionmaker[Session], str]) -> None:

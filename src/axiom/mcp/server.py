@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.api.search import _score_title
 from axiom.govern.agent_registry import ensure_agent_registry_schema
+from axiom.govern.demo_flag import is_demo_target
 from axiom.govern.ledger import demo_receipt
 from axiom.govern.passports import (
     PassportError,
@@ -166,6 +167,18 @@ class AxiomMCPService:
     def _utcnow_iso() -> str:
         return datetime.utcnow().isoformat()
 
+    @staticmethod
+    def _target_entity_id_from_payload(payload: dict[str, Any]) -> str | None:
+        for key in ("target_entity_id", "entity_id"):
+            value = payload.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    def _demo_flag_for_target(self, target_entity_id: str | None) -> bool:
+        with self._session_factory() as session:
+            return is_demo_target(session, target_entity_id)
+
     def _cleanup_idempotency(self) -> None:
         now = time.monotonic()
         stale = [
@@ -294,7 +307,7 @@ class AxiomMCPService:
             "guidance": decision.guidance or None,
             "suggested_alternative": decision.suggested_alternative,
             "passport_id": passport.passport_id,
-            "demo": True,
+            "demo": self._demo_flag_for_target(target_entity_id),
         }
 
     def _emit_policy_result(
@@ -323,7 +336,7 @@ class AxiomMCPService:
             "guidance": evaluation["guidance"],
             "suggested_alternative": evaluation["suggested_alternative"],
             "timestamp": self._utcnow_iso(),
-            "demo": True,
+            "demo": receipt.demo_flag,
         }
         self._emit_action_events(
             [
@@ -370,6 +383,7 @@ class AxiomMCPService:
         if decision == "allow":
             return resolved_action_id, cluster_id, evaluation
 
+        demo_flag = self._demo_flag_for_target(target_entity_id)
         receipt, out = self._persist_policy_receipt(
             action_id=resolved_action_id,
             agent_name=agent_name,
@@ -377,7 +391,7 @@ class AxiomMCPService:
             target_entity_id=target_entity_id,
             cluster_id=cluster_id,
             evaluation=evaluation,
-            demo_flag=True,
+            demo_flag=demo_flag,
         )
         event_type = "agent_action_blocked" if decision == "deny" else "agent_action_corrected"
         self._emit_policy_result(
@@ -471,6 +485,7 @@ class AxiomMCPService:
             passport_token=passport_token,
             scope_intent=intent,
         )
+        demo_flag = self._demo_flag_for_target(target_entity_id)
         persisted, out = self._persist_policy_receipt(
             action_id=action_id,
             agent_name=agent_name,
@@ -478,7 +493,7 @@ class AxiomMCPService:
             target_entity_id=target_entity_id,
             cluster_id=cluster_id,
             evaluation=evaluation,
-            demo_flag=True,
+            demo_flag=demo_flag,
         )
         if idempotency_key:
             self._idempotency[(agent_name, idempotency_key)] = (time.monotonic(), out)
@@ -505,7 +520,7 @@ class AxiomMCPService:
                 "target_entity_id": target_entity_id,
                 "proposed_action": proposed_action,
                 "timestamp": self._utcnow_iso(),
-                "demo": True,
+                "demo": demo_flag,
             }
             evaluated_payload = {
                 **base_payload,
@@ -587,7 +602,7 @@ class AxiomMCPService:
             target_entity_id=None,
             cluster_id=cluster_id,
             evaluation=evaluation,
-            demo_flag=True,
+            demo_flag=self._demo_flag_for_target(None),
         )
         return {
             "queue_id": item["queue_id"],
@@ -657,7 +672,7 @@ class AxiomMCPService:
             target_entity_id=out["skill"]["id"],
             cluster_id=cluster_id,
             evaluation=evaluation,
-            demo_flag=True,
+            demo_flag=self._demo_flag_for_target(out["skill"]["id"]),
         )
         if self._events is not None:
             now_ms = int(datetime.utcnow().timestamp() * 1000)
@@ -692,6 +707,7 @@ class AxiomMCPService:
             skill = get_skill_with_session(session, skill_id)
             skill_name = skill.name
 
+        input_target_entity_id = self._target_entity_id_from_payload(input_payload)
         action_id, _cluster_id, evaluation = self._enforce_preflight(
             agent_name="external_mcp_client",
             intent=f"skill:{skill_name}",
@@ -740,6 +756,7 @@ class AxiomMCPService:
             receipt_policy_id=str(evaluation["policy_id"]),
             receipt_reason=str(evaluation["reason"]),
             receipt_passport_id=str(evaluation["passport_id"]),
+            receipt_demo_flag=self._demo_flag_for_target(input_target_entity_id),
         )
         if idempotency_key:
             self._idempotency[("skill_runner", idempotency_key)] = (time.monotonic(), out)
@@ -773,7 +790,7 @@ class AxiomMCPService:
             target_entity_id=skill_id,
             cluster_id=cluster_id,
             evaluation=evaluation,
-            demo_flag=True,
+            demo_flag=self._demo_flag_for_target(skill_id),
         )
         return out
 
