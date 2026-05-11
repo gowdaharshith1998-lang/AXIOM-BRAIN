@@ -137,6 +137,7 @@ class SkillIn(BaseModel):
 class SkillRunIn(BaseModel):
     input_payload: dict[str, Any] = Field(default_factory=dict)
     agent_name: str = "external_mcp_client"
+    idempotency_key: str | None = None
 
 
 class PassportIn(BaseModel):
@@ -991,6 +992,7 @@ def create_app(
                 body.agent_name,
                 session_factory=session_local,
                 event_callback=publish_sync,
+                idempotency_key=body.idempotency_key,
             )
         except Exception as exc:  # noqa: BLE001
             _raise_skill_error(exc)

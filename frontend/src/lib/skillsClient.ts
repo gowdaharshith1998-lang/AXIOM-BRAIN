@@ -6,6 +6,7 @@ export type Skill = {
   trigger_type: string;
   trigger_config: Record<string, unknown>;
   prompt_template: string;
+  output_schema: Record<string, unknown>;
   llm_provider: string;
   llm_model: string;
   status: string;
@@ -28,7 +29,10 @@ export type SkillRun = {
   error_message: string | null;
   duration_ms: number | null;
   agent_name: string;
+  idempotency_key?: string | null;
 };
+
+export type SkillRunResult = { run: SkillRun; skill: Skill };
 
 export type RegisterSkillBody = {
   name: string;
@@ -70,6 +74,18 @@ export async function registerSkill(body: RegisterSkillBody): Promise<Skill> {
 export async function archiveSkill(skillId: string): Promise<Skill> {
   return request<Skill>(`/api/internal/skills/${encodeURIComponent(skillId)}/archive`, {
     method: "POST",
+  });
+}
+
+export async function runSkill(
+  skillId: string,
+  input: Record<string, unknown>,
+  idempotencyKey?: string,
+): Promise<SkillRunResult> {
+  return request<SkillRunResult>(`/api/internal/skills/${encodeURIComponent(skillId)}/run`, {
+    method: "POST",
+    headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+    body: JSON.stringify({ input_payload: input, idempotency_key: idempotencyKey }),
   });
 }
 

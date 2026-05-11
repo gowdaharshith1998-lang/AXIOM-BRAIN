@@ -121,7 +121,127 @@ def test_skill_runner_failure_path(
     result = run_skill(skill_id, {"ticket": "hello"}, "agent_runner", session_factory=sf)
     assert result["run"]["status"] == "failed"
     assert "missing required" in result["run"]["error_message"]
-    assert result["run"]["receipt_id"] is None
+    assert result["run"]["receipt_id"]
+
+
+def test_skill_run_failure_emits_skill_run_failed_ws_event(
+    skill_db: tuple[sessionmaker[Session], str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sf, _db_url = skill_db
+    _fake_llm(monkeypatch, content='{"wrong":"shape"}')
+    events: list[tuple[str, dict[str, object]]] = []
+    with sf() as session:
+        skill = _register_priority_skill(session)
+        set_provider_key_with_session(session, "anthropic", "sk-ant-test-1234")
+        skill_id = skill.id
+
+    result = run_skill(
+        skill_id,
+        {"ticket": "hello"},
+        "agent_runner",
+        session_factory=sf,
+        event_callback=lambda event_type, payload: events.append((event_type, payload)),
+    )
+
+    assert result["run"]["status"] == "failed"
+    assert [event_type for event_type, _payload in events] == [
+        "skill_run_started",
+        "skill_run_failed",
+    ]
+
+
+def test_skill_run_failure_chains_receipt_with_decision_error(
+    skill_db: tuple[sessionmaker[Session], str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sf, _db_url = skill_db
+    _fake_llm(monkeypatch, content='{"wrong":"shape"}')
+    with sf() as session:
+        skill = _register_priority_skill(session)
+        set_provider_key_with_session(session, "anthropic", "sk-ant-test-1234")
+        skill_id = skill.id
+
+    result = run_skill(skill_id, {"ticket": "hello"}, "agent_runner", session_factory=sf)
+
+    with sf() as session:
+        receipt = session.get(Receipt, result["run"]["receipt_id"])
+        assert receipt is not None
+        assert receipt.decision == "error"
+        assert receipt.action_id.startswith("skill_run:")
+
+
+def test_skill_run_returns_receipt_id_in_response(
+    skill_db: tuple[sessionmaker[Session], str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sf, _db_url = skill_db
+    _fake_llm(monkeypatch)
+    with sf() as session:
+        skill = _register_priority_skill(session)
+        set_provider_key_with_session(session, "anthropic", "sk-ant-test-1234")
+        skill_id = skill.id
+
+    result = run_skill(skill_id, {"ticket": "down"}, "agent_runner", session_factory=sf)
+
+    assert result["run"]["receipt_id"]
+
+
+def test_skill_run_idempotency_key_dedupe_returns_cached_result(
+    skill_db: tuple[sessionmaker[Session], str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sf, _db_url = skill_db
+    calls = 0
+
+    def fake_call(*_args: object) -> str:
+        nonlocal calls
+        calls += 1
+        return '{"priority":"high"}'
+
+    monkeypatch.setattr("axiom.skills.runner._call_provider", fake_call)
+    with sf() as session:
+        skill = _register_priority_skill(session)
+        set_provider_key_with_session(session, "anthropic", "sk-ant-test-1234")
+        skill_id = skill.id
+
+    first = run_skill(
+        skill_id,
+        {"ticket": "down"},
+        "agent_runner",
+        session_factory=sf,
+        idempotency_key="idem-1",
+    )
+    second = run_skill(
+        skill_id,
+        {"ticket": "down"},
+        "agent_runner",
+        session_factory=sf,
+        idempotency_key="idem-1",
+    )
+
+    assert first["run"]["id"] == second["run"]["id"]
+    assert calls == 1
+
+
+def test_skill_run_failed_receipt_demo_flag_follows_target(
+    skill_db: tuple[sessionmaker[Session], str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sf, _db_url = skill_db
+    _fake_llm(monkeypatch, content='{"wrong":"shape"}')
+    with sf() as session:
+        skill = _register_priority_skill(session)
+        set_provider_key_with_session(session, "anthropic", "sk-ant-test-1234")
+        skill_id = skill.id
+
+    result = run_skill(
+        skill_id,
+        {"ticket": "hello"},
+        "agent_runner",
+        session_factory=sf,
+        receipt_demo_flag=True,
+    )
+
+    with sf() as session:
+        receipt = session.get(Receipt, result["run"]["receipt_id"])
+        assert receipt is not None
+        assert receipt.demo_flag is True
 
 
 @pytest.mark.asyncio

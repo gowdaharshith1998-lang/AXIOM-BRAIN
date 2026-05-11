@@ -21,6 +21,7 @@ const skillsApi = vi.hoisted(() => ({
   registerSkill: vi.fn(),
   archiveSkill: vi.fn(),
   listSkillRuns: vi.fn(),
+  runSkill: vi.fn(),
 }));
 const watchdogApi = vi.hoisted(() => ({
   listWatchdogAlerts: vi.fn(),
@@ -72,7 +73,19 @@ const skill = {
   name: "summarize_policy",
   description: "Summarize policy",
   intent: "summarize",
+  trigger_type: "manual",
+  trigger_config: {},
   prompt_template: "Summarize {text}",
+  output_schema: {
+    type: "object",
+    required: ["summary", "confidence", "approved", "metadata"],
+    properties: {
+      summary: { type: "string" },
+      confidence: { type: "number" },
+      approved: { type: "boolean" },
+      metadata: { type: "object" },
+    },
+  },
   llm_provider: "openai",
   llm_model: "gpt-4o-mini",
   status: "draft",
@@ -151,6 +164,7 @@ describe("Phase 13.B UI", () => {
     skillsApi.registerSkill.mockResolvedValue({ ...skill, id: "sk_2", name: "extract_company", intent: "extract" });
     skillsApi.archiveSkill.mockResolvedValue({ ...skill, status: "archived" });
     skillsApi.listSkillRuns.mockResolvedValue([run]);
+    skillsApi.runSkill.mockResolvedValue({ run: { ...run, id: "run_submit" }, skill });
     watchdogApi.listWatchdogAlerts.mockResolvedValue([alert]);
     watchdogApi.acknowledgeWatchdogAlert.mockResolvedValue({ ...alert, status: "acknowledged" });
     watchdogApi.resolveWatchdogAlert.mockResolvedValue({ ...alert, status: "resolved", resolved_at: "2026-05-10T00:10:00" });
@@ -201,6 +215,56 @@ describe("Phase 13.B UI", () => {
     expect(await screen.findByText("No skills registered yet.")).toBeInTheDocument();
   });
 
+  it("skills_page_renders_run_button_per_skill", async () => {
+    render(<SkillsPage />);
+    expect(await screen.findByText("summarize_policy")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run summarize_policy" })).toBeInTheDocument();
+  });
+
+  it("run_skill_modal_generates_form_from_output_schema", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Run summarize_policy" }));
+    const dialog = await screen.findByRole("form", { name: "Run summarize_policy" });
+    expect(within(dialog).getByLabelText("summary")).toHaveAttribute("type", "text");
+    expect(within(dialog).getByLabelText("confidence")).toHaveAttribute("type", "number");
+    expect(within(dialog).getByLabelText("approved")).toHaveAttribute("type", "checkbox");
+    expect(within(dialog).getByLabelText("metadata")).toHaveValue("{}");
+  });
+
+  it("run_skill_modal_submits_and_shows_output", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Run summarize_policy" }));
+    const dialog = await screen.findByRole("form", { name: "Run summarize_policy" });
+    fireEvent.change(within(dialog).getByLabelText("summary"), { target: { value: "ship it" } });
+    fireEvent.change(within(dialog).getByLabelText("confidence"), { target: { value: "0.91" } });
+    fireEvent.click(within(dialog).getByLabelText("approved"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Run Skill" }));
+    await waitFor(() => expect(skillsApi.runSkill).toHaveBeenCalledWith("sk_1", expect.objectContaining({ summary: "ship it", confidence: 0.91, approved: true, metadata: {} }), expect.any(String)));
+    expect(await screen.findByText(/run_submit/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy output" })).toBeInTheDocument();
+  });
+
+  it("run_skill_modal_shows_error_on_failure", async () => {
+    skillsApi.runSkill.mockRejectedValueOnce(new Error("provider offline"));
+    render(<SkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Run summarize_policy" }));
+    fireEvent.click((await screen.findByRole("form", { name: "Run summarize_policy" })).querySelector("button[type='submit']")!);
+    expect(await screen.findByText("provider offline")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("run_skill_modal_retry_uses_same_input", async () => {
+    skillsApi.runSkill.mockRejectedValueOnce(new Error("provider offline")).mockResolvedValueOnce({ run: { ...run, id: "run_retry" }, skill });
+    render(<SkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Run summarize_policy" }));
+    const dialog = await screen.findByRole("form", { name: "Run summarize_policy" });
+    fireEvent.change(within(dialog).getByLabelText("summary"), { target: { value: "retry me" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Run Skill" }));
+    await screen.findByText("provider offline");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(skillsApi.runSkill).toHaveBeenNthCalledWith(2, "sk_1", expect.objectContaining({ summary: "retry me" }), expect.any(String)));
+  });
+
   it("archive button confirms then archives", async () => {
     render(<SkillsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Open" }));
@@ -235,6 +299,27 @@ describe("Phase 13.B UI", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open" }));
     window.dispatchEvent(new CustomEvent("axiom:brain-event", { detail: { type: "skill_run_completed", payload: { run: { ...run, id: "run_ws", status: "failed", error_message: "bad input" } } } }));
     expect(await screen.findByText("failed")).toBeInTheDocument();
+  });
+
+  it("skill_run_failed_ws_event_updates_table_status", async () => {
+    render(<SkillsPage />);
+    await screen.findByText("summarize_policy");
+    window.dispatchEvent(new CustomEvent("axiom:brain-event", { detail: { type: "skill_run_failed", payload: { run: { ...run, id: "run_fail_ws", status: "failed", error_message: "bad input" } } } }));
+    expect(await screen.findByText("skill_run_failed: bad input")).toBeInTheDocument();
+  });
+
+  it("skill_run_completed_ws_event_renders_output_in_drawer", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    window.dispatchEvent(new CustomEvent("axiom:brain-event", { detail: { type: "skill_run_completed", payload: { run: { ...run, id: "run_ws_output", output_payload: { summary: "live output" } } } } }));
+    expect(await screen.findByText(/live output/)).toBeInTheDocument();
+  });
+
+  it("rerun_with_same_input_button_calls_run_endpoint", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Re-run with same input" }));
+    await waitFor(() => expect(skillsApi.runSkill).toHaveBeenCalledWith("sk_1", { text: "hello" }, expect.any(String)));
   });
 
   it("websocket agent_action increments total_actions counter", async () => {
