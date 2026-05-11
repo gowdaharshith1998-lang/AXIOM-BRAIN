@@ -287,9 +287,9 @@ export function Brain() {
     void (async () => {
       try {
         const [ents, eds, health] = await Promise.all([
-          fetchJson<unknown[]>("http://127.0.0.1:8000/api/entities"),
-          fetchJson<unknown[]>("http://127.0.0.1:8000/api/edges"),
-          fetchJson<Record<string, ClusterHealthSnapshot>>("http://127.0.0.1:8000/api/cluster_health").catch(() => ({})),
+          fetchJson<unknown[]>("/api/entities"),
+          fetchJson<unknown[]>("/api/edges"),
+          fetchJson<Record<string, ClusterHealthSnapshot>>("/api/cluster_health").catch(() => ({})),
         ]);
         if (cancelled) return;
         bootstrap(ents as Entity[], eds as Edge[]);

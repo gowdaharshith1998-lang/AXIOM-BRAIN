@@ -28,12 +28,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export async function getStudioSettings(): Promise<StudioSettings> {
-  const data = await request<{ settings: StudioSettings }>("http://127.0.0.1:8000/api/internal/settings");
+  const data = await request<{ settings: StudioSettings }>("/api/internal/settings");
   return data.settings;
 }
 
 export async function saveStudioSettings(payload: StudioSettings): Promise<StudioSettings> {
-  const data = await request<{ settings: StudioSettings }>("http://127.0.0.1:8000/api/internal/settings", {
+  const data = await request<{ settings: StudioSettings }>("/api/internal/settings", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -46,5 +46,5 @@ export async function getMcpStats(): Promise<MCPStats> {
 }
 
 export async function getHealth(): Promise<{ status: string }> {
-  return request<{ status: string }>("http://127.0.0.1:8000/api/health");
+  return request<{ status: string }>("/api/health");
 }
