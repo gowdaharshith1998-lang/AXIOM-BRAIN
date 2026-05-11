@@ -28,11 +28,15 @@ describe("ConnectorsPage", () => {
         return jsonResponse({
           connectors: [
             { vendor: "github", status: "connected", account_label: "Octo Org", last_sync_at: null },
+            { vendor: "linear", status: "connected", account_label: "Linear Workspace", last_sync_at: null },
           ],
         });
       }
       if (url === "/api/internal/connectors/github/install") {
         return jsonResponse({ authorize_url: "https://github.com/login/oauth/authorize?state=csrf" });
+      }
+      if (url === "/api/internal/connectors/linear/install") {
+        return jsonResponse({ authorize_url: "https://linear.app/oauth/authorize?state=csrf" });
       }
       return jsonResponse({});
     });
@@ -63,12 +67,30 @@ describe("ConnectorsPage", () => {
   it("github_connected_row_shows_account_label", async () => {
     renderPage();
     expect(await screen.findByText("Octo Org")).toBeInTheDocument();
-    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getAllByText("Connected")).toHaveLength(2);
   });
 
   it("github_sync_now_button_calls_sync_endpoint", async () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Sync GitHub" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/internal/connectors/github/sync", { method: "POST" }));
+  });
+
+  it("linear_connect_button_opens_authorize_popup", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === "/api/internal/connectors/status") return jsonResponse({ connectors: [] });
+      if (url === "/api/internal/connectors/linear/install") {
+        return jsonResponse({ authorize_url: "https://linear.app/oauth/authorize?state=csrf" });
+      }
+      return jsonResponse({});
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Linear" }));
+    await waitFor(() => expect(window.open).toHaveBeenCalledWith("https://linear.app/oauth/authorize?state=csrf", "axiom-linear-oauth", "width=720,height=780"));
+  });
+
+  it("linear_connected_row_shows_workspace_label", async () => {
+    renderPage();
+    expect(await screen.findByText("Linear Workspace")).toBeInTheDocument();
   });
 });
