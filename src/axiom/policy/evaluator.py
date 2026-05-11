@@ -8,6 +8,7 @@ from typing import Any, Literal
 from sqlalchemy.orm import Session
 
 from axiom.policy.dsl import PolicyRule
+from axiom.policy.predicates import reset_rate_history
 
 PolicyMode = Literal["allow", "correct", "deny", "pause"]
 
@@ -50,6 +51,7 @@ class RealPolicyEvaluator:
     ) -> None:
         self.rules = list(rules)
         self._session_factory = session_factory
+        reset_rate_history()
 
     def evaluate(
         self,

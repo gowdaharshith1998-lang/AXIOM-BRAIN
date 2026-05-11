@@ -1,0 +1,20 @@
+rules:
+  - rule_id: starter.time.off_hours_production
+    description: Pause production writes outside normal UTC operating hours.
+    severity: warning
+    when: action.intent == "write" and action.payload.environment == "production" and time.off_hours_utc(start_hour=20, end_hour=7) == true
+    then:
+      type: pause
+      reason: "Off-hours production write requested for {entity_id}"
+      approval_required_role: ops
+      approval_timeout_seconds: 1800
+    metadata: {category: temporal, customer_facing: true, tags: [production, off_hours]}
+
+  - rule_id: starter.time.rapid_repeat
+    description: Deny the same action repeated against the same target within 60 seconds.
+    severity: warning
+    when: rate.same_action_within(seconds=60) == true
+    then:
+      type: deny
+      reason: "Repeated {intent} action on {entity_id} within 60 seconds"
+    metadata: {category: temporal, customer_facing: true, tags: [rate_limit, repeat]}

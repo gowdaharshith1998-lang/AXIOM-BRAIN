@@ -1,0 +1,27 @@
+rules:
+  - rule_id: starter.passport.revoked
+    description: Deny any action from a revoked passport.
+    severity: critical
+    when: passport.status == "revoked"
+    then:
+      type: deny
+      reason: "Passport {passport_id} is revoked, cannot {intent}"
+    metadata: {category: passport_state, customer_facing: true, tags: [passport, revoked]}
+
+  - rule_id: starter.passport.expired
+    description: Deny any action from an expired passport.
+    severity: critical
+    when: passport.status == "expired"
+    then:
+      type: deny
+      reason: "Passport {passport_id} is expired, cannot {intent}"
+    metadata: {category: passport_state, customer_facing: true, tags: [passport, expired]}
+
+  - rule_id: starter.passport.kill_switch
+    description: Deny actions when a passport kill switch has been flipped.
+    severity: critical
+    when: passport.kill_switch == true
+    then:
+      type: deny
+      reason: "Passport {passport_id} kill switch is active, cannot {intent}"
+    metadata: {category: passport_state, customer_facing: true, tags: [passport, kill_switch]}

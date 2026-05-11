@@ -1,0 +1,29 @@
+rules:
+  - rule_id: starter.scope.cluster_mismatch
+    description: Correct actions aimed outside the passport cluster scope.
+    severity: warning
+    when: not passport.scope_clusters contains entity.cluster_id
+    then:
+      type: correct
+      reason: "Agent {agent_name} is outside cluster scope for {entity_id}"
+      guidance: "Request explicit scope expansion before acting on this cluster."
+      suggested_alternative: {request_scope_expansion: true}
+    metadata: {category: scope_enforcement, customer_facing: true, tags: [scope, cluster]}
+
+  - rule_id: starter.scope.intent_not_allowed
+    description: Deny actions whose intent is not present in the passport.
+    severity: critical
+    when: not passport.scope_intents contains action.intent
+    then:
+      type: deny
+      reason: "Agent {agent_name} is not allowed to perform {intent}"
+    metadata: {category: scope_enforcement, customer_facing: true, tags: [scope, intent]}
+
+  - rule_id: starter.scope.skill_not_in_passport
+    description: Deny skill runs for skills outside the passport skill scope.
+    severity: critical
+    when: action.payload.skill_id != null and not passport.scope_skills contains action.payload.skill_id
+    then:
+      type: deny
+      reason: "Agent {agent_name} is not scoped to run requested skill"
+    metadata: {category: scope_enforcement, customer_facing: true, tags: [scope, skills]}

@@ -1,0 +1,20 @@
+rules:
+  - rule_id: starter.confidence.low_decision
+    description: Correct actions proposed with low confidence.
+    severity: warning
+    when: confidence < 0.4
+    then:
+      type: correct
+      reason: "Low-confidence action proposed for {entity_id}"
+      guidance: "Increase evidence or switch to a read-only action before retrying."
+      suggested_alternative: {intent: read}
+    metadata: {category: confidence_gates, customer_facing: true, tags: [confidence, correction]}
+
+  - rule_id: starter.confidence.archived_entity
+    description: Deny actions against archived entities.
+    severity: critical
+    when: entity.data.archived == true
+    then:
+      type: deny
+      reason: "Archived entity {entity_id} cannot be modified by {agent_name}"
+    metadata: {category: confidence_gates, customer_facing: true, tags: [archive, deny]}

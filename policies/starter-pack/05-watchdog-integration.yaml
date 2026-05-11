@@ -1,0 +1,22 @@
+rules:
+  - rule_id: starter.watchdog.critical_alert_on_target
+    description: Pause actions when a critical watchdog alert is open on the target.
+    severity: critical
+    when: watchdog.alert_count(entity, severity="critical") > 0
+    then:
+      type: pause
+      reason: "Critical watchdog alert is open on {entity_id}"
+      approval_required_role: ops
+      approval_timeout_seconds: 1800
+    metadata: {category: watchdog_integration, customer_facing: true, tags: [watchdog, critical]}
+
+  - rule_id: starter.watchdog.cluster_outlier
+    description: Correct actions when watchdog has marked the target as a cluster outlier.
+    severity: warning
+    when: watchdog.has_open_alert_on(entity, rule_id="R5") == true
+    then:
+      type: correct
+      reason: "Watchdog cluster outlier alert is open on {entity_id}"
+      guidance: "Review cluster assignment and supporting evidence before changing this entity."
+      suggested_alternative: {review_cluster_outlier: true}
+    metadata: {category: watchdog_integration, customer_facing: true, tags: [watchdog, outlier]}

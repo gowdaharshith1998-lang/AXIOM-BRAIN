@@ -127,6 +127,26 @@ def rate_same_action_within(
     return matched
 
 
+def reset_rate_history() -> None:
+    _RATE_HISTORY.clear()
+
+
+def time_off_hours_utc(
+    action: Any,
+    _passport: Any,
+    _entity: Any,
+    _session: Session | None,
+    *,
+    start_hour: int,
+    end_hour: int,
+) -> bool:
+    timestamp = getattr(action, "timestamp", None) or datetime.utcnow()
+    hour = int(timestamp.hour)
+    if start_hour < end_hour:
+        return start_hour <= hour < end_hour
+    return hour >= start_hour or hour < end_hour
+
+
 PREDICATES: dict[str, PredicateFunc] = {
     "contains_pii": contains_pii_predicate,
     "now": now_predicate,
@@ -134,6 +154,7 @@ PREDICATES: dict[str, PredicateFunc] = {
     "watchdog.has_open_alert_on": watchdog_has_open_alert_on,
     "watchdog.alert_count": watchdog_alert_count,
     "rate.same_action_within": rate_same_action_within,
+    "time.off_hours_utc": time_off_hours_utc,
 }
 
 

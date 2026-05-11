@@ -1,15 +1,6 @@
 version: "1"
 metadata:
   policy_name: "intelligent-default"
-  description: "Placeholder policy file; Phase 1 wires evaluation engine"
+  description: "Legacy placeholder retained for compatibility; real starter rules live in policies/starter-pack."
 
-retry_budget:
-  max_corrects_per_task: 3
-  drift_threshold_cosine: 0.85
-  escalate_after_drift: true
-
-clauses:
-  - id: "clause_000"
-    match:
-      tool: "*"
-    decision: "allow"
+rules: []

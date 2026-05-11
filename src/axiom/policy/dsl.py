@@ -118,8 +118,12 @@ class BinaryExpr(PredicateExpr):
         if left is None:
             return False
         if self.operator == "in":
+            if isinstance(right, list) and "*" in right:
+                return True
             return left in (right or [])
         if self.operator == "contains":
+            if isinstance(left, list) and "*" in left:
+                return True
             return right in (left or [])
         if self.operator == ">":
             return left > right
@@ -283,6 +287,9 @@ class _Parser:
             return LiteralExpr(float(raw) if "." in raw else int(raw))
         if token.value in {"true", "false"}:
             return LiteralExpr(self._advance().value == "true")
+        if token.value == "null":
+            self._advance()
+            return LiteralExpr(None)
         if token.value == "[":
             return self._parse_list()
         if token.value == "(":
@@ -403,7 +410,7 @@ def load_policies_from_dir(path: str | Path) -> list[PolicyRule]:
     rules: list[PolicyRule] = []
     if not root.exists():
         return []
-    for file_path in sorted(root.glob("*.yaml")):
+    for file_path in sorted(root.rglob("*.yaml")):
         for rule in parse_policy_yaml(file_path.read_text(encoding="utf-8")):
             rules.append(
                 PolicyRule(

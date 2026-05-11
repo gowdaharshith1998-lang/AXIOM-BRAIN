@@ -1,0 +1,33 @@
+rules:
+  - rule_id: starter.data.pii_in_payload
+    description: Correct actions that include obvious personal data in their payload.
+    severity: warning
+    when: data.payload contains_pii() == true
+    then:
+      type: correct
+      reason: "Payload for {intent} on {entity_id} appears to contain PII"
+      guidance: "Redact email addresses, phone numbers, SSNs, and payment data before retrying."
+      suggested_alternative: {redact_pii: true}
+    metadata: {category: data_safety, customer_facing: true, tags: [pii, redaction]}
+
+  - rule_id: starter.data.export_external
+    description: Pause external data exports for human review.
+    severity: critical
+    when: action.intent == "export" and action.payload.destination == "external"
+    then:
+      type: pause
+      reason: "External export requested for {entity_id}"
+      approval_required_role: data_owner
+      approval_timeout_seconds: 3600
+    metadata: {category: data_safety, customer_facing: true, tags: [export, approval]}
+
+  - rule_id: starter.data.bulk_delete
+    description: Pause destructive deletes that affect more than 100 entities.
+    severity: critical
+    when: action.intent == "delete" and action.payload.entity_count > 100
+    then:
+      type: pause
+      reason: "Bulk delete above 100 entities requires approval"
+      approval_required_role: ops
+      approval_timeout_seconds: 1800
+    metadata: {category: data_safety, customer_facing: true, tags: [delete, bulk, approval]}
