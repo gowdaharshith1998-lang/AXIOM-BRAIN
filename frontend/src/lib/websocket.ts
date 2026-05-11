@@ -17,6 +17,7 @@ export type BrainEvent = {
     | "watchdog_alert_raised"
     | "watchdog_alert_acknowledged"
     | "watchdog_alert_resolved"
+    | "policy_clause_activated"
     | "approval_requested"
     | "approval_approved"
     | "approval_denied"

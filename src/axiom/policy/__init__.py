@@ -23,8 +23,10 @@ def _repo_root() -> Path:
 
 @lru_cache(maxsize=1)
 def load_policies() -> list[PolicyRule]:
+    from .watchdog_integration import watchdog_rules_as_policies
+
     policy_dir = Path(os.environ.get("AXIOM_POLICY_DIR", _repo_root() / "policies"))
-    return load_policies_from_dir(policy_dir)
+    return [*watchdog_rules_as_policies(), *load_policies_from_dir(policy_dir)]
 
 
 def reload_policies() -> list[PolicyRule]:

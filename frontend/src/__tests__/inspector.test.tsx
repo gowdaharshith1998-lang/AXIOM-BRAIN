@@ -49,6 +49,7 @@ function installInspectorFetch(overrides: Record<string, unknown> = {}) {
       ],
       edges: [{ id: "edge_in", source_id: "src_1", target_id: "e1", relationship: "blocks", data: {}, created_at: "2026-05-10T00:00:00Z" }],
     },
+    "/api/internal/policies/active?entity_id=e1": { rules: [] },
     ...overrides,
   };
   vi.stubGlobal(
@@ -154,6 +155,44 @@ describe("inspector metadata", () => {
     fireEvent.click(screen.getByRole("button", { name: "Activity" }));
     expect(await screen.findByText("act_1")).toBeInTheDocument();
     expect(screen.getByText((content) => content.includes("watchdog"))).toBeInTheDocument();
+  });
+
+  it("entity_inspector_active_policies_section_renders", async () => {
+    installInspectorFetch({
+      "/api/internal/policies/active?entity_id=e1": {
+        rules: [
+          {
+            rule_id: "watchdog.R1.billing_change_without_decision",
+            description: "Billing change requires a linked decision.",
+            action: "pause",
+            severity: "critical",
+            reason: "Billing change without decision",
+          },
+        ],
+      },
+    });
+    renderSelectedInspector();
+    expect(await screen.findByText("Active Policies")).toBeInTheDocument();
+    expect(screen.getByText("watchdog.R1.billing_change_without_decision")).toBeInTheDocument();
+  });
+
+  it("entity_inspector_active_policies_updates_on_watchdog_alert", async () => {
+    const activePayload = { rules: [] as Array<Record<string, unknown>> };
+    installInspectorFetch({ "/api/internal/policies/active?entity_id=e1": activePayload });
+    renderSelectedInspector();
+    expect(await screen.findByText("No active policy clauses.")).toBeInTheDocument();
+
+    activePayload.rules = [
+      {
+        rule_id: "watchdog.R2.ticket_severity_mismatch_runbook",
+        description: "P1 ticket requires a runbook.",
+        action: "pause",
+        severity: "critical",
+        reason: "P1 ticket has no runbook",
+      },
+    ];
+    window.dispatchEvent(new CustomEvent("axiom:brain-event", { detail: { type: "policy_clause_activated", payload: { entity_id: "e1" } } }));
+    expect(await screen.findByText("watchdog.R2.ticket_severity_mismatch_runbook")).toBeInTheDocument();
   });
 
   it("inspector_no_hardcoded_strings_remain", async () => {

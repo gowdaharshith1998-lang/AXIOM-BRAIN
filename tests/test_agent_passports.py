@@ -35,14 +35,23 @@ def passport_db(tmp_path: Path) -> sessionmaker[Session]:
 @pytest.fixture()
 def passport_service(passport_db: sessionmaker[Session]) -> AxiomMCPService:
     with passport_db() as session:
-        session.add(
-            Entity(
-                id="eng_1",
-                type="doc",
-                cluster_id="engineering_code",
-                composite_importance=0.1,
-                data={"title": "Engineering Note"},
-            )
+        session.add_all(
+            [
+                Entity(
+                    id="eng_1",
+                    type="doc",
+                    cluster_id="engineering_code",
+                    composite_importance=0.1,
+                    data={"title": "Engineering Note"},
+                ),
+                Entity(
+                    id="eng_2",
+                    type="doc",
+                    cluster_id="engineering_code",
+                    composite_importance=0.1,
+                    data={"title": "Second Engineering Note"},
+                ),
+            ]
         )
         session.commit()
     return AxiomMCPService(session_factory=passport_db)
@@ -295,8 +304,8 @@ def test_passport_smoke_revoke_and_kill_switch(
     after_toggle = passport_service.record_action(
         agent_name="test_agent_1",
         intent="read",
-        target_entity_id="eng_1",
-        proposed_action="read engineering note",
+        target_entity_id="eng_2",
+        proposed_action="read second engineering note",
         idempotency_key=None,
         passport_token=kill_token,
     )

@@ -326,6 +326,19 @@ class WatchdogAgent:
                 "payload": watchdog_insight_from_alert(alert),
             }
         )
+        await self._broadcaster.publish(
+            {
+                "type": "policy_clause_activated",
+                "source_id": None,
+                "persisted_id": f"watchdog.{alert.rule_id}",
+                "timestamp": int(time.time() * 1000),
+                "payload": {
+                    "policy_id": f"watchdog.{alert.rule_id}",
+                    "watchdog_rule_id": alert.rule_id,
+                    "alert": payload,
+                },
+            }
+        )
         if self._sessionmaker is None:
             return
         try:

@@ -122,6 +122,27 @@ type GovernanceSnapshot = {
   };
 };
 
+type PolicySourceFilter = "all" | "starter_pack" | "watchdog" | "custom";
+
+type RealPolicyRule = {
+  rule_id: string;
+  description: string;
+  action: string;
+  severity: string;
+  guidance?: string | null;
+  suggested_alternative?: string | null;
+  approval_required_role?: string | null;
+  approval_timeout_seconds?: number | null;
+  predicate?: string | null;
+  source_file?: string | null;
+  metadata: Record<string, unknown>;
+};
+
+type RealPolicyResponse = {
+  count: number;
+  rules: RealPolicyRule[];
+};
+
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: "overview", label: "Overview" },
   { id: "policies", label: "Policies" },
@@ -135,6 +156,12 @@ async function fetchGovernanceSnapshot(): Promise<GovernanceSnapshot> {
   const response = await fetch("/api/governance");
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return (await response.json()) as GovernanceSnapshot;
+}
+
+async function fetchRealPolicyRules(source: PolicySourceFilter): Promise<RealPolicyResponse> {
+  const response = await fetch(`/api/internal/policies?source=${encodeURIComponent(source)}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return (await response.json()) as RealPolicyResponse;
 }
 
 function formatNumber(value: number | null | undefined) {
@@ -167,6 +194,11 @@ function shortHash(value: string | null | undefined) {
 
 function recorded(value: string | null | undefined) {
   return value && value.trim() ? value : "Not recorded";
+}
+
+function metadataString(metadata: Record<string, unknown>, key: string): string | null {
+  const value = metadata[key];
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 function titleCase(value: string | null | undefined) {
@@ -427,60 +459,134 @@ function OverviewPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
 }
 
 function PoliciesPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
-  const rows = snapshot.policies.map((policy) => ({
-    name: <span className="gov-name-cell"><Icon name="policy" />{policy.name}</span>,
-    scope: <StatusPill tone="blue">{titleCase(policy.scope)}</StatusPill>,
-    owner: <span>{recorded(policy.owner)}<small>{recorded(policy.team || policy.source_id)}</small></span>,
-    mode: <StatusPill tone={policy.mode ? "green" : "blue"}>{titleCase(policy.mode || "recorded")}</StatusPill>,
-    updated: formatDate(policy.updated_at),
-    status: <StatusPill tone={resultTone(policy.status)}>{titleCase(policy.status)}</StatusPill>,
-  }));
-  const first = snapshot.policies[0];
-  const byType = new Map<string, number>();
-  snapshot.policies.forEach((policy) => byType.set(policy.type, (byType.get(policy.type) || 0) + 1));
-  const categoryLabels = [...byType.entries()].slice(0, 5).map(([label, count]) => [titleCase(label), `${count}`] as [string, string]);
+  const [source, setSource] = useState<PolicySourceFilter>("all");
+  const [rules, setRules] = useState<RealPolicyRule[]>([]);
+  const [policyError, setPolicyError] = useState<string | null>(null);
+  const [selectedRule, setSelectedRule] = useState<RealPolicyRule | null>(null);
+  const [watchdogAlerts, setWatchdogAlerts] = useState<WatchdogAlert[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchRealPolicyRules(source)
+      .then((payload) => {
+        if (!cancelled) {
+          setRules(payload.rules);
+          setPolicyError(null);
+          setSelectedRule((current) => current && payload.rules.some((rule) => rule.rule_id === current.rule_id) ? current : (payload.rules[0] ?? null));
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setRules([]);
+          setPolicyError(err instanceof Error ? err.message : "Unable to load policy rules");
+          setSelectedRule(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+
+  useEffect(() => {
+    listWatchdogAlerts().then(setWatchdogAlerts).catch(() => setWatchdogAlerts([]));
+  }, []);
+
+  const ruleAlertStats = useMemo(() => {
+    const stats = new Map<string, { count: number; last: string | null; alerts: WatchdogAlert[] }>();
+    for (const alert of watchdogAlerts) {
+      const key = alert.rule_id;
+      const current = stats.get(key) ?? { count: 0, last: null, alerts: [] };
+      current.count += 1;
+      current.alerts.push(alert);
+      if (alert.detected_at && (!current.last || new Date(alert.detected_at).getTime() > new Date(current.last).getTime())) current.last = alert.detected_at;
+      stats.set(key, current);
+    }
+    return stats;
+  }, [watchdogAlerts]);
+
+  const rows = rules.map((rule) => {
+    const ruleSource = metadataString(rule.metadata, "source") ?? "custom";
+    const watchdogRuleId = metadataString(rule.metadata, "watchdog_rule_id");
+    const stats = watchdogRuleId ? ruleAlertStats.get(watchdogRuleId) : null;
+    return {
+      name: (
+        <button type="button" className="gov-name-cell" onClick={() => setSelectedRule(rule)}>
+          <Icon name={ruleSource === "watchdog" ? "warning" : "policy"} />{rule.rule_id}
+        </button>
+      ),
+      source: <StatusPill tone={ruleSource === "watchdog" ? "amber" : ruleSource === "starter_pack" ? "green" : "blue"}>{titleCase(ruleSource)}</StatusPill>,
+      action: <StatusPill tone={rule.action === "pause" ? "amber" : resultTone(rule.action)}>{titleCase(rule.action)}</StatusPill>,
+      severity: <span className={cx("gov-dot-label", rule.severity.toLowerCase())}>{titleCase(rule.severity)}</span>,
+      fired: stats ? `${formatNumber(stats.count)} open` : "0 open",
+      lastFired: stats?.last ? formatDate(stats.last) : "Not fired",
+    };
+  });
+  const selectedSource = selectedRule ? metadataString(selectedRule.metadata, "source") ?? "custom" : null;
+  const selectedWatchdogRuleId = selectedRule ? metadataString(selectedRule.metadata, "watchdog_rule_id") : null;
+  const selectedFireHistory = selectedWatchdogRuleId ? ruleAlertStats.get(selectedWatchdogRuleId)?.alerts ?? [] : [];
+  const bySource = new Map<string, number>();
+  rules.forEach((rule) => {
+    const ruleSource = metadataString(rule.metadata, "source") ?? "custom";
+    bySource.set(ruleSource, (bySource.get(ruleSource) || 0) + 1);
+  });
+  const sourceLabels = [...bySource.entries()].slice(0, 5).map(([label, count]) => [titleCase(label), `${count}`] as [string, string]);
   return (
     <>
       <div className="gov-grid policies-kpis">
-        <KpiCard title="Policy Entities" value={formatNumber(snapshot.summary.policy_count)} detail="From entities table" accent="cyan" icon="shield" />
-        <KpiCard title="Active Policies" value={formatNumber(snapshot.summary.active_policy_count)} detail="Status not archived or inactive" accent="green" icon="shield" />
-        <KpiCard title="Governance Sources" value={formatNumber(snapshot.summary.source_count)} detail="Connected source records" accent="blue" icon="database" />
-        <Panel title="Policy Categories">
+        <KpiCard title="Loaded Rules" value={formatNumber(rules.length)} detail="From real policy evaluator" accent="cyan" icon="shield" />
+        <KpiCard title="Entity Policies" value={formatNumber(snapshot.summary.policy_count)} detail="Recorded governance entities" accent="green" icon="shield" />
+        <KpiCard title="Watchdog Alerts" value={formatNumber(watchdogAlerts.length)} detail="Open alerts linked to rules" accent="amber" icon="warning" />
+        <Panel title="Rule Sources">
           <Donut
-            center={<><strong>{formatNumber(byType.size)}</strong><span>Types</span></>}
-            labels={categoryLabels.length ? categoryLabels : [["Recorded", "0"]]}
+            center={<><strong>{formatNumber(bySource.size)}</strong><span>Sources</span></>}
+            labels={sourceLabels.length ? sourceLabels : [["Loaded", "0"]]}
           />
         </Panel>
       </div>
-      <SearchAndFilters placeholder="Search policies..." />
+      <div className="gov-filters">
+        {(["all", "starter_pack", "watchdog", "custom"] as PolicySourceFilter[]).map((item) => (
+          <button key={item} type="button" className={source === item ? "is-active" : ""} onClick={() => setSource(item)}>
+            Source <strong>{titleCase(item)}</strong>
+          </button>
+        ))}
+      </div>
       <div className="gov-grid policies-main">
-        <Panel title="Policy Registry">
+        <Panel title="Policy Registry" action={policyError ? <StatusPill tone="red">Unavailable</StatusPill> : <StatusPill tone="green">Live</StatusPill>}>
+          {policyError ? <p className="gov-muted">Unable to load policy rules: {policyError}</p> : null}
           <GovernanceTable
             columns={[
-              { key: "name", label: "Policy Name" },
-              { key: "scope", label: "Scope" },
-              { key: "owner", label: "Owner" },
-              { key: "mode", label: "Enforcement Mode" },
-              { key: "updated", label: "Last Updated" },
-              { key: "status", label: "Status" },
+              { key: "name", label: "Policy Rule" },
+              { key: "source", label: "Source" },
+              { key: "action", label: "Action" },
+              { key: "severity", label: "Severity" },
+              { key: "fired", label: "Alerts" },
+              { key: "lastFired", label: "Last Fired" },
             ]}
             rows={rows}
-            emptyMessage="No policy or governance entities are recorded."
+            emptyMessage="No loaded policy rules match this source."
           />
-          <div className="gov-pagination">Showing {formatNumber(rows.length)} of {formatNumber(snapshot.summary.policy_count)} policy records</div>
+          <div className="gov-pagination">Showing {formatNumber(rows.length)} loaded policy rules</div>
         </Panel>
         <div className="gov-side-stack">
-          <Panel title="Policy Details">
-            {first ? (
+          <Panel title="Policy Rule Details">
+            {selectedRule ? (
               <>
-                <div className="gov-detail-title"><HexIcon icon="database" accent="blue" /><div><strong>{first.name}</strong><span>{titleCase(first.type)} · {titleCase(first.status)}</span></div><StatusPill tone={resultTone(first.status)}>{titleCase(first.status)}</StatusPill></div>
-                <DetailRows rows={[["Owner", recorded(first.owner)], ["Team", recorded(first.team)], ["Scope", titleCase(first.scope)], ["Mode", titleCase(first.mode || "recorded")], ["Last Updated", formatDate(first.updated_at)]]} />
-                <p className="gov-detail-copy">This detail panel is populated directly from the selected entity record.</p>
+                <div className="gov-detail-title"><HexIcon icon={selectedSource === "watchdog" ? "warning" : "policy"} accent={selectedSource === "watchdog" ? "amber" : "blue"} /><div><strong>{selectedRule.rule_id}</strong><span>{titleCase(selectedSource)} · {titleCase(selectedRule.action)}</span></div><StatusPill tone={severityTone(selectedRule.severity)}>{titleCase(selectedRule.severity)}</StatusPill></div>
+                <DetailRows rows={[
+                  ["Description", selectedRule.description],
+                  ["Predicate", selectedRule.predicate ?? "Not recorded"],
+                  ["Approval Role", recorded(selectedRule.approval_required_role)],
+                  ["Source File", recorded(selectedRule.source_file)],
+                  ["Edit Link", selectedRule.source_file ? selectedRule.source_file : "Generated rule"],
+                ]} />
+                <p className="gov-detail-copy">{selectedRule.guidance ?? "No guidance recorded for this rule."}</p>
               </>
-            ) : <p className="gov-muted">No policy record is available.</p>}
+            ) : <p className="gov-muted">No policy rule is selected.</p>}
           </Panel>
-          <Panel title="Policy Status Distribution">
-            <Donut center={<><strong>{formatNumber(snapshot.summary.policy_count)}</strong><span>Policies</span></>} accent="amber" labels={[[ "Active", `${snapshot.summary.active_policy_count}` ], [ "Other", `${Math.max(snapshot.summary.policy_count - snapshot.summary.active_policy_count, 0)}` ]]} />
+          <Panel title="Fire History">
+            {selectedFireHistory.length ? (
+              <Timeline compact items={selectedFireHistory.map((alert) => `${alert.rule_id} · ${alert.entity_id} · ${formatDate(alert.detected_at)}`)} />
+            ) : <p className="gov-muted">No watchdog fire history for the selected rule.</p>}
           </Panel>
         </div>
       </div>

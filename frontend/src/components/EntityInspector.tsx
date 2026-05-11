@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { CLUSTER_LABELS, isClusterId, type ClusterId } from "@/lib/cluster-layout";
 import { superClusterIdForEntity } from "@/lib/cluster-reframe";
+import type { BrainEvent } from "@/lib/websocket";
 import { useBrainStore, type Edge, type Entity } from "@/state/brain.store";
 
 const tabs = ["Overview", "Connections", "Lineage", "Activity"];
@@ -38,6 +39,16 @@ type EntityEdges = {
 type EntityLineage = {
   nodes: Entity[];
   edges: Edge[];
+};
+
+type ActivePolicyRule = {
+  rule_id: string;
+  description: string;
+  action: string;
+  severity: string;
+  mode?: string;
+  reason?: string | null;
+  metadata?: Record<string, unknown>;
 };
 
 async function requestJson<T>(path: string): Promise<T> {
@@ -154,6 +165,7 @@ function EntityView({
   const [sourceName, setSourceName] = useState<string | null>(null);
   const [entityEdges, setEntityEdges] = useState<EntityEdges>({ incoming: [], outgoing: [] });
   const [lineage, setLineage] = useState<EntityLineage>({ nodes: [], edges: [] });
+  const [activePolicies, setActivePolicies] = useState<ActivePolicyRule[]>([]);
   const latestReceipt = receipts[0] ?? null;
   const root = receiptHash(receiptDetail) ?? receiptHash(latestReceipt);
   const policyStatus = latestReceipt ? titleCase(latestReceipt.decision) : "No policy decisions yet.";
@@ -167,6 +179,16 @@ function EntityView({
     setSourceName(null);
     setEntityEdges({ incoming: [], outgoing: [] });
     setLineage({ nodes: [], edges: [] });
+    setActivePolicies([]);
+
+    async function loadActivePolicies() {
+      try {
+        const payload = await requestJson<{ rules: ActivePolicyRule[] }>(`/api/internal/policies/active?entity_id=${encodeURIComponent(entity.id)}`);
+        if (!cancelled) setActivePolicies(payload.rules ?? []);
+      } catch {
+        if (!cancelled) setActivePolicies([]);
+      }
+    }
 
     async function load() {
       try {
@@ -212,11 +234,25 @@ function EntityView({
       } catch {
         if (!cancelled) setLineage({ nodes: [], edges: [] });
       }
+
+      await loadActivePolicies();
     }
 
     void load();
+
+    function onBrainEvent(event: Event) {
+      const detail = (event as CustomEvent<BrainEvent>).detail;
+      if (!detail) return;
+      if (!["policy_clause_activated", "watchdog_alert_raised", "watchdog_alert_acknowledged", "watchdog_alert_resolved"].includes(detail.type)) return;
+      const payload = detail.payload as { entity_id?: string } | undefined;
+      if (payload?.entity_id && payload.entity_id !== entity.id) return;
+      void loadActivePolicies();
+    }
+
+    window.addEventListener("axiom:brain-event", onBrainEvent);
     return () => {
       cancelled = true;
+      window.removeEventListener("axiom:brain-event", onBrainEvent);
     };
   }, [entity.id, entity.source_id]);
 
@@ -289,6 +325,20 @@ function EntityView({
                 </div>
               </div>
               <div className="mt-3 text-xs text-[#E8F0FF]/55">Data Source: {dataSourceLabel}</div>
+              <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
+                <div className="text-[10px] uppercase tracking-[0.16em] text-[#E8F0FF]/38">Active Policies</div>
+                <div className="mt-2 space-y-2">
+                  {activePolicies.length ? activePolicies.map((rule) => (
+                    <div key={rule.rule_id} className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
+                      <div className="flex items-center justify-between gap-2 text-xs text-[#E8F0FF]/78">
+                        <span className="min-w-0 truncate">{rule.rule_id}</span>
+                        <span className="shrink-0 text-[10px] uppercase tracking-[0.12em] text-[#ffbf3d]">{rule.action}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-[#E8F0FF]/45">{rule.reason ?? rule.description}</div>
+                    </div>
+                  )) : <div className="text-xs text-[#E8F0FF]/45">No active policy clauses.</div>}
+                </div>
+              </div>
             </Section>
             <Section title="Connected Entities">
               <div className="space-y-2">

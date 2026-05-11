@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket
@@ -83,7 +84,7 @@ from axiom.organize.cluster_health import (
     compute_brain_health_score,
     health_status_for_score,
 )
-from axiom.policy import PolicyRule, reload_policies
+from axiom.policy import ActionRequest, PolicyRule, RealPolicyEvaluator, reload_policies
 from axiom.retrieval.embeddings import bootstrap_embeddings, ensure_entity_embeddings_schema
 from axiom.retrieval.search import SearchMode, hybrid_search
 from axiom.schema.dto import EdgeDTO, EntityDTO
@@ -945,9 +946,11 @@ def create_app(
         return payload
 
     @app.get("/api/internal/policies")
-    def get_internal_policies() -> dict[str, Any]:
+    def get_internal_policies(source: str = Query("all")) -> dict[str, Any]:
         evaluator = app.state.policy_evaluator
         rules = list(getattr(evaluator, "rules", []))
+        if source != "all":
+            rules = [rule for rule in rules if rule.metadata.get("source") == source]
         return {
             "rules": [_policy_rule_row(rule) for rule in rules],
             "count": len(rules),
@@ -962,6 +965,37 @@ def create_app(
             "rules": [_policy_rule_row(rule) for rule in active_rules],
             "count": len(active_rules),
         }
+
+    @app.get("/api/internal/policies/active")
+    def get_internal_active_policies(entity_id: str) -> dict[str, Any]:
+        with session_local() as session:
+            entity = session.get(Entity, entity_id)
+            if entity is None:
+                raise HTTPException(status_code=404, detail="entity not found")
+        passport = SimpleNamespace(
+            passport_id="policy_probe",
+            agent_name="policy_probe",
+            scope_clusters=["*"],
+            scope_intents=["*"],
+            scope_skills=["*"],
+            kill_switch=False,
+            revoked_at=None,
+            expires_at=datetime(2099, 1, 1),
+        )
+        action = ActionRequest(
+            agent_name="policy_probe",
+            intent="write",
+            target_entity_id=entity_id,
+            proposed_action="active policy probe",
+            idempotency_key=None,
+            payload={},
+        )
+        rows: list[dict[str, Any]] = []
+        for rule in getattr(app.state.policy_evaluator, "rules", []):
+            decision = RealPolicyEvaluator([rule], session_local).evaluate(action, passport, entity)
+            if decision.policy_id == rule.rule_id:
+                rows.append({**_policy_rule_row(rule), "mode": decision.mode})
+        return {"rules": rows, "count": len(rows)}
 
     @app.get("/api/internal/policies/{rule_id}")
     def get_internal_policy(rule_id: str) -> dict[str, Any]:

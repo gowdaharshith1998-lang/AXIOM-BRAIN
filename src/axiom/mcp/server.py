@@ -28,7 +28,11 @@ from axiom.govern.passports import (
     ensure_system_passport,
     verify_passport,
 )
-from axiom.govern.policy_evaluator import CORRECT_IMPORTANCE_THRESHOLD, get_policy_evaluator
+from axiom.govern.policy_evaluator import (
+    CORRECT_IMPORTANCE_THRESHOLD,
+    DemoPolicyEvaluator,
+    get_policy_evaluator,
+)
 from axiom.govern.receipts import (
     ReceiptInsert,
     chain_insert_receipt,
@@ -854,6 +858,7 @@ class AxiomMCPService:
             "external_mcp_client",
             session_factory=self._session_factory,
             event_callback=emit,
+            policy_evaluator=DemoPolicyEvaluator(deny_rate=0),
             receipt_policy_id=str(evaluation["policy_id"]),
             receipt_reason=str(evaluation["reason"]),
             receipt_passport_id=str(evaluation["passport_id"]),

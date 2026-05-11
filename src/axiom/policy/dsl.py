@@ -412,6 +412,7 @@ def load_policies_from_dir(path: str | Path) -> list[PolicyRule]:
         return []
     for file_path in sorted(root.rglob("*.yaml")):
         for rule in parse_policy_yaml(file_path.read_text(encoding="utf-8")):
+            source = "starter_pack" if "starter-pack" in file_path.parts else "custom"
             rules.append(
                 PolicyRule(
                     rule_id=rule.rule_id,
@@ -419,7 +420,7 @@ def load_policies_from_dir(path: str | Path) -> list[PolicyRule]:
                     severity=rule.severity,
                     when=rule.when,
                     then=rule.then,
-                    metadata={**rule.metadata, "source_file": str(file_path)},
+                    metadata={**rule.metadata, "source": source, "source_file": str(file_path)},
                     source=str(file_path),
                 )
             )

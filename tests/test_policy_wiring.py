@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import pytest
@@ -11,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.govern.policy_evaluator import DemoPolicyEvaluator, get_policy_evaluator
 from axiom.mcp.server import AxiomMCPService
-from axiom.policy import RealPolicyEvaluator, reload_policies
+from axiom.policy import RealPolicyEvaluator, load_policies, reload_policies
 from axiom.schema.models import Base, Entity, Receipt, SkillRun
 from axiom.skills.registry import register_skill_with_session
 from axiom.skills.runner import run_skill
@@ -91,7 +90,7 @@ def test_default_evaluator_loads_from_policies_dir_at_startup(
     assert isinstance(evaluator, RealPolicyEvaluator)
 
 
-def test_evaluator_factory_falls_back_to_demo_if_policies_dir_missing(
+def test_evaluator_factory_loads_watchdog_clauses_if_policies_dir_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     wiring_sf: sessionmaker[Session],
@@ -100,21 +99,25 @@ def test_evaluator_factory_falls_back_to_demo_if_policies_dir_missing(
 
     evaluator = get_policy_evaluator(wiring_sf)
 
-    assert isinstance(evaluator, DemoPolicyEvaluator)
+    assert isinstance(evaluator, RealPolicyEvaluator)
+    assert evaluator.rules
+    assert evaluator.rules[0].rule_id.startswith("watchdog.")
 
 
-def test_real_evaluator_logs_warning_on_fallback(
+def test_real_evaluator_falls_back_to_demo_on_invalid_policy(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
     wiring_sf: sessionmaker[Session],
 ) -> None:
-    _clear_policy_cache(monkeypatch, tmp_path / "missing")
+    policy_dir = tmp_path / "policies"
+    policy_dir.mkdir()
+    (policy_dir / "invalid.yaml").write_text("rules:\n  - rule_id:", encoding="utf-8")
+    monkeypatch.setenv("AXIOM_POLICY_DIR", str(policy_dir))
+    load_policies.cache_clear()
 
-    with caplog.at_level(logging.WARNING, logger="axiom.govern.policy_evaluator"):
-        get_policy_evaluator(wiring_sf)
+    evaluator = get_policy_evaluator(wiring_sf)
 
-    assert "falling back to DemoPolicyEvaluator" in caplog.text
+    assert isinstance(evaluator, DemoPolicyEvaluator)
 
 
 def test_mcp_record_action_uses_real_evaluator_when_passport_provided(
@@ -229,9 +232,10 @@ def test_policies_endpoint_lists_current_rules(
     app = create_app(db_url=db_url, enable_organizer=False)
 
     with TestClient(app) as client:
-        response = client.get("/api/internal/policies")
+        response = client.get("/api/internal/policies?source=custom")
 
     assert response.status_code == 200
+    assert response.json()["count"] == 1
     assert response.json()["rules"][0]["rule_id"] == "api.rule"
 
 
@@ -253,8 +257,9 @@ def test_reload_policies_endpoint_picks_up_new_rules(
         response = client.post("/api/internal/policies/reload")
 
     assert response.status_code == 200
-    assert response.json()["count"] == 1
-    assert response.json()["rules"][0]["rule_id"] == "api.after"
+    custom_rules = [rule for rule in response.json()["rules"] if rule["metadata"]["source"] == "custom"]
+    assert len(custom_rules) == 1
+    assert custom_rules[0]["rule_id"] == "api.after"
 
 
 def test_policy_detail_endpoint_fetches_one_rule(
