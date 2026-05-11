@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsPage } from "@/pages/SettingsPage";
+import { saveStudioSettings } from "@/lib/studioClient";
 
 vi.mock("@/lib/studioClient", () => ({
   getStudioSettings: vi.fn().mockResolvedValue({ company_name: "Axiom Analytics Inc." }),
@@ -150,6 +151,19 @@ describe("SettingsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "API & MCP" }));
     await waitFor(() => expect(screen.getByText("Agent Access Policies")).toBeInTheDocument());
     expect(screen.getByRole("link", { name: "Manage Passports" })).toHaveAttribute("href", "/settings/passports");
+  });
+
+  it("sends a member invitation into persisted workspace settings", async () => {
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Access" }));
+    fireEvent.change(screen.getByLabelText("Invite Email"), { target: { value: "teammate@example.com" } });
+    fireEvent.change(screen.getByLabelText("Invite Role"), { target: { value: "Editor" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send Invitation" }));
+    await waitFor(() => expect(saveStudioSettings).toHaveBeenCalledWith(expect.objectContaining({
+      member_invites: [expect.objectContaining({ email: "teammate@example.com", role: "Editor", status: "Pending" })],
+    })));
+    expect(screen.getByText("teammate@example.com")).toBeInTheDocument();
+    expect(screen.getByText("Invitation queued")).toBeInTheDocument();
   });
 
   it.each([

@@ -101,6 +101,19 @@ function hasChartData(points: TimedPoint[]): boolean {
   return points.some((point) => point.value > 0);
 }
 
+function downloadMetricCsv(title: string, points: TimedPoint[]) {
+  const csv = ["label,value", ...points.map((point) => `"${point.label.replace(/"/g, '""')}",${point.value}`)].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "metric"}-trend.csv`;
+  document.body.appendChild(link);
+  if (!navigator.userAgent.includes("jsdom")) link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function Icon({ name, className = "" }: { name: string; className?: string }) {
   const common = { stroke: "currentColor", strokeWidth: 1.8, fill: "none", strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   return (
@@ -119,6 +132,7 @@ function Icon({ name, className = "" }: { name: string; className?: string }) {
       {name === "brain" && <path {...common} d="M9 4a3 3 0 0 0-3 3v1a3 3 0 0 0-1 5.8V15a4 4 0 0 0 4 4h1V4H9Zm6 0a3 3 0 0 1 3 3v1a3 3 0 0 1 1 5.8V15a4 4 0 0 1-4 4h-1V4h1Z" />}
       {name === "arrow" && <path {...common} d="M5 12h13m-5-5 5 5-5 5" />}
       {name === "menu" && <path {...common} d="M12 5h.01M12 12h.01M12 19h.01" />}
+      {name === "download" && <path {...common} d="M12 4v10m0 0 4-4m-4 4-4-4M4 20h16" />}
       {name === "cube" && <path {...common} d="m12 3 7 4v10l-7 4-7-4V7l7-4Zm0 8 7-4M12 11 5 7m7 4v10" />}
       {name === "policy" && <path {...common} d="M7 3h8l3 3v15H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm8 0v4h4M8 12h8M8 16h5" />}
     </svg>
@@ -212,7 +226,9 @@ function HeaderTools({ timeRange, setTimeRange, dataAsOf }: { timeRange: string;
         </select>
         <Icon name="calendar" />
       </label>
-      <span className="ins-filter-button"><Icon name="filter" /> Time range filters metrics</span>
+      <button type="button" className="ins-filter-button" onClick={() => setTimeRange(timeRange === "Last 30 Days" ? "Last 7 Days" : "Last 30 Days")}>
+        <Icon name="filter" /> {timeRange === "Last 30 Days" ? "Focus 7 Days" : "Show 30 Days"}
+      </button>
     </div>
   );
 }
@@ -433,20 +449,24 @@ function OverviewTab({ data }: { data: RealData }) {
 
 function TrendsTab({ data }: { data: RealData }) {
   const [query, setQuery] = useState("");
+  const [hideEmpty, setHideEmpty] = useState(false);
   const cards = [
     { title: "Entities Created", value: data.entities.length, detail: "/api/entities", accent: "blue" as Accent, points: data.charts.entityDaily },
     { title: "Relationships Created", value: data.edges.length, detail: "/api/edges", accent: "cyan" as Accent, points: data.charts.edgeDaily },
     { title: "Real Agent Actions", value: data.agentActions.length, detail: "Demo actions excluded", accent: "purple" as Accent, points: data.charts.actionDaily },
     { title: "Real Receipts", value: data.receipts.length, detail: "Demo receipts excluded", accent: "green" as Accent, points: data.charts.receiptDaily },
     { title: "Real Insights", value: data.insights.length, detail: "Demo insights excluded", accent: "amber" as Accent, points: data.charts.insightDaily },
-  ].filter((card) => card.title.toLowerCase().includes(query.toLowerCase()));
+  ].filter((card) => card.title.toLowerCase().includes(query.toLowerCase()))
+    .filter((card) => !hideEmpty || card.value > 0 || hasChartData(card.points));
 
   return (
     <>
       <div className="ins-trends-top">
         <div className="ins-date"><span>{data.days}-day window</span><Icon name="calendar" /></div>
         <label className="ins-search"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search real metrics..." /></label>
-        <span className="ins-filter-button"><Icon name="filter" /> Search filters metrics</span>
+        <button type="button" className="ins-filter-button" onClick={() => setHideEmpty((value) => !value)}>
+          <Icon name="filter" /> {hideEmpty ? "Show Empty Metrics" : "Hide Empty Metrics"}
+        </button>
         <TrendHighlight title="Most Connected Entity" value={buildDegreeRows(data.entities, data.edges)[0]?.entity ? titleForEntity(buildDegreeRows(data.entities, data.edges)[0].entity) : "N/A"} delta={buildDegreeRows(data.entities, data.edges)[0] ? `${buildDegreeRows(data.entities, data.edges)[0].degree} edges` : "No edges"} accent="blue" />
         <TrendHighlight title="Active Real Agents" value={formatNumber(realAgentNames(data).length)} delta="From non-demo actions and MCP stats" accent="green" />
         <TrendHighlight title="Success Rate" value={formatPercent(receiptSuccessRate(data.receipts), 1)} delta="From real receipts" accent="purple" />
@@ -454,7 +474,7 @@ function TrendsTab({ data }: { data: RealData }) {
 
       <div className="ins-grid ins-trend-grid">
         {cards.map((card) => (
-          <Panel key={card.title} title={card.title} action={<span className="ins-icon-button" aria-hidden="true"><Icon name="menu" /></span>}>
+          <Panel key={card.title} title={card.title} action={<button type="button" className="ins-icon-button" aria-label={`Download ${card.title} trend`} onClick={() => downloadMetricCsv(card.title, card.points)}><Icon name="download" /></button>}>
             <div className="ins-trend-metric"><strong>{formatNumber(card.value)}</strong><span>{card.detail}</span></div>
             <MiniLineChart accent={card.accent} points={card.points} />
           </Panel>

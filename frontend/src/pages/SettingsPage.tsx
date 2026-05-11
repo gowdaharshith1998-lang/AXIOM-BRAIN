@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { AddKeyDialog } from "@/components/settings/AddKeyDialog";
@@ -9,6 +9,7 @@ import { secretForProvider, useSettingsStore, visibleProviders } from "@/state/s
 
 const tabs = ["general", "integrations", "access", "notifications", "security", "preferences", "api-mcp"] as const;
 type Tab = (typeof tabs)[number];
+type MemberInvite = { email: string; role: string; status: string; invited_at: string };
 
 function Phase({ children }: { children: string }) {
   return <span className="ml-2 rounded border border-[#2c5c95] bg-[#10294f] px-1.5 py-0.5 text-[10px] leading-none text-[#86b7ff]">{children}</span>;
@@ -62,6 +63,21 @@ function DataTable({ headers, rows }: { headers: string[]; rows: React.ReactNode
   );
 }
 
+function memberInvitesFromSettings(value: unknown): MemberInvite[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Partial<MemberInvite>;
+    if (typeof record.email !== "string" || !record.email.includes("@")) return [];
+    return [{
+      email: record.email,
+      role: typeof record.role === "string" && record.role ? record.role : "Viewer",
+      status: typeof record.status === "string" && record.status ? record.status : "Pending",
+      invited_at: typeof record.invited_at === "string" ? record.invited_at : new Date().toISOString(),
+    }];
+  });
+}
+
 export function SettingsPage() {
   const [params, setParams] = useSearchParams();
   const requested = (params.get("tab") as Tab) || "general";
@@ -69,6 +85,9 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [mcpStats, setMcpStats] = useState<MCPStats | null>(null);
   const [health, setHealth] = useState("unknown");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("Viewer");
+  const [inviteStatus, setInviteStatus] = useState<string | null>(null);
 
   const providers = useSettingsStore((s) => s.providers);
   const secrets = useSettingsStore((s) => s.secrets);
@@ -86,7 +105,7 @@ export function SettingsPage() {
   const { llm, connectors } = visibleProviders(providers);
 
   useEffect(() => {
-    void getStudioSettings().then(setSettings).catch(() => {});
+    void getStudioSettings().then((loaded) => setSettings((current) => ({ ...loaded, member_invites: current.member_invites ?? loaded.member_invites }))).catch(() => {});
     void getMcpStats().then(setMcpStats).catch(() => {});
     void getHealth().then((res) => setHealth(res.status)).catch(() => {});
     void loadSettingsData();
@@ -102,6 +121,35 @@ export function SettingsPage() {
     () => (mcpStats?.tools ?? []).map((tool) => [tool.name, "Read", tool.last_called ? new Date(tool.last_called).toLocaleTimeString() : "—", `${tool.calls}`]),
     [mcpStats],
   );
+  const memberInvites = useMemo(() => memberInvitesFromSettings(settings.member_invites), [settings.member_invites]);
+  const memberRows = useMemo(
+    () => [
+      ["Axiom Operator", "you@axiom.local", "Platform Admin", "Platform", "Active"],
+      ...memberInvites.map((invite) => ["Invited Member", invite.email, invite.role, "Pending", invite.status]),
+    ],
+    [memberInvites],
+  );
+
+  const sendInvite = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const email = inviteEmail.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      setInviteStatus("Enter a valid email address");
+      return;
+    }
+    const invite = { email, role: inviteRole, status: "Pending", invited_at: new Date().toISOString() };
+    const nextInvites = [invite, ...memberInvites.filter((item) => item.email !== email)];
+    const nextSettings = { ...settings, member_invites: nextInvites };
+    setSettings(nextSettings);
+    setInviteStatus("Sending invitation...");
+    try {
+      await saveStudioSettings({ member_invites: nextInvites });
+      setInviteEmail("");
+      setInviteStatus("Invitation queued");
+    } catch (error) {
+      setInviteStatus(error instanceof Error ? error.message : "Invitation failed");
+    }
+  };
 
   return (
     <div className="settings-stage">
@@ -170,7 +218,7 @@ export function SettingsPage() {
         <div className="grid grid-cols-[1040px_346px] gap-[14px]">
           <div className="space-y-[14px]">
             <Panel title="Members" subtitle="Manage users, roles, and access across your Company Brain.">
-              <DataTable headers={["Name", "Email", "Role", "Team", "Status"]} rows={[["Axiom Operator", "you@axiom.local", "Platform Admin", "Platform", "Active"]]} />
+              <DataTable headers={["Name", "Email", "Role", "Team", "Status"]} rows={memberRows} />
               <div className="mt-3"><Phase>PHASE 11 multi-user</Phase></div>
             </Panel>
             <div className="grid grid-cols-2 gap-[14px]">
@@ -179,7 +227,32 @@ export function SettingsPage() {
             </div>
           </div>
           <Panel title="Invite Member" subtitle="Add a new member to your workspace.">
-            <div title="Phase 11 — multi-tenant" className="flex h-[38px] w-full items-center justify-center rounded-md border border-[#2b558a] text-[#88add5] opacity-70">Invitations are not enabled yet</div>
+            <form className="space-y-3" onSubmit={sendInvite}>
+              <label className="block">
+                <span className="mb-1 block text-[#9fb5d0]">Invite Email</span>
+                <input
+                  className="h-[41px] w-full rounded-md border border-[#223b5c] bg-[#071225] px-3 text-[#e6f0ff] outline-none focus:border-[#2389ff]"
+                  value={inviteEmail}
+                  onChange={(event) => setInviteEmail(event.target.value)}
+                  placeholder="name@company.com"
+                  type="email"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[#9fb5d0]">Invite Role</span>
+                <select
+                  className="h-[41px] w-full rounded-md border border-[#223b5c] bg-[#071225] px-3 text-[#e6f0ff] outline-none focus:border-[#2389ff]"
+                  value={inviteRole}
+                  onChange={(event) => setInviteRole(event.target.value)}
+                >
+                  <option>Viewer</option>
+                  <option>Editor</option>
+                  <option>Platform Admin</option>
+                </select>
+              </label>
+              <button type="submit" className="h-[38px] w-full rounded-md border border-[#2389ff] bg-[#12386c] text-[#e8f2ff] hover:bg-[#174680]">Send Invitation</button>
+              {inviteStatus ? <div className="rounded-md border border-[#1d446f] bg-[#071327] px-3 py-2 text-[13px] text-[#9fb5d0]">{inviteStatus}</div> : null}
+            </form>
           </Panel>
         </div>
       )}

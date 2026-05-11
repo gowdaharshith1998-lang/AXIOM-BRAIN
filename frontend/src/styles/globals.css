@@ -1421,6 +1421,24 @@ body {
   font-weight: 500;
 }
 
+.gov-select select {
+  min-width: 96px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #e7f1ff;
+}
+
+.gov-table-tools .gov-select {
+  min-height: 40px;
+}
+
+.gov-lineage-controls button.is-active {
+  border-color: #2568c8;
+  background: rgba(17, 55, 113, 0.6);
+  color: #f0f6ff;
+}
+
 .gov-filter-chip {
   min-height: 34px;
   border: 1px solid #213c5f;
@@ -1904,12 +1922,14 @@ body {
 }
 
 .insights-stage {
-  min-width: 1440px;
+  min-width: 0;
   min-height: 100%;
+  overflow-x: auto;
   padding: 0 8px 24px;
 }
 
 .insights-shell {
+  min-width: 0;
   min-height: calc(100vh - 74px);
   border: 1px solid #263c58;
   border-radius: 12px;
@@ -1922,6 +1942,7 @@ body {
 
 .insights-title-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
@@ -2229,6 +2250,7 @@ body {
 }
 
 .ins-header-tools {
+  flex-wrap: wrap;
   justify-content: flex-end;
   color: #a7b4c8;
   font-size: 14px;
@@ -2250,7 +2272,7 @@ body {
 }
 
 .ins-filter-button {
-  cursor: default;
+  cursor: pointer;
 }
 
 .ins-select span {
@@ -2476,10 +2498,21 @@ body {
 
 .ins-trends-top {
   display: grid;
-  grid-template-columns: 250px 320px 90px repeat(3, 1fr);
+  grid-template-columns: 250px 320px 170px repeat(3, 1fr);
   align-items: start;
   gap: 10px;
   margin-bottom: 14px;
+}
+
+@media (max-width: 1400px) {
+  .ins-header-tools {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .ins-trends-top {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .ins-trends-top .ins-date,
@@ -2546,6 +2579,14 @@ body {
 }
 
 .ins-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #233d5c;
+  border-radius: 7px;
+  background: rgba(5, 15, 31, 0.75);
   color: #aebbd0;
 }
 

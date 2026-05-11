@@ -208,6 +208,34 @@ function titleCase(value: string | null | undefined) {
     .join(" ");
 }
 
+function includesText(values: Array<string | null | undefined>, query: string): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return true;
+  return values.some((value) => (value ?? "").toLowerCase().includes(normalized));
+}
+
+function uniqueValues(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))).sort();
+}
+
+function csvCell(value: ReactNode): string {
+  const raw = typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : "";
+  return `"${raw.replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(filename: string, headers: string[], rows: Array<Array<ReactNode>>) {
+  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  if (!navigator.userAgent.includes("jsdom")) link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function resultTone(value: string | null | undefined): Accent {
   const normalized = (value || "").toLowerCase();
   if (["critical", "failed", "fail", "deny", "denied", "unsigned"].includes(normalized)) return "red";
@@ -358,20 +386,8 @@ function GovernanceTable({
   );
 }
 
-function SearchAndFilters({ placeholder, dense = false }: { placeholder: string; dense?: boolean }) {
-  return (
-    <div className={cx("gov-filters", dense && "is-dense")}>
-      <label className="gov-search"><Icon name="search" /> <input placeholder={placeholder} /></label>
-      <span className="gov-filter-chip">Scope <strong>All</strong></span>
-      <span className="gov-filter-chip">Status <strong>All</strong></span>
-      <span className="gov-filter-chip">Category <strong>All</strong></span>
-      <span className="gov-filter-chip"><Icon name="filter" /> Search filters applied live</span>
-      {dense ? <span className="gov-filter-chip"><Icon name="download" /> Export in receipts tab</span> : <span className="gov-filter-chip" aria-label="List"><Icon name="menu" /></span>}
-    </div>
-  );
-}
-
 function OverviewPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
+  const [copied, setCopied] = useState(false);
   const summary = snapshot.summary;
   const healthyPct = summary.check_count ? Math.round((summary.healthy_check_count / summary.check_count) * 100) : 0;
   const signedPct = summary.receipt_count ? Math.round((summary.signed_receipt_count / summary.receipt_count) * 100) : 0;
@@ -451,7 +467,17 @@ function OverviewPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
               <span>Source<br /><b>receipts table</b></span>
             </div>
           </div>
-          <div className="gov-wide-button">Current Sequence {formatNumber(summary.current_seq)}</div>
+          <button
+            type="button"
+            className="gov-wide-button"
+            onClick={() => {
+              void navigator.clipboard?.writeText(JSON.stringify({ sequence: summary.current_seq, merkle_root: summary.current_merkle_root }));
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1800);
+            }}
+          >
+            {copied ? "Copied Sequence" : `Copy Sequence ${formatNumber(summary.current_seq)}`}
+          </button>
         </Panel>
       </div>
     </>
@@ -595,7 +621,17 @@ function PoliciesPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
 }
 
 function ChecksPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
-  const rows = snapshot.checks.map((check) => ({
+  const [query, setQuery] = useState("");
+  const [severity, setSeverity] = useState("all");
+  const [result, setResult] = useState("all");
+  const severities = uniqueValues(snapshot.checks.map((check) => check.severity));
+  const results = uniqueValues(snapshot.checks.map((check) => check.result));
+  const filteredChecks = snapshot.checks.filter((check) => {
+    if (severity !== "all" && check.severity !== severity) return false;
+    if (result !== "all" && check.result !== result) return false;
+    return includesText([check.entity, check.type, check.owner, check.severity, check.result], query);
+  });
+  const rows = filteredChecks.map((check) => ({
     entity: <span className="gov-name-cell"><Icon name="database" />{check.entity}</span>,
     type: titleCase(check.type),
     severity: <span className={cx("gov-dot-label", check.severity.toLowerCase())}>{titleCase(check.severity)}</span>,
@@ -603,7 +639,7 @@ function ChecksPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
     lastRun: formatDate(check.last_run),
     owner: check.owner,
   }));
-  const selected = snapshot.checks.find((check) => check.result === "critical" || check.result === "degraded") || snapshot.checks[0];
+  const selected = filteredChecks.find((check) => check.result === "critical" || check.result === "degraded") || filteredChecks[0] || snapshot.checks[0];
   return (
     <>
       <div className="gov-grid checks-kpis">
@@ -615,7 +651,22 @@ function ChecksPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
       </div>
       <div className="gov-grid checks-main">
         <Panel title="Checks Queue" action={<StatusPill>Live</StatusPill>}>
-          <div className="gov-table-tools"><span className="gov-filter-chip"><Icon name="filter" /> Search checks</span><label className="gov-search"><Icon name="search" /><input placeholder="Search checks..." /></label></div>
+          <div className="gov-table-tools">
+            <label className="gov-search"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search checks..." /></label>
+            <label className="gov-select">Severity
+              <select aria-label="Check Severity" value={severity} onChange={(event) => setSeverity(event.target.value)}>
+                <option value="all">All</option>
+                {severities.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}
+              </select>
+            </label>
+            <label className="gov-select">Result
+              <select aria-label="Check Result" value={result} onChange={(event) => setResult(event.target.value)}>
+                <option value="all">All</option>
+                {results.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}
+              </select>
+            </label>
+            <button type="button" onClick={() => { setQuery(""); setSeverity("all"); setResult("all"); }}>Reset</button>
+          </div>
           <GovernanceTable
             columns={[
               { key: "entity", label: "Entity" },
@@ -626,9 +677,9 @@ function ChecksPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
               { key: "owner", label: "Owner" },
             ]}
             rows={rows}
-            emptyMessage="No cluster health checks are available."
+            emptyMessage={snapshot.checks.length ? "No cluster health checks match the current filters." : "No cluster health checks are available."}
           />
-          <div className="gov-pagination">Showing {formatNumber(rows.length)} recorded checks</div>
+          <div className="gov-pagination">Showing {formatNumber(rows.length)} of {formatNumber(snapshot.checks.length)} recorded checks</div>
         </Panel>
         <Panel title="Check Details">
           {selected ? (
@@ -648,16 +699,29 @@ function ChecksPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
 }
 
 function ReceiptsPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
-  const rows = snapshot.receipts.map((receipt) => ({
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("all");
+  const [type, setType] = useState("all");
+  const [signer, setSigner] = useState("all");
+  const receiptTypes = uniqueValues(snapshot.receipts.map((receipt) => receipt.receipt_type));
+  const signingSchemes = uniqueValues(snapshot.receipts.map((receipt) => receipt.signing_scheme));
+  const filteredReceipts = snapshot.receipts.filter((receipt) => {
+    if (status === "signed" && !receipt.signed) return false;
+    if (status === "unsigned" && receipt.signed) return false;
+    if (type !== "all" && receipt.receipt_type !== type) return false;
+    if (signer !== "all" && receipt.signing_scheme !== signer) return false;
+    return includesText([receipt.receipt_id, receipt.receipt_type, receipt.action_id, receipt.decision, receipt.agent_name, receipt.signing_scheme], query);
+  });
+  const rows = filteredReceipts.map((receipt) => ({
     entity: <span className="gov-name-cell"><Icon name="cube" />{recorded(receipt.agent_name || receipt.action_id)}</span>,
     action: titleCase(receipt.decision || receipt.receipt_type),
     policy: receipt.receipt_type,
     signedBy: recorded(receipt.signing_scheme),
     status: <StatusPill tone={receipt.signed ? "green" : "red"}>{receipt.signed ? "Signed" : "Unsigned"}</StatusPill>,
     timestamp: formatDate(receipt.created_at),
-    id: shortHash(receipt.receipt_id),
+    id: receipt.receipt_id,
   }));
-  const first = snapshot.receipts[0];
+  const first = filteredReceipts[0] ?? snapshot.receipts[0];
   return (
     <>
       <div className="gov-grid receipts-kpis">
@@ -668,7 +732,40 @@ function ReceiptsPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
       </div>
       <div className="gov-grid receipts-main">
         <Panel title="Receipts Ledger">
-          <SearchAndFilters placeholder="Search receipts..." dense />
+          <div className="gov-filters is-dense">
+            <label className="gov-search"><Icon name="search" /> <input aria-label="Search Receipts" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search receipts..." /></label>
+            <label className="gov-select">Status
+              <select aria-label="Verification Status" value={status} onChange={(event) => setStatus(event.target.value)}>
+                <option value="all">All</option>
+                <option value="signed">Signed</option>
+                <option value="unsigned">Unsigned</option>
+              </select>
+            </label>
+            <label className="gov-select">Type
+              <select aria-label="Receipt Type" value={type} onChange={(event) => setType(event.target.value)}>
+                <option value="all">All</option>
+                {receiptTypes.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}
+              </select>
+            </label>
+            <label className="gov-select">Signer
+              <select aria-label="Signing Scheme" value={signer} onChange={(event) => setSigner(event.target.value)}>
+                <option value="all">All</option>
+                {signingSchemes.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}
+              </select>
+            </label>
+            <button type="button" onClick={() => { setQuery(""); setStatus("all"); setType("all"); setSigner("all"); }}>Reset</button>
+            <button
+              type="button"
+              aria-label="Export Receipts CSV"
+              onClick={() => downloadCsv(
+                "axiom-receipts.csv",
+                ["receipt_id", "receipt_type", "action_id", "decision", "agent_name", "signing_scheme", "signed", "created_at"],
+                filteredReceipts.map((receipt) => [receipt.receipt_id, receipt.receipt_type, receipt.action_id, receipt.decision, receipt.agent_name, receipt.signing_scheme, receipt.signed, receipt.created_at]),
+              )}
+            >
+              <Icon name="download" /> Export CSV
+            </button>
+          </div>
           <GovernanceTable
             columns={[
               { key: "entity", label: "Entity" },
@@ -680,7 +777,7 @@ function ReceiptsPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
               { key: "id", label: "Receipt ID" },
             ]}
             rows={rows}
-            emptyMessage="No receipts are recorded."
+            emptyMessage={snapshot.receipts.length ? "No receipts match the current filters." : "No receipts are recorded."}
           />
           <div className="gov-pagination">Showing {formatNumber(rows.length)} of {formatNumber(snapshot.summary.receipt_count)} receipts</div>
         </Panel>
@@ -698,6 +795,9 @@ function ReceiptsPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
 }
 
 function LineagePage({ snapshot }: { snapshot: GovernanceSnapshot }) {
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [view, setView] = useState<"entities" | "edges">("entities");
+  const filteredSources = sourceFilter === "all" ? snapshot.sources : snapshot.sources.filter((source) => source.id === sourceFilter);
   const edgeRows = snapshot.lineage.edges.slice(0, 12).map((edge) => ({
     source: shortHash(edge.source_id),
     relationship: edge.relationship,
@@ -713,9 +813,15 @@ function LineagePage({ snapshot }: { snapshot: GovernanceSnapshot }) {
   return (
     <>
       <div className="gov-lineage-controls">
-        <span className="gov-filter-chip">Source <strong>entities and edges tables</strong></span>
-        <span className="gov-filter-chip">Records <strong>{formatNumber(snapshot.summary.graph_entity_count)}</strong></span>
-        <span className="gov-filter-chip">Edges <strong>{formatNumber(snapshot.summary.graph_edge_count)}</strong></span>
+        <label className="gov-select">Source
+          <select aria-label="Lineage Source" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}>
+            <option value="all">All Sources</option>
+            {snapshot.sources.map((source) => <option key={source.id} value={source.id}>{source.display_name}</option>)}
+          </select>
+        </label>
+        <button type="button" className={view === "entities" ? "is-active" : ""} onClick={() => setView("entities")}>Records <strong>{formatNumber(snapshot.summary.graph_entity_count)}</strong></button>
+        <button type="button" className={view === "edges" ? "is-active" : ""} onClick={() => setView("edges")}>Edges <strong>{formatNumber(snapshot.summary.graph_edge_count)}</strong></button>
+        <button type="button" onClick={() => downloadCsv("axiom-lineage.csv", ["source_id", "target_id", "relationship", "created_at"], snapshot.lineage.edges.map((edge) => [edge.source_id, edge.target_id, edge.relationship, edge.created_at]))}><Icon name="download" /> Export</button>
       </div>
       <div className="gov-grid lineage-kpis">
         <KpiCard title="Entities" value={formatNumber(snapshot.summary.graph_entity_count)} detail="Stored graph nodes" accent="green" icon="shield" />
@@ -726,21 +832,26 @@ function LineagePage({ snapshot }: { snapshot: GovernanceSnapshot }) {
       <div className="gov-grid lineage-main">
         <Panel title={`Source Systems (${snapshot.sources.length})`}>
           <div className="gov-source-list">
-            {snapshot.sources.length ? snapshot.sources.map((source, index) => (
+            {filteredSources.length ? filteredSources.map((source, index) => (
               <div key={source.id} className={index === 0 ? "is-active" : ""}><Icon name="database" /><strong>{source.display_name}</strong><span>{source.source_type}</span><small>{source.connected ? "connected" : "not connected"}</small><small>Updated {formatDate(source.updated_at)}</small></div>
             )) : <p className="gov-muted">No source records are available.</p>}
           </div>
         </Panel>
-        <Panel title="Recent Graph Edges">
+        <Panel title={view === "edges" ? "Recent Graph Edges" : "Recent Entities"}>
           <GovernanceTable
-            columns={[
+            columns={view === "edges" ? [
               { key: "source", label: "Source" },
               { key: "relationship", label: "Relationship" },
               { key: "target", label: "Target" },
               { key: "created", label: "Created" },
+            ] : [
+              { key: "name", label: "Entity" },
+              { key: "type", label: "Type" },
+              { key: "cluster", label: "Cluster" },
+              { key: "updated", label: "Updated" },
             ]}
-            rows={edgeRows}
-            emptyMessage="No graph edges are recorded."
+            rows={view === "edges" ? edgeRows : entityRows}
+            emptyMessage={view === "edges" ? "No graph edges are recorded." : "No entity records are available."}
           />
         </Panel>
         <div className="gov-side-stack">
@@ -767,10 +878,17 @@ function LineagePage({ snapshot }: { snapshot: GovernanceSnapshot }) {
 
 function AuditLogPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
   const [sourceFilter, setSourceFilter] = useState<"all" | "actions" | "mcp">("all");
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("all");
+  const [result, setResult] = useState("all");
+  const categories = uniqueValues(snapshot.audit_events.map((event) => event.category));
+  const results = uniqueValues(snapshot.audit_events.map((event) => event.result));
   const filteredEvents = snapshot.audit_events.filter((event) => {
-    if (sourceFilter === "actions") return event.category !== "mcp_event";
-    if (sourceFilter === "mcp") return event.category === "mcp_event";
-    return true;
+    if (sourceFilter === "actions" && event.category === "mcp_event") return false;
+    if (sourceFilter === "mcp" && event.category !== "mcp_event") return false;
+    if (category !== "all" && event.category !== category) return false;
+    if (result !== "all" && event.result !== result) return false;
+    return includesText([event.actor, event.action, event.entity, event.category, event.result, event.source], query);
   });
   const rows = filteredEvents.map((event) => ({
     timestamp: formatEventTime(event),
@@ -798,7 +916,33 @@ function AuditLogPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
           ["mcp", "MCP Events"],
         ].map(([id, label]) => <button key={id} type="button" className={sourceFilter === id ? "is-active" : ""} onClick={() => setSourceFilter(id as typeof sourceFilter)}>{label}</button>)}
       </div>
-      <SearchAndFilters placeholder="Search events, actors, entities, actions..." />
+      <div className="gov-filters">
+        <label className="gov-search"><Icon name="search" /> <input aria-label="Search Audit Events" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search events, actors, entities, actions..." /></label>
+        <label className="gov-select">Category
+          <select aria-label="Audit Category" value={category} onChange={(event) => setCategory(event.target.value)}>
+            <option value="all">All</option>
+            {categories.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}
+          </select>
+        </label>
+        <label className="gov-select">Result
+          <select aria-label="Audit Result" value={result} onChange={(event) => setResult(event.target.value)}>
+            <option value="all">All</option>
+            {results.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}
+          </select>
+        </label>
+        <button type="button" onClick={() => { setQuery(""); setCategory("all"); setResult("all"); }}>Reset</button>
+        <button
+          type="button"
+          aria-label="Export Audit CSV"
+          onClick={() => downloadCsv(
+            "axiom-audit-events.csv",
+            ["timestamp", "actor", "action", "entity", "category", "result", "source", "id"],
+            filteredEvents.map((event) => [formatEventTime(event), event.actor, event.action, event.entity, event.category, event.result, event.source, event.id]),
+          )}
+        >
+          <Icon name="download" /> Export CSV
+        </button>
+      </div>
       <div className="gov-grid audit-main">
         <Panel title="Audit Events">
           <GovernanceTable
