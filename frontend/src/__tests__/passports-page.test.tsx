@@ -67,6 +67,19 @@ describe("PassportsPage", () => {
     expect(await screen.findByRole("dialog", { name: "Issue passport" })).toBeInTheDocument();
   });
 
+  it("shows an error when issuing a passport fails", async () => {
+    api.issuePassport.mockRejectedValueOnce(new Error("invalid agent_class"));
+    render(<PassportsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Issue Passport" }));
+    fireEvent.change(screen.getByText("agent_name").nextSibling as HTMLInputElement, { target: { value: "builder" } });
+    fireEvent.change(screen.getByText("agent_class").nextSibling as HTMLInputElement, { target: { value: "qa" } });
+    fireEvent.change(screen.getByText("owner_email").nextSibling as HTMLInputElement, { target: { value: "ops@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Issue" }));
+
+    expect(await screen.findByText("invalid agent_class")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Issue passport" })).toBeInTheDocument();
+  });
+
   it("issues a passport and shows the bearer token once", async () => {
     render(<PassportsPage />);
     fireEvent.click(screen.getByRole("button", { name: "Issue Passport" }));

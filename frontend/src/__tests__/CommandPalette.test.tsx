@@ -23,6 +23,35 @@ describe("CommandPalette", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("opens with a provided query from the top query bar event", async () => {
+    const fetchMock = vi.spyOn(window, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [
+          {
+            id: "entity-1",
+            type: "document",
+            title: "Refund Policy 2026 (v3)",
+            connection_count: 3,
+            methods: ["hybrid"],
+          },
+        ],
+      }),
+    } as Response);
+    render(<CommandPalette />);
+
+    window.dispatchEvent(new CustomEvent("axiom:palette-query", { detail: { query: "refund" } }));
+
+    expect(await screen.findByDisplayValue("refund")).toBeInTheDocument();
+    expect(await screen.findByText("Refund Policy 2026 (v3)")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/internal/search",
+      expect.objectContaining({
+        body: JSON.stringify({ query: "refund", mode: "hybrid", top_k: 8 }),
+      }),
+    );
+  });
+
   it("opens with slash outside text input", () => {
     render(<CommandPalette />);
 

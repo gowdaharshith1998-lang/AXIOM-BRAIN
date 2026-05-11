@@ -164,6 +164,18 @@ function isSkill(item: CompileSkillItem): item is Skill {
   return typeof item.id === "string" && typeof item.created_at === "string";
 }
 
+function dedupeProcesses(rows: ProcessEntity[]): ProcessEntity[] {
+  const seen = new Set<string>();
+  const unique: ProcessEntity[] = [];
+  for (const row of rows) {
+    const key = `${processName(row).toLowerCase()}::${row.cluster_id ?? "*"}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(row);
+  }
+  return unique;
+}
+
 export function SkillsPage() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [runs, setRuns] = useState<Record<string, SkillRun[]>>({});
@@ -188,6 +200,9 @@ export function SkillsPage() {
   const [compileDryRun, setCompileDryRun] = useState(false);
   const [compileLoading, setCompileLoading] = useState(false);
   const [compileResults, setCompileResults] = useState<CompileSkillItem[]>([]);
+  const [registerLoading, setRegisterLoading] = useState(false);
+  const [registerError, setRegisterError] = useState<string | null>(null);
+  const [compileError, setCompileError] = useState<string | null>(null);
 
   const mdPreview = useMemo(() => parseSkillMdPreview(skillMdContent), [skillMdContent]);
 
@@ -285,44 +300,68 @@ export function SkillsPage() {
 
   async function submitSkillMd(event: FormEvent) {
     event.preventDefault();
-    if (mdPreview.error || !mdPreview.preview) return;
-    const created = await uploadSkillMd(skillMdContent);
-    setSkills((current) => [created, ...current.filter((skill) => skill.id !== created.id)]);
-    setModalOpen(false);
-    setSkillMdContent("");
-    setRegisterTab("upload");
+    if (mdPreview.error || !mdPreview.preview || registerLoading) return;
+    setRegisterError(null);
+    setRegisterLoading(true);
+    try {
+      const created = await uploadSkillMd(skillMdContent);
+      setSkills((current) => [created, ...current.filter((skill) => skill.id !== created.id)]);
+      setModalOpen(false);
+      setSkillMdContent("");
+      setRegisterTab("upload");
+    } catch (err) {
+      setRegisterError(err instanceof Error ? err.message : "Unable to register SKILL.md");
+    } finally {
+      setRegisterLoading(false);
+    }
   }
 
   async function submitSkill(event: FormEvent) {
     event.preventDefault();
-    if (!formValid) return;
-    const created = await registerSkill({
-      name: form.name,
-      description: form.description,
-      intent: form.intent,
-      prompt_template: form.prompt_template,
-      llm_provider: form.llm_provider,
-      llm_model: form.llm_model,
-      trigger_config: { scope_clusters: form.scope_clusters.split(",").map((item) => item.trim()).filter(Boolean) },
-    });
-    setSkills((current) => [created, ...current.filter((skill) => skill.id !== created.id)]);
-    setModalOpen(false);
-    setForm(blankForm);
+    if (!formValid || registerLoading) return;
+    setRegisterError(null);
+    setRegisterLoading(true);
+    try {
+      const created = await registerSkill({
+        name: form.name,
+        description: form.description,
+        intent: form.intent,
+        prompt_template: form.prompt_template,
+        llm_provider: form.llm_provider,
+        llm_model: form.llm_model,
+        trigger_config: { scope_clusters: form.scope_clusters.split(",").map((item) => item.trim()).filter(Boolean) },
+      });
+      setSkills((current) => [created, ...current.filter((skill) => skill.id !== created.id)]);
+      setModalOpen(false);
+      setForm(blankForm);
+    } catch (err) {
+      setRegisterError(err instanceof Error ? err.message : "Unable to register skill");
+    } finally {
+      setRegisterLoading(false);
+    }
   }
 
   async function openCompileModal() {
     setCompileOpen(true);
     setCompileResults([]);
-    const response = await fetch("/api/entities?type=process");
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const rows = (await response.json()) as ProcessEntity[];
-    setProcesses(rows);
-    setSelectedProcessIds(rows.map((row) => row.id));
+    setCompileError(null);
+    try {
+      const response = await fetch("/api/entities?type=process");
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const rows = dedupeProcesses((await response.json()) as ProcessEntity[]);
+      setProcesses(rows);
+      setSelectedProcessIds(rows.map((row) => row.id));
+    } catch (err) {
+      setProcesses([]);
+      setSelectedProcessIds([]);
+      setCompileError(err instanceof Error ? err.message : "Unable to load process entities");
+    }
   }
 
   async function submitCompile(event: FormEvent) {
     event.preventDefault();
     setCompileLoading(true);
+    setCompileError(null);
     try {
       const result = await compileSkillsFromProcesses({
         dryRun: compileDryRun,
@@ -336,6 +375,9 @@ export function SkillsPage() {
           ...current.filter((skill) => !compiledSkills.some((compiled) => compiled.id === skill.id)),
         ]);
       }
+      setToast(result.dry_run ? `Dry run produced ${result.count} skill manifest${result.count === 1 ? "" : "s"}` : `Compiled ${result.count} skill${result.count === 1 ? "" : "s"}`);
+    } catch (err) {
+      setCompileError(err instanceof Error ? err.message : "Unable to compile skills");
     } finally {
       setCompileLoading(false);
     }
@@ -365,7 +407,7 @@ export function SkillsPage() {
           <button type="button" className="agents-secondary" onClick={() => void openCompileModal()}>
             Compile from Processes
           </button>
-          <button type="button" className="agents-primary" onClick={() => setModalOpen(true)}>
+          <button type="button" className="agents-primary" onClick={() => { setRegisterError(null); setModalOpen(true); }}>
             <Icon name="plus" /> Register Skill
           </button>
         </div>
@@ -436,6 +478,7 @@ export function SkillsPage() {
                 </label>
               )) : <EmptyState>No process entities found.</EmptyState>}
             </div>
+            {compileError ? <p className="agents-error" role="alert">{compileError}</p> : null}
             <button type="submit" className="agents-primary" disabled={compileLoading || selectedProcessIds.length === 0}>
               {compileLoading ? "Compiling..." : "Compile"}
             </button>
@@ -493,7 +536,8 @@ export function SkillsPage() {
                     <code>{mdPreview.preview.llm_provider} / {mdPreview.preview.llm_model}</code>
                   </div>
                 ) : null}
-                <button type="submit" className="agents-primary" disabled={!mdPreview.preview || Boolean(mdPreview.error)}>Register SKILL.md</button>
+                {registerError ? <p className="agents-error" role="alert">{registerError}</p> : null}
+                <button type="submit" className="agents-primary" disabled={!mdPreview.preview || Boolean(mdPreview.error) || registerLoading}>{registerLoading ? "Registering..." : "Register SKILL.md"}</button>
               </>
             ) : (
               <>
@@ -506,7 +550,8 @@ export function SkillsPage() {
                 <label>Provider<input value={form.llm_provider} onChange={(event) => setForm({ ...form, llm_provider: event.target.value })} /></label>
                 <label>Model<input value={form.llm_model} onChange={(event) => setForm({ ...form, llm_model: event.target.value })} /></label>
                 <label>Scope Clusters<input value={form.scope_clusters} onChange={(event) => setForm({ ...form, scope_clusters: event.target.value })} /></label>
-                <button type="submit" className="agents-primary" disabled={!formValid}>Register</button>
+                {registerError ? <p className="agents-error" role="alert">{registerError}</p> : null}
+                <button type="submit" className="agents-primary" disabled={!formValid || registerLoading}>{registerLoading ? "Registering..." : "Register"}</button>
               </>
             )}
           </form>

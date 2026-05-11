@@ -36,8 +36,9 @@ body {
 }
 
 .settings-stage {
-  width: 1408px;
-  padding: 0 0 32px 20px;
+  box-sizing: border-box;
+  width: min(1408px, 100%);
+  padding: 0 20px 32px;
 }
 
 .settings-tabs {
@@ -3705,6 +3706,15 @@ body {
   color: #a9b8cc;
   text-align: center;
   font-size: 14px;
+}
+
+.agents-error {
+  border: 1px solid rgba(239, 68, 68, 0.42);
+  border-radius: 8px;
+  background: rgba(127, 29, 29, 0.2);
+  padding: 10px 12px;
+  color: #fecaca;
+  font-size: 13px;
 }
 
 .agents-compact-rows {

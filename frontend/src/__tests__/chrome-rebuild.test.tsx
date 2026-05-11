@@ -42,11 +42,51 @@ describe("phase 5.12 visual chrome", () => {
 
   it("query prompt chips dispatch traversal events", () => {
     const spy = vi.fn();
+    const searchSpy = vi.fn();
     window.addEventListener("axiom:traverse-clusters", spy);
+    window.addEventListener("axiom:palette-query", searchSpy);
     render(<QueryBar />);
     fireEvent.click(screen.getByText("What impacted Q2 revenue?"));
     expect(spy).toHaveBeenCalled();
+    expect(searchSpy).toHaveBeenCalledWith(expect.objectContaining({
+      detail: { query: "What impacted Q2 revenue?" },
+    }));
     window.removeEventListener("axiom:traverse-clusters", spy);
+    window.removeEventListener("axiom:palette-query", searchSpy);
+  });
+
+  it("send query dispatches a searchable palette query", () => {
+    const searchSpy = vi.fn();
+    window.addEventListener("axiom:palette-query", searchSpy);
+    render(<QueryBar />);
+    fireEvent.change(screen.getByPlaceholderText("Ask the Company Brain anything..."), {
+      target: { value: "policy" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send query" }));
+    expect(searchSpy).toHaveBeenCalledWith(expect.objectContaining({
+      detail: { query: "policy" },
+    }));
+    window.removeEventListener("axiom:palette-query", searchSpy);
+  });
+
+  it("query input submits with Enter without opening an empty palette on focus", () => {
+    const openSpy = vi.fn();
+    const searchSpy = vi.fn();
+    window.addEventListener("axiom:open-palette", openSpy);
+    window.addEventListener("axiom:palette-query", searchSpy);
+    render(<QueryBar />);
+    const input = screen.getByPlaceholderText("Ask the Company Brain anything...");
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "policy" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(searchSpy).toHaveBeenCalledWith(expect.objectContaining({
+      detail: { query: "policy" },
+    }));
+    window.removeEventListener("axiom:open-palette", openSpy);
+    window.removeEventListener("axiom:palette-query", searchSpy);
   });
 
   it("renders the edge legend categories", () => {

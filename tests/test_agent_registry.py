@@ -183,6 +183,28 @@ def test_agent_registry_register_endpoint_issues_passport(tmp_path: Path) -> Non
         assert listed[0]["owner_email"] == "ops@example.com"
 
 
+def test_agent_registry_register_endpoint_returns_validation_errors(tmp_path: Path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'register_validation.db'}"
+    engine = create_engine(db_url, future=True)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    app = create_app(db_url=db_url, enable_organizer=False)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/internal/agent-registry",
+            json={
+                "name": "qa_agent",
+                "agent_class": "qa",
+                "owner_email": "ops@example.com",
+                "issue_new_passport": True,
+            },
+        )
+
+    assert response.status_code == 422
+    assert "invalid agent_class" in response.json()["detail"]
+
+
 def test_mcp_stats_includes_observed_agents_from_registry(tmp_path: Path) -> None:
     db_url = f"sqlite:///{tmp_path / 'stats.db'}"
     engine = create_engine(db_url, future=True)

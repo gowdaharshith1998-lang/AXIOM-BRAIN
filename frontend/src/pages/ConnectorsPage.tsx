@@ -196,7 +196,7 @@ export function ConnectorsPage() {
             return (
               <div
                 key={vendor.id}
-                className="grid grid-cols-[120px_130px_1fr_240px_360px] items-center gap-3 border-b border-[#173657] py-3 text-[13px]"
+                className="grid grid-cols-[110px_120px_minmax(160px,1fr)_minmax(180px,240px)_auto] items-center gap-3 border-b border-[#173657] py-3 text-[13px]"
               >
                 <div className="text-[15px] font-semibold text-[#e8f2ff]">{vendor.label}</div>
                 <div>
@@ -221,7 +221,7 @@ export function ConnectorsPage() {
                   <span>{status?.writes_blocked_week ?? 0} blocked</span>
                   <span>{status?.last_sync_at || "never"}</span>
                 </div>
-                <div className="flex items-center justify-end gap-2">
+                <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
                   {connected ? (
                     <>
                       <button

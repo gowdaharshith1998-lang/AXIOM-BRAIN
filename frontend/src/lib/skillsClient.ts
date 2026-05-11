@@ -67,7 +67,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers ?? {}),
     },
   });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try {
+      const payload = await response.json();
+      message = String(payload.detail || payload.error || message);
+    } catch {
+      // keep HTTP fallback
+    }
+    throw new Error(message);
+  }
   return (await response.json()) as T;
 }
 

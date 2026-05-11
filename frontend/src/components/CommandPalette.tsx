@@ -106,6 +106,13 @@ export function CommandPalette() {
     setHintDismissed(true);
   };
 
+  const openWithQuery = (nextQuery: string) => {
+    setQuery(nextQuery);
+    setActiveIndex(0);
+    setOpen(true);
+    setHintDismissed(true);
+  };
+
   const closePalette = () => {
     setOpen(false);
     setQuery("");
@@ -144,11 +151,18 @@ export function CommandPalette() {
         openPalette();
       }
     };
+    const onPaletteQuery = (event: Event) => {
+      const query = String((event as CustomEvent<{ query?: unknown }>).detail?.query ?? "").trim();
+      if (query) openWithQuery(query);
+      else openPalette();
+    };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("axiom:open-palette", openPalette);
+    window.addEventListener("axiom:palette-query", onPaletteQuery);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("axiom:open-palette", openPalette);
+      window.removeEventListener("axiom:palette-query", onPaletteQuery);
     };
   }, []);
 

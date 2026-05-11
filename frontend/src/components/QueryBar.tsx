@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 
 const prompts = [
   "What impacted Q2 revenue?",
@@ -10,12 +10,22 @@ const prompts = [
 
 export function QueryBar() {
   const [value, setValue] = useState("");
-  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const openPalette = () => window.dispatchEvent(new Event("axiom:open-palette"));
   const submit = (text = value) => {
-    setValue(text);
-    window.dispatchEvent(new CustomEvent("axiom:traverse-clusters", { detail: { query: text } }));
+    const query = text.trim();
+    if (!query) {
+      openPalette();
+      return;
+    }
+    setValue(query);
+    window.dispatchEvent(new CustomEvent("axiom:traverse-clusters", { detail: { query } }));
+    window.dispatchEvent(new CustomEvent("axiom:palette-query", { detail: { query } }));
+  };
+  const onInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    submit();
   };
 
   return (
@@ -28,10 +38,9 @@ export function QueryBar() {
         <SearchIcon />
         <div className="h-8 w-px bg-white/12" />
         <input
-          ref={inputRef}
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          onFocus={openPalette}
+          onKeyDown={onInputKeyDown}
           placeholder="Ask the Company Brain anything..."
           className="min-w-0 flex-1 bg-transparent font-mono text-base text-[#E8F0FF] outline-none placeholder:text-[#E8F0FF]/38"
         />

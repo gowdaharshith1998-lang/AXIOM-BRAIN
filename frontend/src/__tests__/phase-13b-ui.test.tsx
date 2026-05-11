@@ -219,6 +219,21 @@ describe("Phase 13.B UI", () => {
     await waitFor(() => expect(agentsApi.registerAgent).toHaveBeenCalledWith(expect.objectContaining({ name: "builder", issue_new_passport: true })));
   });
 
+  it("register-agent modal surfaces backend errors and keeps the form editable", async () => {
+    agentsApi.registerAgent.mockRejectedValueOnce(new Error("invalid agent_class"));
+    render(<AgentsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Register Agent/ }));
+    const dialog = await screen.findByRole("form", { name: "Register Agent" });
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "builder" } });
+    fireEvent.change(within(dialog).getByLabelText("Class"), { target: { value: "qa" } });
+    fireEvent.change(within(dialog).getByLabelText("Owner Email"), { target: { value: "ops@example.com" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Register" }));
+
+    expect(await screen.findByText("invalid agent_class")).toBeInTheDocument();
+    expect(screen.getByRole("form", { name: "Register Agent" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Register" })).not.toBeDisabled();
+  });
+
   it("register-agent modal can select an existing passport", async () => {
     render(<AgentsPage />);
     fireEvent.click(screen.getByRole("button", { name: /Register Agent/ }));
@@ -241,6 +256,20 @@ describe("Phase 13.B UI", () => {
     fireEvent.change(within(dialog).getByLabelText("Prompt Template"), { target: { value: "Extract {text}" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Register" }));
     await waitFor(() => expect(skillsApi.registerSkill).toHaveBeenCalledWith(expect.objectContaining({ name: "extract_company" })));
+  });
+
+  it("register-skill modal surfaces backend errors and keeps user input", async () => {
+    skillsApi.registerSkill.mockRejectedValueOnce(new Error("provider unavailable"));
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Register Skill/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Form" }));
+    const dialog = await screen.findByRole("form", { name: "Register Skill" });
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "extract_company" } });
+    fireEvent.change(within(dialog).getByLabelText("Prompt Template"), { target: { value: "Extract {text}" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Register" }));
+
+    expect(await screen.findByText("provider unavailable")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Name")).toHaveValue("extract_company");
   });
 
   it("upload_md_tab_renders_drag_drop_zone", async () => {
@@ -349,6 +378,18 @@ describe("Phase 13.B UI", () => {
     render(<SkillsPage />);
     fireEvent.click(screen.getByRole("button", { name: "Compile from Processes" }));
     expect(await screen.findByText("Refund Review")).toBeInTheDocument();
+  });
+
+  it("compile_from_processes_modal_deduplicates_duplicate_process_rows", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify([
+      processEntity,
+      { ...processEntity, id: "process_refund_copy" },
+    ])));
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Compile from Processes" }));
+    expect(await screen.findByText("Refund Review")).toBeInTheDocument();
+    const dialog = screen.getByRole("form", { name: "Compile from Processes" });
+    expect(within(dialog).getAllByText("Refund Review")).toHaveLength(1);
   });
 
   it("compile_from_processes_dry_run_shows_manifests", async () => {

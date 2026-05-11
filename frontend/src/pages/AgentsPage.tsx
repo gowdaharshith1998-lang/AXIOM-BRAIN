@@ -69,6 +69,8 @@ export function AgentsPage() {
   const [form, setForm] = useState<AgentForm>(blankForm);
   const [filter, setFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [registerError, setRegisterError] = useState<string | null>(null);
+  const [registering, setRegistering] = useState(false);
 
   async function load() {
     const [registry, passportRows, skills] = await Promise.all([
@@ -156,19 +158,27 @@ export function AgentsPage() {
 
   async function submitAgent(event: FormEvent) {
     event.preventDefault();
-    if (!formValid) return;
-    const created = await registerAgent({
-      name: form.name,
-      agent_class: form.agent_class,
-      owner_email: form.owner_email,
-      passport_id: form.issue_new_passport ? null : form.passport_id,
-      issue_new_passport: form.issue_new_passport,
-      ttl_hours: 24,
-    });
-    setAgents((current) => [created, ...current.filter((agent) => agent.agent_name !== created.agent_name)]);
-    setModalOpen(false);
-    setForm(blankForm);
-    setPassports(await listPassports());
+    if (!formValid || registering) return;
+    setRegisterError(null);
+    setRegistering(true);
+    try {
+      const created = await registerAgent({
+        name: form.name,
+        agent_class: form.agent_class,
+        owner_email: form.owner_email,
+        passport_id: form.issue_new_passport ? null : form.passport_id,
+        issue_new_passport: form.issue_new_passport,
+        ttl_hours: 24,
+      });
+      setAgents((current) => [created, ...current.filter((agent) => agent.agent_name !== created.agent_name)]);
+      setModalOpen(false);
+      setForm(blankForm);
+      setPassports(await listPassports());
+    } catch (err) {
+      setRegisterError(err instanceof Error ? err.message : "Unable to register agent");
+    } finally {
+      setRegistering(false);
+    }
   }
 
   async function revokeSelectedPassport() {
@@ -185,7 +195,7 @@ export function AgentsPage() {
           <h1>Agents</h1>
           <p>Registry, passports, receipts, and skill activity from live backend records.</p>
         </div>
-        <button type="button" className="agents-primary" onClick={() => setModalOpen(true)}>
+        <button type="button" className="agents-primary" onClick={() => { setRegisterError(null); setModalOpen(true); }}>
           <Icon name="plus" /> Register Agent
         </button>
       </header>
@@ -241,7 +251,8 @@ export function AgentsPage() {
                 {passports.map((passport) => <option key={passport.passport_id} value={passport.passport_id}>{passportLabel(passport)}</option>)}
               </select></label>
             ) : null}
-            <button type="submit" className="agents-primary" disabled={!formValid}>Register</button>
+            {registerError ? <p className="agents-error" role="alert">{registerError}</p> : null}
+            <button type="submit" className="agents-primary" disabled={!formValid || registering}>{registering ? "Registering..." : "Register"}</button>
           </form>
         </div>
       ) : null}

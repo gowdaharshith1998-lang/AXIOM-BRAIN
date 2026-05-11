@@ -1729,16 +1729,19 @@ def create_app(
         issued_token: str | None = None
         passport_payload: dict[str, Any] | None = None
         if body.issue_new_passport or not body.passport_id:
-            row, issued_token = issue_passport(
-                session_local,
-                agent_name=name,
-                agent_class=agent_class,
-                owner_email=owner_email,
-                scope_clusters=["*"],
-                scope_intents=["*"],
-                scope_skills=["*"],
-                ttl_hours=body.ttl_hours,
-            )
+            try:
+                row, issued_token = issue_passport(
+                    session_local,
+                    agent_name=name,
+                    agent_class=agent_class,
+                    owner_email=owner_email,
+                    scope_clusters=["*"],
+                    scope_intents=["*"],
+                    scope_skills=["*"],
+                    ttl_hours=body.ttl_hours,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
             passport_payload = passport_to_dict(row)
             await publish_passport_event("passport_issued", passport_payload, row.passport_id)
         else:
