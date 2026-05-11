@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-import re
 from typing import Any, Protocol
 
 import yaml
@@ -151,7 +151,14 @@ class FunctionExpr(PredicateExpr):
             raise PolicyParseError(f"unknown predicate {self.name!r}")
         args = [arg.evaluate(context) for arg in self.args]
         kwargs = {key: value.evaluate(context) for key, value in self.kwargs.items()}
-        return func(context.action, context.passport, context.entity, context.session, *args, **kwargs)
+        return func(
+            context.action,
+            context.passport,
+            context.entity,
+            context.session,
+            *args,
+            **kwargs,
+        )
 
     def to_source(self) -> str:
         args = [arg.to_source() for arg in self.args]

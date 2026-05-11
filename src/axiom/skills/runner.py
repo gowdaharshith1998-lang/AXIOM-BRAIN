@@ -12,7 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.govern.llm_keys import get_provider_key_plaintext_with_session
+from axiom.govern.policy_evaluator import DemoPolicyEvaluator, get_policy_evaluator
 from axiom.govern.receipts import ReceiptInsert, chain_insert_receipt
+from axiom.policy import ActionRequest, RealPolicyEvaluator
 from axiom.schema.models import Skill, SkillRun
 from axiom.skills.registry import SkillNotFound, get_skill_with_session, skill_run_to_dict
 from axiom.storage.db import SessionLocal
@@ -205,11 +207,52 @@ def _run_skill_with_session(
     receipt_passport_id: str | None = None,
     receipt_demo_flag: bool = False,
     idempotency_key: str | None = None,
+    policy_evaluator: RealPolicyEvaluator | DemoPolicyEvaluator | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     with session_factory() as session:
         skill = get_skill_with_session(session, skill_id)
         skill_snapshot = _skill_snapshot(skill)
+        evaluator = (
+            policy_evaluator
+            if policy_evaluator is not None
+            else get_policy_evaluator(session_factory)
+        )
+        if isinstance(evaluator, RealPolicyEvaluator):
+            decision = evaluator.evaluate(
+                ActionRequest(
+                    agent_name=agent_name,
+                    intent=f"skill:{skill.name}",
+                    target_entity_id=None,
+                    proposed_action=f"run_skill:{skill_id}",
+                    idempotency_key=idempotency_key,
+                    payload=input_payload,
+                ),
+                None,
+                None,
+            )
+            if decision.mode in {"deny", "correct", "pause"}:
+                receipt_id = _chain_skill_run_receipt(
+                    session_factory,
+                    run_id=f"blocked_{int(time.time() * 1000)}",
+                    agent_name=agent_name,
+                    skill_name=str(skill.name),
+                    decision=decision.mode,
+                    reason=decision.reason,
+                    policy_id=decision.policy_id,
+                    passport_id=receipt_passport_id,
+                    demo_flag=receipt_demo_flag,
+                )
+                return {
+                    "status": "denied" if decision.mode == "deny" else decision.mode,
+                    "decision": decision.mode,
+                    "reason": decision.reason,
+                    "policy_id": decision.policy_id,
+                    "guidance": decision.guidance,
+                    "suggested_alternative": decision.suggested_alternative,
+                    "receipt_id": receipt_id,
+                    "skill": skill_snapshot,
+                }
         if idempotency_key:
             existing = session.execute(
                 select(SkillRun)
@@ -331,6 +374,7 @@ def run_skill(
     receipt_passport_id: str | None = None,
     receipt_demo_flag: bool = False,
     idempotency_key: str | None = None,
+    policy_evaluator: RealPolicyEvaluator | DemoPolicyEvaluator | None = None,
 ) -> dict[str, Any]:
     sf = session_factory or SessionLocal
     if sf is None:
@@ -347,6 +391,7 @@ def run_skill(
             receipt_passport_id=receipt_passport_id,
             receipt_demo_flag=receipt_demo_flag,
             idempotency_key=idempotency_key,
+            policy_evaluator=policy_evaluator,
         )
     except SkillNotFound:
         raise

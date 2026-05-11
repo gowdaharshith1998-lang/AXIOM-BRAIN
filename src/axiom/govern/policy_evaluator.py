@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import logging
 import os
 import random
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 
+from sqlalchemy.orm import Session
+
+from axiom.policy import RealPolicyEvaluator, load_policies
+
+logger = logging.getLogger("axiom.govern.policy_evaluator")
 DENY_REASONS: tuple[str, ...] = (
     "no decision document references this skill",
     "agent lacks scope",
@@ -86,3 +93,20 @@ class DemoPolicyEvaluator:
             self._reason_index += 1
             return PolicyDecision("deny", reason, f"AEGIS-{(self._reason_index % 9) + 1}")
         return PolicyDecision("allow", "policy checks passed", "AEGIS-1")
+
+
+def get_policy_evaluator(
+    session_factory: Callable[[], Session] | None = None,
+) -> RealPolicyEvaluator | DemoPolicyEvaluator:
+    try:
+        rules = load_policies()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "could not load real policies; falling back to DemoPolicyEvaluator: %s",
+            exc,
+        )
+        return DemoPolicyEvaluator(deny_rate=0)
+    if not rules:
+        logger.warning("no real policies loaded; falling back to DemoPolicyEvaluator")
+        return DemoPolicyEvaluator(deny_rate=0)
+    return RealPolicyEvaluator(rules, session_factory)

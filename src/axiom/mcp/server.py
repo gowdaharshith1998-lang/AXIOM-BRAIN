@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
@@ -26,8 +27,14 @@ from axiom.govern.passports import (
     ensure_system_passport,
     verify_passport,
 )
-from axiom.govern.policy_evaluator import CORRECT_IMPORTANCE_THRESHOLD, DemoPolicyEvaluator
-from axiom.govern.receipts import ReceiptInsert, chain_insert_receipt, ensure_receipts_schema, receipt_to_dict
+from axiom.govern.policy_evaluator import CORRECT_IMPORTANCE_THRESHOLD, get_policy_evaluator
+from axiom.govern.receipts import (
+    ReceiptInsert,
+    chain_insert_receipt,
+    ensure_receipts_schema,
+    receipt_to_dict,
+)
+from axiom.policy import ActionRequest, RealPolicyEvaluator
 from axiom.retrieval.search import SearchMode, hybrid_search
 from axiom.schema.dto import EntityDTO
 from axiom.schema.models import AgentPassport, Edge, Entity, Receipt
@@ -58,6 +65,14 @@ class _EntityLite:
     cluster_id: str | None
     composite_importance: float
     data: dict[str, Any]
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+def _string_or_json(value: Any) -> str | None:
+    if value is None or isinstance(value, str):
+        return value
+    return json.dumps(value, sort_keys=True)
 
 
 class _GraphCache:
@@ -136,6 +151,7 @@ class AxiomMCPService:
         *,
         session_factory: sessionmaker[Session],
         event_forwarder: NavigationEventForwarder | None = None,
+        policy: Any | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._events = event_forwarder
@@ -148,7 +164,7 @@ class AxiomMCPService:
             "CREATE VIRTUAL TABLE IF NOT EXISTS entities_fts USING fts5(entity_id UNINDEXED, searchable)"
         )
         self._sync_state = _SyncState()
-        self._policy = DemoPolicyEvaluator(deny_rate=0)
+        self._policy = policy if policy is not None else get_policy_evaluator(session_factory)
         self._receipt_index = 0
         self._idempotency_ttl_sec = 3600.0
         self._idempotency: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
@@ -264,7 +280,7 @@ class AxiomMCPService:
                 reason=str(evaluation["reason"]),
                 policy_id=str(evaluation["policy_id"]),
                 guidance=evaluation["guidance"],
-                suggested_alternative=evaluation["suggested_alternative"],
+                suggested_alternative=_string_or_json(evaluation["suggested_alternative"]),
                 signing_scheme=str(receipt_seed["signing_scheme"]),
                 signature=str(receipt_seed.get("signature") or receipt_seed["merkle_root"]),
                 passport_id=evaluation.get("passport_id"),
@@ -288,25 +304,56 @@ class AxiomMCPService:
         skill_id: str | None = None,
     ) -> tuple[str, str, dict[str, Any]]:
         resolved_action_id = action_id or f"act_{uuid4().hex[:12]}"
-        cluster_id, entity_importance, suggested_alternative = self._entity_context(target_entity_id)
+        cluster_id, entity_importance, suggested_alternative, entity = self._entity_context(
+            target_entity_id
+        )
         passport = self._require_passport_scope(
             passport_token=passport_token,
             intent=scope_intent or intent,
             cluster_id=cluster_id,
             skill_id=skill_id,
         )
-        decision = self._policy.evaluate(
-            cluster_id,
-            intent,
-            entity_importance=entity_importance,
-            suggested_alternative=suggested_alternative,
-        )
+        if isinstance(self._policy, RealPolicyEvaluator):
+            action = ActionRequest(
+                agent_name=agent_name,
+                intent=intent,
+                target_entity_id=target_entity_id,
+                proposed_action=proposed_action,
+                idempotency_key=action_id,
+                payload={
+                    "proposed_action": proposed_action,
+                    "scope_intent": scope_intent,
+                    "skill_id": skill_id,
+                    "suggested_alternative": suggested_alternative,
+                },
+            )
+            real_decision = self._policy.evaluate(action, passport, entity)
+            decision_payload = {
+                "decision": real_decision.mode,
+                "reason": real_decision.reason,
+                "policy_id": real_decision.policy_id,
+                "guidance": real_decision.guidance,
+                "suggested_alternative": real_decision.suggested_alternative
+                or ({"entity_id": suggested_alternative} if suggested_alternative else None),
+                "approval_id": real_decision.approval_id,
+                "fired_predicates": real_decision.fired_predicates,
+            }
+        else:
+            decision = self._policy.evaluate(
+                cluster_id,
+                intent,
+                entity_importance=entity_importance,
+                suggested_alternative=suggested_alternative,
+            )
+            decision_payload = {
+                "decision": decision.decision,
+                "reason": decision.reason,
+                "policy_id": decision.policy_id,
+                "guidance": decision.guidance or None,
+                "suggested_alternative": decision.suggested_alternative,
+            }
         return resolved_action_id, cluster_id, {
-            "decision": decision.decision,
-            "reason": decision.reason,
-            "policy_id": decision.policy_id,
-            "guidance": decision.guidance or None,
-            "suggested_alternative": decision.suggested_alternative,
+            **decision_payload,
             "passport_id": passport.passport_id,
             "demo": self._demo_flag_for_target(target_entity_id),
         }
@@ -420,17 +467,21 @@ class AxiomMCPService:
         }
         self._receipt_index = len(rows)
 
-    def _entity_context(self, entity_id: str | None) -> tuple[str, float | None, str | None]:
+    def _entity_context(
+        self, entity_id: str | None
+    ) -> tuple[str, float | None, str | None, _EntityLite | None]:
         if entity_id is None:
-            return "external_mcp", None, None
+            return "external_mcp", None, None, None
         with self._session_factory() as session:
             self._refresh_cache_if_needed(session)
         entity = self._cache.entities.get(entity_id)
         if entity is None:
-            return "external_mcp", None, None
+            return "external_mcp", None, None, None
         suggested_alternative: str | None = None
         if entity.composite_importance >= CORRECT_IMPORTANCE_THRESHOLD:
-            neighbors = self._cache.outgoing.get(entity_id, []) + self._cache.incoming.get(entity_id, [])
+            neighbors = self._cache.outgoing.get(entity_id, []) + self._cache.incoming.get(
+                entity_id, []
+            )
             ranked_neighbors = sorted(
                 (
                     self._cache.entities[nid]
@@ -441,7 +492,12 @@ class AxiomMCPService:
             )
             if ranked_neighbors:
                 suggested_alternative = ranked_neighbors[0].id
-        return entity.cluster_id or "external_mcp", entity.composite_importance, suggested_alternative
+        return (
+            entity.cluster_id or "external_mcp",
+            entity.composite_importance,
+            suggested_alternative,
+            entity,
+        )
 
     def check_policy(
         self,
@@ -854,6 +910,8 @@ class AxiomMCPService:
                 cluster_id=row.cluster_id,
                 composite_importance=float(row.composite_importance or 0.0),
                 data=row.data,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
             )
             new_cache.entities[row.id] = lite
             new_cache.outgoing[row.id] = []
@@ -895,6 +953,8 @@ class AxiomMCPService:
                         cluster_id=row.cluster_id,
                         composite_importance=float(row.composite_importance or 0.0),
                         data=row.data,
+                        created_at=row.created_at,
+                        updated_at=row.updated_at,
                     )
                     self._cache.entities[row.id] = lite
                     self._cache.outgoing.setdefault(row.id, [])

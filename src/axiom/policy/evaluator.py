@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from axiom.policy.dsl import PolicyRule
 
-
 PolicyMode = Literal["allow", "correct", "deny", "pause"]
 
 

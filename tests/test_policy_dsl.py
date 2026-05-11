@@ -8,7 +8,12 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from axiom.policy import ActionRequest, RealPolicyEvaluator, load_policies_from_dir, parse_policy_yaml
+from axiom.policy import (
+    ActionRequest,
+    RealPolicyEvaluator,
+    load_policies_from_dir,
+    parse_policy_yaml,
+)
 from axiom.policy.dsl import PolicyParseError
 from axiom.policy.predicates import contains_pii
 from axiom.schema.models import AgentPassport, Base, Entity, WatchdogAlert

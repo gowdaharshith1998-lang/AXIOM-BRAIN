@@ -5,7 +5,13 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-from .dsl import PolicyAction, PolicyParseError, PolicyRule, load_policies_from_dir, parse_policy_yaml
+from .dsl import (
+    PolicyAction,
+    PolicyParseError,
+    PolicyRule,
+    load_policies_from_dir,
+    parse_policy_yaml,
+)
 from .evaluator import ActionRequest, PolicyDecision, RealPolicyEvaluator
 from .interfaces import PolicyDecision as LegacyPolicyDecision
 from .interfaces import PolicyEngine, PolicyResult

@@ -45,17 +45,18 @@ from axiom.govern.passports import (
     revoke_passport,
     toggle_kill_switch,
 )
+from axiom.govern.policy_evaluator import get_policy_evaluator
 from axiom.govern.receipts import (
     ensure_receipts_schema,
     receipt_to_dict,
 )
-from axiom.govern.verify import verify_receipt_chain
 from axiom.govern.snapshots import (
     backfill_snapshots_from_receipts,
     ensure_snapshots_schema,
     get_snapshots,
     take_snapshot,
 )
+from axiom.govern.verify import verify_receipt_chain
 from axiom.govern.warden import emit_demo_warden_insights
 from axiom.govern.watchdog import (
     WatchdogAgent,
@@ -73,6 +74,7 @@ from axiom.organize.cluster_health import (
     compute_brain_health_score,
     health_status_for_score,
 )
+from axiom.policy import PolicyRule, reload_policies
 from axiom.retrieval.embeddings import bootstrap_embeddings, ensure_entity_embeddings_schema
 from axiom.retrieval.search import SearchMode, hybrid_search
 from axiom.schema.dto import EdgeDTO, EntityDTO
@@ -87,6 +89,7 @@ from axiom.schema.models import (
     Source,
 )
 from axiom.sign.ed25519_signer import load_or_create_keypair
+from axiom.skills.emitter import compile_skills_from_processes, manifest_to_dict
 from axiom.skills.registry import (
     SkillNotFound,
     activate_skill_with_session,
@@ -99,13 +102,12 @@ from axiom.skills.registry import (
     skill_run_to_dict,
     skill_to_dict,
 )
-from axiom.skills.emitter import compile_skills_from_processes, manifest_to_dict
 from axiom.skills.runner import run_skill
 from axiom.skills.skill_md import SkillManifestError, parse_skill_md, serialize_skill_md
 from axiom.sources.base import IngestEvent
 from axiom.sources.live_synthetic import LiveSyntheticSource
-from axiom.studio.sources import ensure_sources_schema, real_sources_snapshot
 from axiom.studio.llm_keys_api import router as llm_keys_router
+from axiom.studio.sources import ensure_sources_schema, real_sources_snapshot
 from axiom.studio.vault_api import router as vault_router
 
 
@@ -256,6 +258,25 @@ def _receipt_row(receipt: Receipt) -> dict[str, Any]:
         "timestamp": _iso(receipt.created_at),
     }
 
+
+def _policy_rule_row(rule: PolicyRule) -> dict[str, Any]:
+    return {
+        "rule_id": rule.rule_id,
+        "description": rule.description,
+        "severity": rule.severity,
+        "when": rule.when.to_source(),
+        "then": {
+            "type": rule.then.type,
+            "reason": rule.then.reason,
+            "guidance": rule.then.guidance,
+            "suggested_alternative": rule.then.suggested_alternative,
+            "approval_required_role": rule.then.approval_required_role,
+            "approval_timeout_seconds": rule.then.approval_timeout_seconds,
+        },
+        "metadata": rule.metadata,
+        "source": rule.source,
+    }
+
 SETTINGS_FILE = Path("axiom_studio_settings.json")
 MCP_TOOL_NAMES = [
     "axiom_query_brain",
@@ -298,6 +319,7 @@ def create_app(
     ensure_watchdog_alerts_schema(engine)
     session_local = sessionmaker(bind=engine, future=True)
     broadcaster = EventBroadcaster()
+    policy_evaluator = get_policy_evaluator(session_local)
     cluster_health_monitor = ClusterHealthMonitor()
     live_source = (
         LiveSyntheticSource(rate_per_second=live_rate, max_events=live_pause_after)
@@ -324,6 +346,7 @@ def create_app(
         app.state.mcp_action_events = []
         app.state.mcp_tool_counts = {name: 0 for name in MCP_TOOL_NAMES}
         app.state.mcp_last_called = {name: None for name in MCP_TOOL_NAMES}
+        app.state.policy_evaluator = policy_evaluator
         if SETTINGS_FILE.exists():
             try:
                 app.state.studio_settings = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
@@ -527,6 +550,7 @@ def create_app(
                     engine.dispose()
 
     app = FastAPI(title="AXIOM Studio API", lifespan=lifespan)
+    app.state.policy_evaluator = policy_evaluator
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -905,7 +929,38 @@ def create_app(
         await publish_watchdog_event("watchdog_alert_resolved", payload, alert_id)
         return payload
 
-    async def publish_skill_event(event_type: str, payload: dict[str, Any], persisted_id: str | None = None) -> None:
+    @app.get("/api/internal/policies")
+    def get_internal_policies() -> dict[str, Any]:
+        evaluator = app.state.policy_evaluator
+        rules = list(getattr(evaluator, "rules", []))
+        return {
+            "rules": [_policy_rule_row(rule) for rule in rules],
+            "count": len(rules),
+        }
+
+    @app.post("/api/internal/policies/reload")
+    def post_internal_policies_reload() -> dict[str, Any]:
+        rules = reload_policies()
+        app.state.policy_evaluator = get_policy_evaluator(session_local)
+        active_rules = list(getattr(app.state.policy_evaluator, "rules", rules))
+        return {
+            "rules": [_policy_rule_row(rule) for rule in active_rules],
+            "count": len(active_rules),
+        }
+
+    @app.get("/api/internal/policies/{rule_id}")
+    def get_internal_policy(rule_id: str) -> dict[str, Any]:
+        evaluator = app.state.policy_evaluator
+        for rule in getattr(evaluator, "rules", []):
+            if rule.rule_id == rule_id:
+                return _policy_rule_row(rule)
+        raise HTTPException(status_code=404, detail="policy rule not found")
+
+    async def publish_skill_event(
+        event_type: str,
+        payload: dict[str, Any],
+        persisted_id: str | None = None,
+    ) -> None:
         await broadcaster.publish(
             {
                 "type": event_type,
@@ -1079,6 +1134,7 @@ def create_app(
                 session_factory=session_local,
                 event_callback=publish_sync,
                 idempotency_key=body.idempotency_key,
+                policy_evaluator=app.state.policy_evaluator,
             )
         except Exception as exc:  # noqa: BLE001
             _raise_skill_error(exc)
