@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import Table, select
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from axiom.schema.models import ConnectorStateRow
+from axiom.schema.models import ConnectorConfigRow, ConnectorEventRow, ConnectorStateRow
 from axiom.storage.db import get_session
 
 ConnectorFactory = Callable[[], Any]
@@ -56,6 +57,19 @@ def list_installed(session_factory: Callable[[], Session] | None = None) -> list
             }
             for row in rows
         ]
+
+
+def ensure_connectors_schema(engine: Engine) -> None:
+    tables = (
+        cast(Table, ConnectorConfigRow.__table__),
+        cast(Table, ConnectorStateRow.__table__),
+        cast(Table, ConnectorEventRow.__table__),
+    )
+    for table in tables:
+        table.create(bind=engine, checkfirst=True)
+    for table in tables:
+        for index in table.indexes:
+            index.create(bind=engine, checkfirst=True)
 
 
 def _placeholder_factory() -> Any:

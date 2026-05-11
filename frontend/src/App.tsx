@@ -16,6 +16,7 @@ import { ApprovalsPage } from "@/pages/agents/ApprovalsPage";
 import { RuntimePage } from "@/pages/agents/RuntimePage";
 import { SchedulesPage } from "@/pages/agents/SchedulesPage";
 import { TriggersPage } from "@/pages/agents/TriggersPage";
+import { ConnectorsPage } from "@/pages/ConnectorsPage";
 import { ExplorePage } from "@/pages/ExplorePage";
 import { GovernancePage } from "@/pages/GovernancePage";
 import { InsightsPage } from "@/pages/InsightsPage";
@@ -248,6 +249,7 @@ export function App() {
           <Route path="/graph" element={<GraphPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/settings/passports" element={<PassportsPage />} />
+          <Route path="/settings/connectors" element={<ConnectorsPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/schedules" element={<SchedulesPage />} />
           <Route path="/agents/triggers" element={<TriggersPage />} />

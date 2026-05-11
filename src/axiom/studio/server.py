@@ -19,6 +19,36 @@ from sqlalchemy import create_engine, desc, func, select
 from sqlalchemy.orm import sessionmaker
 
 from axiom.api.search import EntitySearchResult, search_entities
+from axiom.connectors.base import ConnectorConfig
+from axiom.connectors.github.ingest import (
+    fetch_initial_repos as github_fetch_initial_repos,
+)
+from axiom.connectors.github.ingest import (
+    fetch_issues as github_fetch_issues,
+)
+from axiom.connectors.github.ingest import (
+    fetch_pull_requests as github_fetch_pull_requests,
+)
+from axiom.connectors.github.ingest import (
+    normalize_issue as github_normalize_issue,
+)
+from axiom.connectors.github.ingest import (
+    normalize_pull_request as github_normalize_pull_request,
+)
+from axiom.connectors.github.ingest import (
+    normalize_repo as github_normalize_repo,
+)
+from axiom.connectors.github.ingest import (
+    repo_to_issue_edge as github_repo_to_issue_edge,
+)
+from axiom.connectors.github.ingest import (
+    repo_to_pr_edge as github_repo_to_pr_edge,
+)
+from axiom.connectors.github.oauth import GITHUB_SCOPES, GitHubOAuth
+from axiom.connectors.github.webhook import GitHubWebhookHandler
+from axiom.connectors.ingest import apply_to_brain
+from axiom.connectors.registry import ensure_connectors_schema
+from axiom.connectors.registry import list_installed as list_connectors
 from axiom.govern.agent_actions import emit_demo_agent_actions
 from axiom.govern.agent_registry import (
     AgentType,
@@ -92,11 +122,15 @@ from axiom.schema.models import (
     Action,
     AgentRegistry,
     ClusterCheckRun,
+    ConnectorConfigRow,
+    ConnectorEventRow,
+    ConnectorStateRow,
     Edge,
     Entity,
     MetricsSnapshot,
     Receipt,
     Source,
+    new_id,
 )
 from axiom.sign.ed25519_signer import load_or_create_keypair
 from axiom.skills.emitter import compile_skills_from_processes, manifest_to_dict
@@ -333,6 +367,7 @@ def create_app(
     ensure_entity_embeddings_schema(engine)
     ensure_watchdog_alerts_schema(engine)
     ensure_approvals_schema(engine)
+    ensure_connectors_schema(engine)
     session_local = sessionmaker(bind=engine, future=True)
     broadcaster = EventBroadcaster()
     policy_evaluator = get_policy_evaluator(session_local)
@@ -599,6 +634,195 @@ def create_app(
         except Exception:
             pass
         return {"settings": existing}
+
+    def github_enabled() -> bool:
+        return os.environ.get("AXIOM_CONNECTOR_GITHUB_ENABLED", "").lower() in {"1", "true", "yes"}
+
+    def github_config() -> ConnectorConfig:
+        return ConnectorConfig(
+            id="github",
+            vendor="github",
+            oauth_client_id=os.environ.get("AXIOM_GITHUB_CLIENT_ID"),
+            oauth_client_secret=os.environ.get("AXIOM_GITHUB_CLIENT_SECRET"),
+            redirect_uri=os.environ.get(
+                "AXIOM_GITHUB_REDIRECT_URI",
+                "/api/internal/connectors/github/callback",
+            ),
+            scopes=GITHUB_SCOPES,
+            webhook_secret=os.environ.get("AXIOM_GITHUB_WEBHOOK_SECRET"),
+            workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
+        )
+
+    def require_github_enabled() -> None:
+        if not github_enabled():
+            raise HTTPException(status_code=503, detail="GitHub connector disabled")
+
+    @app.post("/api/internal/connectors/github/install")
+    def post_github_install() -> dict[str, Any]:
+        require_github_enabled()
+        config = github_config()
+        state = new_id()
+        with session_local() as session:
+            row = session.get(ConnectorConfigRow, config.id)
+            if row is None:
+                row = ConnectorConfigRow(
+                    id=config.id,
+                    vendor="github",
+                    oauth_client_id=config.oauth_client_id,
+                    oauth_client_secret=config.oauth_client_secret,
+                    redirect_uri=config.redirect_uri,
+                    scopes=config.scopes,
+                    webhook_secret=config.webhook_secret,
+                    workspace_id=config.workspace_id,
+                    install_state=state,
+                )
+            else:
+                row.install_state = state
+                row.oauth_client_id = config.oauth_client_id
+                row.oauth_client_secret = config.oauth_client_secret
+                row.redirect_uri = config.redirect_uri
+                row.scopes = config.scopes
+                row.webhook_secret = config.webhook_secret
+            session.add(row)
+            session.commit()
+        return {"authorize_url": GitHubOAuth(config).authorize_url(state), "state": state}
+
+    @app.get("/api/internal/connectors/github/callback")
+    def get_github_callback(code: str, state: str) -> dict[str, Any]:
+        require_github_enabled()
+        config = github_config()
+        oauth_state = GitHubOAuth(config).exchange_code(code)
+        with session_local() as session:
+            config_row = session.get(ConnectorConfigRow, config.id)
+            if config_row is None:
+                config_row = ConnectorConfigRow(
+                    id=config.id,
+                    vendor="github",
+                    oauth_client_id=config.oauth_client_id,
+                    oauth_client_secret=config.oauth_client_secret,
+                    redirect_uri=config.redirect_uri,
+                    scopes=config.scopes,
+                    webhook_secret=config.webhook_secret,
+                    workspace_id=config.workspace_id,
+                    install_state=state,
+                )
+                session.add(config_row)
+            row = ConnectorStateRow(
+                id=oauth_state.id,
+                connector_id=config.id,
+                vendor="github",
+                access_token=oauth_state.access_token,
+                refresh_token=None,
+                token_expires_at=None,
+                account_id=oauth_state.account_id,
+                account_label=oauth_state.account_label or "GitHub",
+                installed_by=oauth_state.installed_by,
+                status="connected",
+            )
+            session.add(row)
+            session.commit()
+        return {"status": "connected", "account_label": oauth_state.account_label or "GitHub"}
+
+    @app.post("/api/internal/connectors/github/sync")
+    async def post_github_sync() -> dict[str, Any]:
+        require_github_enabled()
+        with session_local() as session:
+            state = session.execute(
+                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "github")
+            ).scalars().first()
+            if state is None:
+                raise HTTPException(status_code=404, detail="GitHub connector not installed")
+            token_state = SimpleNamespace(access_token=state.access_token)
+            repos = github_fetch_initial_repos(token_state)
+            entities: list[dict[str, Any]] = []
+            edges: list[dict[str, Any]] = []
+            for repo in repos:
+                repo_entity = github_normalize_repo(repo)
+                entities.append(repo_entity)
+                repo_name = str(repo["full_name"])
+                for issue in github_fetch_issues(token_state, repo_name):
+                    issue_entity = github_normalize_issue(repo_name, issue)
+                    entities.append(issue_entity)
+                    edges.append(
+                        github_repo_to_issue_edge(repo_entity["nick"], issue_entity["nick"])
+                    )
+                for pull_request in github_fetch_pull_requests(token_state, repo_name):
+                    pr_entity = github_normalize_pull_request(repo_name, pull_request)
+                    entities.append(pr_entity)
+                    edges.append(github_repo_to_pr_edge(repo_entity["nick"], pr_entity["nick"]))
+            count = await apply_to_brain(session, entities, edges, broadcaster=broadcaster)
+            state.last_sync_at = datetime.utcnow()
+            session.add(state)
+            session.commit()
+        return {"status": "ok", "ingested": count}
+
+    @app.post("/api/internal/connectors/github/webhook")
+    async def post_github_webhook(request: Request) -> dict[str, Any]:
+        require_github_enabled()
+        body = await request.body()
+        headers = dict(request.headers)
+        handler = GitHubWebhookHandler(os.environ.get("AXIOM_GITHUB_WEBHOOK_SECRET", ""))
+        parsed_request = SimpleNamespace(body=body, headers=headers)
+        signature_ok = handler.verify(parsed_request)
+        events = handler.parse(parsed_request)
+        with session_local() as session:
+            for event in events:
+                session.add(
+                    ConnectorEventRow(
+                        vendor="github",
+                        connector_state_id=None,
+                        event_type=event.event_type,
+                        external_id=event.external_id,
+                        payload=event.payload,
+                        signature_ok=signature_ok,
+                        received_at=datetime.utcnow(),
+                        event_timestamp=event.timestamp,
+                    )
+                )
+            session.commit()
+        for event in events:
+            await broadcaster.publish(
+                {
+                    "type": "connector_event_received",
+                    "source_id": "github",
+                    "persisted_id": event.external_id,
+                    "timestamp": datetime_now_ms(),
+                    "payload": {"vendor": "github", "event_type": event.event_type},
+                }
+            )
+        return {"ok": signature_ok, "events": len(events)}
+
+    @app.get("/api/internal/connectors/github/status")
+    def get_github_status() -> dict[str, Any]:
+        require_github_enabled()
+        with session_local() as session:
+            row = session.execute(
+                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "github")
+            ).scalars().first()
+        if row is None:
+            return {"vendor": "github", "status": "disconnected"}
+        return {
+            "vendor": "github",
+            "status": row.status,
+            "account_label": row.account_label,
+            "last_sync_at": _iso(row.last_sync_at),
+        }
+
+    @app.get("/api/internal/connectors/status")
+    def get_connectors_status() -> dict[str, Any]:
+        installed = {row["vendor"]: row for row in list_connectors(session_local)}
+        vendors = ["github", "linear", "slack", "notion", "gmail"]
+        return {
+            "connectors": [
+                {
+                    "vendor": vendor,
+                    "status": installed.get(vendor, {}).get("status", "disconnected"),
+                    "account_label": installed.get(vendor, {}).get("account_label"),
+                    "last_sync_at": installed.get(vendor, {}).get("last_sync_at"),
+                }
+                for vendor in vendors
+            ]
+        }
 
     @app.get("/api/internal/agent-registry")
     def get_agent_registry(

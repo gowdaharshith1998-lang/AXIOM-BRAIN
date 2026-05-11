@@ -98,6 +98,49 @@ body {
   line-height: 1.35;
 }
 
+.settings-status-good,
+.settings-status-muted {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  border-radius: 6px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-status-good {
+  border: 1px solid rgba(42, 194, 127, 0.44);
+  background: rgba(20, 92, 58, 0.24);
+  color: #7df0b5;
+}
+
+.settings-status-muted {
+  border: 1px solid rgba(126, 147, 173, 0.26);
+  background: rgba(73, 91, 117, 0.16);
+  color: #a7b7cc;
+}
+
+.settings-action,
+.settings-action-muted {
+  height: 32px;
+  border-radius: 6px;
+  padding: 0 11px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-action {
+  border: 1px solid #2d83d5;
+  background: rgba(23, 92, 160, 0.34);
+  color: #e8f4ff;
+}
+
+.settings-action-muted {
+  border: 1px solid rgba(90, 115, 146, 0.38);
+  color: #aebdd0;
+}
+
 .axiom-labels {
   padding: 16px;
 }
