@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from axiom.mcp.server import AxiomMCPService
-from axiom.schema.models import Base, Edge, Entity
+from axiom.schema.models import Base, Edge, Entity, Source
 from axiom.studio.server import create_app
 
 
@@ -132,10 +132,32 @@ def test_traverse_edge_type_filter(mcp_service: AxiomMCPService) -> None:
     assert all(edge["relationship"] == "manages" for edge in out["edges"])
 
 
-def test_list_sources_shape(mcp_service: AxiomMCPService) -> None:
+def test_axiom_list_sources_no_longer_fabricates(mcp_service: AxiomMCPService) -> None:
+    with mcp_service._session_factory() as session:  # type: ignore[attr-defined]
+        session.merge(
+            Source(
+                id="synthetic-default",
+                source_type="synthetic",
+                display_name="Synthetic",
+                connected=True,
+            )
+        )
+        session.add(
+            Entity(
+                id="source_backed",
+                type="doc",
+                source_id="synthetic-default",
+                data={"title": "Source backed"},
+            )
+        )
+        session.commit()
+
     out = mcp_service.list_sources()
-    assert out["count"] > 0
-    assert all(row["is_demo"] is True for row in out["sources"])
+
+    assert out["count"] == 1
+    assert out["sources"][0]["source_id"] == "synthetic-default"
+    assert out["sources"][0]["count"] == 1
+    assert "Slack" not in {row["name"] for row in out["sources"]}
 
 
 def test_internal_agent_navigation_endpoint_caps_to_50(tmp_path: Path) -> None:

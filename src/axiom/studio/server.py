@@ -101,7 +101,7 @@ from axiom.skills.registry import (
 from axiom.skills.runner import run_skill
 from axiom.sources.base import IngestEvent
 from axiom.sources.live_synthetic import LiveSyntheticSource
-from axiom.studio.sources import synthetic_sources_snapshot
+from axiom.studio.sources import ensure_sources_schema, real_sources_snapshot
 from axiom.studio.llm_keys_api import router as llm_keys_router
 from axiom.studio.vault_api import router as vault_router
 
@@ -280,6 +280,7 @@ def create_app(
     ensure_snapshots_schema(engine)
     ensure_llm_provider_keys_schema(engine)
     ensure_skills_schema(engine)
+    ensure_sources_schema(engine)
     ensure_entity_embeddings_schema(engine)
     ensure_watchdog_alerts_schema(engine)
     session_local = sessionmaker(bind=engine, future=True)
@@ -1014,7 +1015,7 @@ def create_app(
     @app.get("/api/sources")
     def get_sources() -> list[dict[str, object]]:
         with session_local() as session:
-            return synthetic_sources_snapshot(session)
+            return real_sources_snapshot(session)
 
     @app.get("/api/entities/search")
     def search_entities_endpoint(

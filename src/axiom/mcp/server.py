@@ -42,7 +42,7 @@ from axiom.skills.registry import (
 from axiom.skills.runner import run_skill
 from axiom.storage import crud
 from axiom.storage.db import init_engine
-from axiom.studio.sources import synthetic_sources_snapshot
+from axiom.studio.sources import ensure_sources_schema, real_sources_snapshot
 
 Direction = Literal["outgoing", "incoming", "both"]
 TITLE_KEYS = ("title", "name", "subject", "label")
@@ -158,6 +158,7 @@ class AxiomMCPService:
             ensure_receipts_schema(bind)
             ensure_agent_registry_schema(bind)
             ensure_skills_schema(bind)
+            ensure_sources_schema(bind)
         ensure_system_passport(session_factory)
         self._hydrate_action_history_from_receipts()
 
@@ -1107,9 +1108,8 @@ class AxiomMCPService:
 
     def list_sources(self) -> dict[str, Any]:
         with self._session_factory() as session:
-            rows = synthetic_sources_snapshot(session)
-        out = [{**row, "is_demo": True} for row in rows]
-        return {"sources": out, "count": len(out)}
+            rows = real_sources_snapshot(session)
+        return {"sources": rows, "count": len(rows)}
 
     @staticmethod
     def _entity_result(entity: _EntityLite, matched_on: str, match_score: float) -> dict[str, Any]:

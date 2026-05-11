@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from axiom.ingest.broadcaster import EventBroadcaster
-from axiom.schema.models import Base, Entity
+from axiom.schema.models import Base, Entity, Source
 from axiom.studio.server import create_app
 
 
@@ -62,7 +62,44 @@ def test_cluster_health_endpoint_returns_cluster_snapshot(tmp_path: Path) -> Non
     assert payload["billing_payments"]["total_entities"] == 1
 
 
-def test_sources_endpoint_returns_synthetic_rows(tmp_path: Path) -> None:
+def test_sources_endpoint_returns_real_groupby_counts(tmp_path: Path) -> None:
+    db_url = _make_db_url(tmp_path)
+    engine = create_engine(db_url, future=True)
+    Base.metadata.create_all(engine)
+    session_local = sessionmaker(bind=engine, future=True)
+    with session_local() as session:
+        session.add_all(
+            [
+                Source(
+                    id="synthetic-default",
+                    source_type="synthetic",
+                    display_name="Synthetic",
+                    connected=True,
+                ),
+                Source(
+                    id="linear-main",
+                    source_type="linear",
+                    display_name="Linear",
+                    connected=True,
+                ),
+                Entity(type="thread", data={}, source_id="synthetic-default"),
+                Entity(type="ticket", data={}, source_id="synthetic-default"),
+                Entity(type="ticket", data={}, source_id="linear-main"),
+            ]
+        )
+        session.commit()
+    engine.dispose()
+
+    app = create_app(db_url=db_url)
+    with TestClient(app) as client:
+        payload = client.get("/api/sources").json()
+
+    counts = {row["source_id"]: row["count"] for row in payload}
+    assert counts == {"synthetic-default": 2, "linear-main": 1}
+    assert {row["name"] for row in payload} == {"Synthetic", "Linear"}
+
+
+def test_sources_endpoint_returns_empty_when_no_data(tmp_path: Path) -> None:
     db_url = _make_db_url(tmp_path)
     engine = create_engine(db_url, future=True)
     Base.metadata.create_all(engine)
@@ -72,15 +109,27 @@ def test_sources_endpoint_returns_synthetic_rows(tmp_path: Path) -> None:
     with TestClient(app) as client:
         payload = client.get("/api/sources").json()
 
-    assert [row["name"] for row in payload] == [
-        "Slack",
-        "Linear",
-        "GitHub",
-        "Notion",
-        "Email",
-        "Meetings",
-    ]
-    assert payload[0]["live"] is True
+    assert payload == []
+
+
+def test_synthetic_default_source_row_present_after_migration(tmp_path: Path) -> None:
+    db_url = _make_db_url(tmp_path)
+    engine = create_engine(db_url, future=True)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    app = create_app(db_url=db_url)
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 200
+
+    engine = create_engine(db_url, future=True)
+    session_local = sessionmaker(bind=engine, future=True)
+    with session_local() as session:
+        row = session.get(Source, "synthetic-default")
+        assert row is not None
+        assert row.source_type == "synthetic"
+        assert row.display_name == "Synthetic"
+        assert row.connected is True
 
 
 def test_entities_p95_under_50ms_for_100_rows(tmp_path: Path) -> None:

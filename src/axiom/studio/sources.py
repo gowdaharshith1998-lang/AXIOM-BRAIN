@@ -1,47 +1,71 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import Engine, func, inspect, select
 from sqlalchemy.orm import Session
 
-from axiom.schema.models import Entity
+from axiom.schema.models import Entity, Source
 
 
 @dataclass(frozen=True)
 class SourceSnapshot:
+    source_id: str
     name: str
     count: int
     last_event_at: str
     live: bool
 
 
-SOURCE_BASELINES: tuple[tuple[str, int, str], ...] = (
-    ("Slack", 1247, "live"),
-    ("Linear", 312, "2m ago"),
-    ("GitHub", 89, "5m ago"),
-    ("Notion", 156, "1h ago"),
-    ("Email", 2890, "live"),
-    ("Meetings", 47, "3h ago"),
-)
+def ensure_sources_schema(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("sources"):
+        Source.__table__.create(bind=engine, checkfirst=True)
+    with Session(engine, expire_on_commit=False, future=True) as session:
+        row = session.get(Source, "synthetic-default")
+        if row is None:
+            session.add(
+                Source(
+                    id="synthetic-default",
+                    source_type="synthetic",
+                    display_name="Synthetic",
+                    connected=True,
+                    metadata_json={},
+                )
+            )
+            session.commit()
 
 
-def synthetic_sources_snapshot(session: Session) -> list[dict[str, object]]:
-    entity_count = session.execute(select(Entity.id)).all()
-    increment = len(entity_count)
-    now = datetime.utcnow()
+def real_sources_snapshot(session: Session) -> list[dict[str, object]]:
+    stmt = (
+        select(
+            Source.id,
+            Source.source_type,
+            Source.display_name,
+            Source.connected,
+            func.count(Entity.id),
+            func.max(Entity.created_at),
+        )
+        .join(Entity, Entity.source_id == Source.id)
+        .group_by(Source.id, Source.source_type, Source.display_name, Source.connected)
+        .order_by(Source.display_name)
+    )
     rows: list[dict[str, object]] = []
-    for index, (name, baseline, freshness) in enumerate(SOURCE_BASELINES):
-        live = freshness == "live"
-        last_event = now if live else now - timedelta(minutes=(index + 1) * 2)
+    for source_id, source_type, display_name, connected, count, last_event_at in session.execute(stmt):
         rows.append(
             {
-                "name": name,
-                "count": baseline + increment * (index + 1),
-                "last_event_at": last_event.isoformat(),
-                "freshness": freshness,
-                "live": live,
+                "source_id": source_id,
+                "source_type": source_type,
+                "name": display_name,
+                "display_name": display_name,
+                "count": int(count),
+                "last_event_at": last_event_at.isoformat() if last_event_at is not None else None,
+                "freshness": last_event_at.isoformat() if last_event_at is not None else None,
+                "live": bool(connected),
+                "connected": bool(connected),
             }
         )
     return rows
+
+
+synthetic_sources_snapshot = real_sources_snapshot
