@@ -6,6 +6,21 @@ import { ConnectorsPage } from "@/pages/ConnectorsPage";
 
 const fetchMock = vi.fn();
 
+class MockWebSocket {
+  static instances: MockWebSocket[] = [];
+  onmessage: ((ev: { data: string }) => void) | null = null;
+
+  constructor(public url: string) {
+    MockWebSocket.instances.push(this);
+  }
+
+  emit(event: unknown) {
+    this.onmessage?.({ data: JSON.stringify(event) });
+  }
+
+  close() {}
+}
+
 function jsonResponse(payload: unknown) {
   return Promise.resolve(new Response(JSON.stringify(payload), { status: 200 }));
 }
@@ -21,19 +36,24 @@ function renderPage() {
 describe("ConnectorsPage", () => {
   beforeEach(() => {
     fetchMock.mockReset();
+    MockWebSocket.instances = [];
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("open", vi.fn());
+    vi.stubGlobal("WebSocket", MockWebSocket);
     fetchMock.mockImplementation((url: string) => {
       if (url === "/api/internal/connectors/status") {
         return jsonResponse({
           connectors: [
-            { vendor: "github", status: "connected", account_label: "Octo Org", last_sync_at: null },
-            { vendor: "linear", status: "connected", account_label: "Linear Workspace", last_sync_at: null },
-            { vendor: "slack", status: "connected", account_label: "Axiom HQ", last_sync_at: null },
-            { vendor: "notion", status: "connected", account_label: "Axiom Wiki", last_sync_at: null },
-            { vendor: "gmail", status: "connected", account_label: "founder@axiom.local", last_sync_at: null },
+            { vendor: "github", status: "connected", account_label: "Octo Org", last_sync_at: null, entities_ingested: 3, events_24h: 1, writes_blocked_week: 0 },
+            { vendor: "linear", status: "connected", account_label: "Linear Workspace", last_sync_at: null, entities_ingested: 2, events_24h: 0, writes_blocked_week: 0 },
+            { vendor: "slack", status: "connected", account_label: "Axiom HQ", last_sync_at: null, entities_ingested: 4, events_24h: 0, writes_blocked_week: 0 },
+            { vendor: "notion", status: "connected", account_label: "Axiom Wiki", last_sync_at: null, entities_ingested: 5, events_24h: 0, writes_blocked_week: 0, watch_mode: "polling" },
+            { vendor: "gmail", status: "connected", account_label: "founder@axiom.local", last_sync_at: null, entities_ingested: 6, events_24h: 0, writes_blocked_week: 0 },
           ],
         });
+      }
+      if (url === "/api/internal/connectors/github/events") {
+        return jsonResponse({ events: [{ vendor: "github", event_type: "issue.opened", external_id: "issue_1" }] });
       }
       if (url === "/api/internal/connectors/github/install") {
         return jsonResponse({ authorize_url: "https://github.com/login/oauth/authorize?state=csrf" });
@@ -165,5 +185,44 @@ describe("ConnectorsPage", () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Disconnect Gmail" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/internal/connectors/gmail", { method: "DELETE" }));
+  });
+
+  it("connectors_page_aggregates_status_for_all_five", async () => {
+    renderPage();
+    expect(await screen.findByText("3 entities")).toBeInTheDocument();
+    expect(screen.getByText("6 entities")).toBeInTheDocument();
+    expect(screen.getAllByText("never")).toHaveLength(5);
+  });
+
+  it("connector_event_received_ws_event_increments_counter", async () => {
+    renderPage();
+    expect(await screen.findByText("1 events")).toBeInTheDocument();
+    MockWebSocket.instances[0]?.emit({
+      seq: 1,
+      type: "connector_event_received",
+      source_id: "github",
+      persisted_id: "issue_2",
+      payload: { vendor: "github", event_type: "issue.opened" },
+    });
+    expect(await screen.findByText("2 events")).toBeInTheDocument();
+  });
+
+  it("connector_write_blocked_ws_event_shows_in_drawer", async () => {
+    renderPage();
+    MockWebSocket.instances[0]?.emit({
+      seq: 2,
+      type: "connector_write_blocked",
+      source_id: "github",
+      persisted_id: "write_1",
+      payload: { vendor: "github", event_type: "write.blocked" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "View GitHub Events" }));
+    expect(await screen.findByText(/write.blocked/)).toBeInTheDocument();
+  });
+
+  it("test_connection_button_per_row", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Test GitHub" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/internal/connectors/github/test", { method: "POST" }));
   });
 });

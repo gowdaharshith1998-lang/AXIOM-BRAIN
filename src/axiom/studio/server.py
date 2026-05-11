@@ -1577,10 +1577,88 @@ def create_app(
             session.commit()
         return {"status": "disconnected", "vendor": vendor, "revoked": len(rows)}
 
+    def require_connector_enabled(vendor: str) -> None:
+        if vendor == "github":
+            require_github_enabled()
+        elif vendor == "linear":
+            require_linear_enabled()
+        elif vendor == "slack":
+            require_slack_enabled()
+        elif vendor == "notion":
+            require_notion_enabled()
+        elif vendor == "gmail":
+            require_gmail_enabled()
+        else:
+            raise HTTPException(status_code=404, detail="connector not found")
+
+    @app.post("/api/internal/connectors/{vendor}/test")
+    def post_connector_test(vendor: str) -> dict[str, Any]:
+        require_connector_enabled(vendor)
+        with session_local() as session:
+            row = session.execute(
+                select(ConnectorStateRow).where(ConnectorStateRow.vendor == vendor)
+            ).scalars().first()
+        return {
+            "vendor": vendor,
+            "ok": row is not None and row.status == "connected",
+            "status": row.status if row is not None else "disconnected",
+        }
+
+    @app.get("/api/internal/connectors/{vendor}/events")
+    def get_connector_events(vendor: str) -> dict[str, Any]:
+        require_connector_enabled(vendor)
+        with session_local() as session:
+            rows = session.execute(
+                select(ConnectorEventRow)
+                .where(ConnectorEventRow.vendor == vendor)
+                .order_by(desc(ConnectorEventRow.received_at))
+                .limit(50)
+            ).scalars().all()
+        return {
+            "events": [
+                {
+                    "vendor": row.vendor,
+                    "event_type": row.event_type,
+                    "external_id": row.external_id,
+                    "received_at": _iso(row.received_at),
+                    "signature_ok": row.signature_ok,
+                    "payload": row.payload,
+                }
+                for row in rows
+            ]
+        }
+
     @app.get("/api/internal/connectors/status")
     def get_connectors_status() -> dict[str, Any]:
         installed = {row["vendor"]: row for row in list_connectors(session_local)}
         vendors = ["github", "linear", "slack", "notion", "gmail"]
+        now = datetime.utcnow()
+        event_cutoff = now - timedelta(hours=24)
+        receipt_cutoff = now - timedelta(days=7)
+        metrics: dict[str, dict[str, Any]] = {}
+        with session_local() as session:
+            for vendor in vendors:
+                entities_ingested = session.execute(
+                    select(func.count(Entity.id)).where(Entity.source_id.startswith(f"{vendor}:"))
+                ).scalar_one()
+                events_24h = session.execute(
+                    select(func.count(ConnectorEventRow.id)).where(
+                        ConnectorEventRow.vendor == vendor,
+                        ConnectorEventRow.received_at >= event_cutoff,
+                    )
+                ).scalar_one()
+                writes_blocked = session.execute(
+                    select(func.count(Receipt.id)).where(
+                        Receipt.agent_name == f"connector:{vendor}",
+                        Receipt.decision != "allow",
+                        Receipt.created_at >= receipt_cutoff,
+                    )
+                ).scalar_one()
+                metrics[vendor] = {
+                    "entities_ingested": int(entities_ingested or 0),
+                    "events_24h": int(events_24h or 0),
+                    "writes_blocked_week": int(writes_blocked or 0),
+                }
         return {
             "connectors": [
                 {
@@ -1588,6 +1666,8 @@ def create_app(
                     "status": installed.get(vendor, {}).get("status", "disconnected"),
                     "account_label": installed.get(vendor, {}).get("account_label"),
                     "last_sync_at": installed.get(vendor, {}).get("last_sync_at"),
+                    **metrics[vendor],
+                    "watch_mode": "polling" if vendor == "notion" else "webhook",
                 }
                 for vendor in vendors
             ]

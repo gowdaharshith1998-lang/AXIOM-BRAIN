@@ -29,7 +29,11 @@ export type BrainEvent = {
     | "skill_run_failed"
     | "skill_archived"
     | "agent_navigation_step"
-    | "confidence_changed";
+    | "confidence_changed"
+    | "connector_event_received"
+    | "connector_write_blocked"
+    | "connector_write_executed"
+    | "connector_install_completed";
   timestamp: number;
   source_id: string | null;
   persisted_id: string | null;
