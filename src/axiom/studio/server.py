@@ -99,6 +99,7 @@ from axiom.skills.registry import (
     skill_run_to_dict,
     skill_to_dict,
 )
+from axiom.skills.emitter import compile_skills_from_processes, manifest_to_dict
 from axiom.skills.runner import run_skill
 from axiom.skills.skill_md import SkillManifestError, parse_skill_md, serialize_skill_md
 from axiom.sources.base import IngestEvent
@@ -144,6 +145,11 @@ class SkillRunIn(BaseModel):
 
 class SkillMdIn(BaseModel):
     content: str
+
+
+class CompileSkillsIn(BaseModel):
+    dry_run: bool = False
+    process_ids: list[str] | None = None
 
 
 class PassportIn(BaseModel):
@@ -1028,6 +1034,28 @@ def create_app(
         await publish_skill_event("skill_registered", {"skill": payload}, payload["id"])
         return payload
 
+    @app.post("/api/internal/skills/compile-from-processes")
+    async def post_internal_skills_compile_from_processes(
+        body: CompileSkillsIn = Body(default_factory=CompileSkillsIn),
+    ) -> dict[str, Any]:
+        try:
+            with session_local() as session:
+                rows = compile_skills_from_processes(
+                    session,
+                    dry_run=body.dry_run,
+                    process_ids=body.process_ids,
+                )
+                if body.dry_run:
+                    compiled = [manifest_to_dict(row) for row in rows]
+                else:
+                    compiled = [skill_to_dict(row) for row in rows]
+        except Exception as exc:  # noqa: BLE001
+            _raise_skill_error(exc)
+        if not body.dry_run:
+            for payload in compiled:
+                await publish_skill_event("skill_compiled", {"skill": payload}, str(payload["id"]))
+        return {"compiled": compiled, "dry_run": body.dry_run, "count": len(compiled)}
+
     @app.post("/api/internal/skills/{skill_id}/activate")
     def post_internal_skill_activate(skill_id: str) -> dict[str, Any]:
         try:
@@ -1067,9 +1095,12 @@ def create_app(
         return payload
 
     @app.get("/api/entities")
-    def get_entities() -> list[dict[str, Any]]:
+    def get_entities(type: str | None = None) -> list[dict[str, Any]]:  # noqa: A002
         with session_local() as session:
-            rows = session.execute(select(Entity)).scalars().all()
+            stmt = select(Entity)
+            if type is not None:
+                stmt = stmt.where(Entity.type == type)
+            rows = session.execute(stmt).scalars().all()
             return [EntityDTO.model_validate(r).model_dump(mode="json") for r in rows]
 
     @app.get("/api/cluster_health")

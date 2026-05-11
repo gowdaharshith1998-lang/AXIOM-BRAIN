@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from "react";
 
 import {
   archiveSkill,
+  compileSkillsFromProcesses,
   listSkillRuns,
   listSkills,
   registerSkill,
@@ -10,6 +11,7 @@ import {
   uploadSkillMd,
   downloadSkillMd,
   type Skill,
+  type CompileSkillItem,
   type SkillRun,
 } from "@/lib/skillsClient";
 import type { BrainEvent } from "@/lib/websocket";
@@ -71,6 +73,12 @@ type RunField = {
 
 type RunFormValue = string | boolean;
 type RegisterTab = "upload" | "form";
+type ProcessEntity = {
+  id: string;
+  type: string;
+  data?: Record<string, unknown>;
+  cluster_id?: string | null;
+};
 type MdPreview = {
   name: string;
   description: string;
@@ -143,6 +151,19 @@ function parseSkillMdPreview(content: string): { preview: MdPreview | null; erro
   };
 }
 
+function processName(entity: ProcessEntity): string {
+  const data = entity.data ?? {};
+  for (const key of ["name", "title", "label"]) {
+    const value = data[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return entity.id;
+}
+
+function isSkill(item: CompileSkillItem): item is Skill {
+  return typeof item.id === "string" && typeof item.created_at === "string";
+}
+
 export function SkillsPage() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [runs, setRuns] = useState<Record<string, SkillRun[]>>({});
@@ -161,6 +182,12 @@ export function SkillsPage() {
   const [runError, setRunError] = useState<string | null>(null);
   const [runResult, setRunResult] = useState<SkillRun | null>(null);
   const [lastRunInput, setLastRunInput] = useState<Record<string, unknown> | null>(null);
+  const [compileOpen, setCompileOpen] = useState(false);
+  const [processes, setProcesses] = useState<ProcessEntity[]>([]);
+  const [selectedProcessIds, setSelectedProcessIds] = useState<string[]>([]);
+  const [compileDryRun, setCompileDryRun] = useState(false);
+  const [compileLoading, setCompileLoading] = useState(false);
+  const [compileResults, setCompileResults] = useState<CompileSkillItem[]>([]);
 
   const mdPreview = useMemo(() => parseSkillMdPreview(skillMdContent), [skillMdContent]);
 
@@ -190,7 +217,7 @@ export function SkillsPage() {
       const detail = (event as CustomEvent<BrainEvent>).detail;
       if (!detail) return;
       const payload = detail.payload as { skill?: Skill; run?: SkillRun };
-      if (detail.type === "skill_registered" && payload.skill) {
+      if ((detail.type === "skill_registered" || detail.type === "skill_compiled") && payload.skill) {
         setSkills((current) => [payload.skill!, ...current.filter((skill) => skill.id !== payload.skill!.id)]);
       }
       if (detail.type === "skill_archived" && payload.skill) {
@@ -283,6 +310,37 @@ export function SkillsPage() {
     setForm(blankForm);
   }
 
+  async function openCompileModal() {
+    setCompileOpen(true);
+    setCompileResults([]);
+    const response = await fetch("/api/entities?type=process");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const rows = (await response.json()) as ProcessEntity[];
+    setProcesses(rows);
+    setSelectedProcessIds(rows.map((row) => row.id));
+  }
+
+  async function submitCompile(event: FormEvent) {
+    event.preventDefault();
+    setCompileLoading(true);
+    try {
+      const result = await compileSkillsFromProcesses({
+        dryRun: compileDryRun,
+        processIds: selectedProcessIds,
+      });
+      setCompileResults(result.compiled);
+      if (!result.dry_run) {
+        const compiledSkills = result.compiled.filter(isSkill);
+        setSkills((current) => [
+          ...compiledSkills,
+          ...current.filter((skill) => !compiledSkills.some((compiled) => compiled.id === skill.id)),
+        ]);
+      }
+    } finally {
+      setCompileLoading(false);
+    }
+  }
+
   async function downloadSelectedSkillMd(skill: Skill) {
     const content = await downloadSkillMd(skill.id);
     setToast(`Downloaded SKILL.md for ${skill.name}`);
@@ -303,9 +361,14 @@ export function SkillsPage() {
           <h1>Skills</h1>
           <p>Registered prompt skills, provider routing, run history, and archive controls.</p>
         </div>
-        <button type="button" className="agents-primary" onClick={() => setModalOpen(true)}>
-          <Icon name="plus" /> Register Skill
-        </button>
+        <div className="agents-panel-head">
+          <button type="button" className="agents-secondary" onClick={() => void openCompileModal()}>
+            Compile from Processes
+          </button>
+          <button type="button" className="agents-primary" onClick={() => setModalOpen(true)}>
+            <Icon name="plus" /> Register Skill
+          </button>
+        </div>
       </header>
 
       <main className="agents-content">
@@ -345,6 +408,56 @@ export function SkillsPage() {
           </div>
         </section>
       </main>
+
+      {compileOpen ? (
+        <div className="agents-modal-backdrop">
+          <form className="agents-modal" aria-label="Compile from Processes" onSubmit={submitCompile}>
+            <div className="agents-modal-head">
+              <h2>Compile from Processes</h2>
+              <button type="button" aria-label="Close compile modal" onClick={() => setCompileOpen(false)}><Icon name="x" /></button>
+            </div>
+            <label>
+              <input type="checkbox" checked={compileDryRun} onChange={(event) => setCompileDryRun(event.target.checked)} />
+              Dry run
+            </label>
+            <div className="agents-table">
+              <div className="agents-table-head">
+                <span>Use</span>
+                <span>Process</span>
+                <span>Cluster</span>
+              </div>
+              {processes.length ? processes.map((process) => (
+                <label className="agents-table-row" key={process.id}>
+                  <span><input type="checkbox" checked={selectedProcessIds.includes(process.id)} onChange={(event) => {
+                    setSelectedProcessIds((current) => event.target.checked ? [...current, process.id] : current.filter((id) => id !== process.id));
+                  }} /></span>
+                  <span>{processName(process)}</span>
+                  <span>{process.cluster_id ?? "*"}</span>
+                </label>
+              )) : <EmptyState>No process entities found.</EmptyState>}
+            </div>
+            <button type="submit" className="agents-primary" disabled={compileLoading || selectedProcessIds.length === 0}>
+              {compileLoading ? "Compiling..." : "Compile"}
+            </button>
+            {compileResults.length ? (
+              <div className="agents-table">
+                <div className="agents-table-head">
+                  <span>Skill</span>
+                  <span>Intent</span>
+                  <span>Status</span>
+                </div>
+                {compileResults.map((item) => (
+                  <div className="agents-table-row" key={`${item.id ?? item.name}`}>
+                    <span>{item.name}</span>
+                    <span>{item.intent ?? "transform"}</span>
+                    <span>{compileDryRun ? "dry_run" : "compiled"}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </form>
+        </div>
+      ) : null}
 
       {modalOpen ? (
         <div className="agents-modal-backdrop">

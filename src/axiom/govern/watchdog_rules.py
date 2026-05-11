@@ -9,7 +9,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from axiom.retrieval.embeddings import cosine_similarity, vector_from_blob
-from axiom.schema.models import Edge, Entity, EntityEmbedding
+from axiom.schema.models import Edge, Entity, EntityEmbedding, Skill
+from axiom.skills.emitter import slugify_skill_name
 
 
 @dataclass(frozen=True, slots=True)
@@ -338,6 +339,32 @@ def stale_decision_referenced(
     )
 
 
+def process_without_compiled_skill(
+    session: Session,
+    entity: Entity,
+    _now: datetime,
+) -> AlertCandidate | None:
+    if entity.type.lower() != "process":
+        return None
+    expected_name = slugify_skill_name(_entity_title(entity))
+    existing = int(
+        session.execute(select(func.count(Skill.id)).where(Skill.name == expected_name)).scalar_one()
+    )
+    if existing:
+        return None
+    return AlertCandidate(
+        rule_id="R7",
+        severity="info",
+        reason=f"{_entity_title(entity)} has no compiled skill.",
+        evidence={
+            "entity_id": entity.id,
+            "expected_skill_name": expected_name,
+            "compiled_skill_count": existing,
+        },
+        suggested_action="Compile this process into a runnable skill.",
+    )
+
+
 DEFAULT_RULES: tuple[WatchdogRule, ...] = (
     billing_change_without_decision,
     ticket_severity_mismatch_runbook,
@@ -345,4 +372,5 @@ DEFAULT_RULES: tuple[WatchdogRule, ...] = (
     confidence_drift_high,
     cluster_outlier,
     stale_decision_referenced,
+    process_without_compiled_skill,
 )

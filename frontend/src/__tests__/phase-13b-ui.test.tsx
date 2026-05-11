@@ -24,6 +24,7 @@ const skillsApi = vi.hoisted(() => ({
   runSkill: vi.fn(),
   uploadSkillMd: vi.fn(),
   downloadSkillMd: vi.fn(),
+  compileSkillsFromProcesses: vi.fn(),
 }));
 const watchdogApi = vi.hoisted(() => ({
   listWatchdogAlerts: vi.fn(),
@@ -138,6 +139,17 @@ const alert = {
   resolved_by: null,
 };
 
+const processEntity = {
+  id: "process_refund",
+  type: "process",
+  data: { name: "Refund Review", description: "Review refunds" },
+  source_id: "synthetic-default",
+  created_at: "2026-05-10T00:00:00",
+  updated_at: "2026-05-10T00:00:00",
+  cluster_id: "customer_support",
+  composite_importance: 0.5,
+};
+
 const governanceSnapshot = {
   generated_at: "2026-05-10T00:00:00",
   summary: {
@@ -182,6 +194,11 @@ describe("Phase 13.B UI", () => {
     skillsApi.runSkill.mockResolvedValue({ run: { ...run, id: "run_submit" }, skill });
     skillsApi.uploadSkillMd.mockResolvedValue({ ...skill, id: "sk_md", name: "summarize_thread" });
     skillsApi.downloadSkillMd.mockResolvedValue(skillMd);
+    skillsApi.compileSkillsFromProcesses.mockResolvedValue({
+      compiled: [{ ...skill, id: "sk_compiled", name: "refund_review" }],
+      dry_run: false,
+      count: 1,
+    });
     watchdogApi.listWatchdogAlerts.mockResolvedValue([alert]);
     watchdogApi.acknowledgeWatchdogAlert.mockResolvedValue({ ...alert, status: "acknowledged" });
     watchdogApi.resolveWatchdogAlert.mockResolvedValue({ ...alert, status: "resolved", resolved_at: "2026-05-10T00:10:00" });
@@ -325,6 +342,50 @@ describe("Phase 13.B UI", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open" }));
     fireEvent.click(await screen.findByRole("button", { name: "Download SKILL.md" }));
     await waitFor(() => expect(skillsApi.downloadSkillMd).toHaveBeenCalledWith("sk_1"));
+  });
+
+  it("compile_from_processes_modal_lists_all_processes", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify([processEntity])));
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Compile from Processes" }));
+    expect(await screen.findByText("Refund Review")).toBeInTheDocument();
+  });
+
+  it("compile_from_processes_dry_run_shows_manifests", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify([processEntity])));
+    skillsApi.compileSkillsFromProcesses.mockResolvedValueOnce({
+      compiled: [{ name: "refund_review", intent: "classify", description: "Review refunds" }],
+      dry_run: true,
+      count: 1,
+    });
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Compile from Processes" }));
+    fireEvent.click(await screen.findByLabelText("Dry run"));
+    fireEvent.click(screen.getByRole("button", { name: "Compile" }));
+    expect(await screen.findByText("refund_review")).toBeInTheDocument();
+  });
+
+  it("compile_from_processes_register_calls_endpoint", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify([processEntity])));
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Compile from Processes" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Compile" }));
+    await waitFor(() => expect(skillsApi.compileSkillsFromProcesses).toHaveBeenCalledWith({ dryRun: false, processIds: ["process_refund"] }));
+  });
+
+  it("skill_compiled_ws_event_updates_table_live", async () => {
+    render(<SkillsPage />);
+    await screen.findByText("summarize_policy");
+    window.dispatchEvent(new CustomEvent("axiom:brain-event", { detail: { type: "skill_compiled", payload: { skill: { ...skill, id: "sk_live", name: "compiled_live" } } } }));
+    expect(await screen.findByText("compiled_live")).toBeInTheDocument();
+  });
+
+  it("compile_results_table_shows_status_per_process", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify([processEntity])));
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Compile from Processes" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Compile" }));
+    expect(await screen.findByText("compiled")).toBeInTheDocument();
   });
 
   it("form_tab_still_works_for_fallback_registration", async () => {

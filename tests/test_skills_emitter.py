@@ -11,7 +11,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.govern.llm_keys import set_provider_key_with_session
-from axiom.schema.models import Base, Receipt, SkillRun
+from axiom.schema.models import Base, Edge, Entity, Receipt, Skill, SkillRun
 from axiom.skills.registry import (
     activate_skill_with_session,
     archive_skill_with_session,
@@ -64,6 +64,176 @@ def _register_priority_skill(session: Session):
             "properties": {"priority": {"type": "string"}},
         },
     )
+
+
+def _process_entity(session: Session, entity_id: str = "process_refund") -> Entity:
+    process = Entity(
+        id=entity_id,
+        type="process",
+        data={
+            "name": "Refund Review",
+            "description": "Review refund requests",
+            "steps": ["Classify the request", "Summarize the evidence"],
+        },
+        cluster_id="customer_support",
+    )
+    session.add(process)
+    session.commit()
+    return process
+
+
+def _linked_decision(session: Session, process_id: str) -> None:
+    decision = Entity(
+        id="decision_refund_policy",
+        type="decision",
+        data={"title": "Refund policy decision", "summary": "Refunds over $500 need approval."},
+        cluster_id="customer_support",
+    )
+    edge = Edge(
+        id="edge_process_decision",
+        source_id=process_id,
+        target_id=decision.id,
+        relationship="PROCESS_REFERENCES_DECISION",
+        data={},
+    )
+    session.add_all([decision, edge])
+    session.commit()
+
+
+def test_emitter_emit_all_walks_all_process_entities(skill_db: tuple[sessionmaker[Session], str]) -> None:
+    sf, _db_url = skill_db
+    from axiom.skills.emitter import ProcessSkillEmitter
+
+    with sf() as session:
+        _process_entity(session)
+        manifests = ProcessSkillEmitter(session).emit_all()
+    assert [manifest.name for manifest in manifests] == ["refund_review"]
+
+
+def test_emitter_emit_one_returns_manifest_for_one_process(
+    skill_db: tuple[sessionmaker[Session], str]
+) -> None:
+    sf, _db_url = skill_db
+    from axiom.skills.emitter import ProcessSkillEmitter
+
+    with sf() as session:
+        process = _process_entity(session)
+        manifest = ProcessSkillEmitter(session).emit_one(process.id)
+    assert manifest.description == "Review refund requests"
+    assert manifest.scope_clusters == ["customer_support"]
+
+
+def test_emitter_infers_classify_intent_from_steps(skill_db: tuple[sessionmaker[Session], str]) -> None:
+    sf, _db_url = skill_db
+    from axiom.skills.emitter import ProcessSkillEmitter
+
+    with sf() as session:
+        process = _process_entity(session)
+        assert ProcessSkillEmitter(session).emit_one(process.id).intent == "classify"
+
+
+def test_emitter_infers_summarize_intent_from_steps(skill_db: tuple[sessionmaker[Session], str]) -> None:
+    sf, _db_url = skill_db
+    from axiom.skills.emitter import ProcessSkillEmitter
+
+    with sf() as session:
+        process = Entity(
+            id="process_summary",
+            type="process",
+            data={"name": "Weekly Summary", "steps": ["Summarize the thread"]},
+            cluster_id=None,
+        )
+        session.add(process)
+        session.commit()
+        assert ProcessSkillEmitter(session).emit_one(process.id).intent == "summarize"
+
+
+def test_emitter_infers_transform_intent_as_fallback(
+    skill_db: tuple[sessionmaker[Session], str]
+) -> None:
+    sf, _db_url = skill_db
+    from axiom.skills.emitter import ProcessSkillEmitter
+
+    with sf() as session:
+        process = Entity(id="process_generic", type="process", data={"name": "Generic Process"})
+        session.add(process)
+        session.commit()
+        assert ProcessSkillEmitter(session).emit_one(process.id).intent == "transform"
+
+
+def test_emitter_compiles_linked_decisions_into_prompt(
+    skill_db: tuple[sessionmaker[Session], str]
+) -> None:
+    sf, _db_url = skill_db
+    from axiom.skills.emitter import ProcessSkillEmitter
+
+    with sf() as session:
+        process = _process_entity(session)
+        _linked_decision(session, process.id)
+        manifest = ProcessSkillEmitter(session).emit_one(process.id)
+    assert "Refund policy decision" in manifest.prompt_template
+    assert "Refunds over $500 need approval." in manifest.prompt_template
+
+
+def test_compile_skills_idempotent_on_same_process(
+    skill_db: tuple[sessionmaker[Session], str]
+) -> None:
+    sf, _db_url = skill_db
+    from axiom.skills.emitter import compile_skills_from_processes
+
+    with sf() as session:
+        _process_entity(session)
+        first = compile_skills_from_processes(session)
+        second = compile_skills_from_processes(session)
+        assert first[0].id == second[0].id
+        assert session.query(Skill).count() == 1
+
+
+def test_compile_skills_emits_skill_compiled_ws_event(
+    skill_db: tuple[sessionmaker[Session], str]
+) -> None:
+    sf, _db_url = skill_db
+    from axiom.skills.emitter import compile_skills_from_processes
+
+    events: list[tuple[str, dict[str, object]]] = []
+    with sf() as session:
+        _process_entity(session)
+        compile_skills_from_processes(
+            session,
+            event_callback=lambda event_type, payload: events.append((event_type, payload)),
+        )
+    assert events[0][0] == "skill_compiled"
+
+
+def test_compile_endpoint_dry_run_returns_manifests_without_persisting(
+    skill_db: tuple[sessionmaker[Session], str]
+) -> None:
+    sf, db_url = skill_db
+    from axiom.studio.server import create_app
+
+    with sf() as session:
+        _process_entity(session)
+    app = create_app(db_url=db_url, enable_organizer=False)
+    with TestClient(app) as client:
+        response = client.post("/api/internal/skills/compile-from-processes", json={"dry_run": True})
+        assert response.status_code == 200
+        assert response.json()["dry_run"] is True
+        assert response.json()["compiled"][0]["name"] == "refund_review"
+    with sf() as session:
+        assert session.query(Skill).count() == 0
+
+
+def test_r7_watchdog_rule_fires_for_uncompiled_process(
+    skill_db: tuple[sessionmaker[Session], str]
+) -> None:
+    sf, _db_url = skill_db
+    from axiom.govern.watchdog_rules import process_without_compiled_skill
+
+    with sf() as session:
+        process = _process_entity(session)
+        alert = process_without_compiled_skill(session, process, process.created_at)
+    assert alert is not None
+    assert alert.rule_id == "R7"
 
 
 SKILL_MD = """---

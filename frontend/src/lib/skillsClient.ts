@@ -34,6 +34,21 @@ export type SkillRun = {
 
 export type SkillRunResult = { run: SkillRun; skill: Skill };
 
+export type CompileSkillItem = Partial<Skill> & {
+  name: string;
+  description?: string;
+  intent?: string;
+  prompt_template?: string;
+  process_id?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type CompileSkillsResult = {
+  compiled: CompileSkillItem[];
+  dry_run: boolean;
+  count: number;
+};
+
 export type RegisterSkillBody = {
   name: string;
   description: string;
@@ -100,6 +115,19 @@ export async function downloadSkillMd(skillId: string): Promise<string> {
   const response = await fetch(`/api/internal/skills/${encodeURIComponent(skillId)}/md`);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.text();
+}
+
+export async function compileSkillsFromProcesses(options: {
+  dryRun?: boolean;
+  processIds?: string[];
+} = {}): Promise<CompileSkillsResult> {
+  return request<CompileSkillsResult>("/api/internal/skills/compile-from-processes", {
+    method: "POST",
+    body: JSON.stringify({
+      dry_run: options.dryRun ?? false,
+      process_ids: options.processIds,
+    }),
+  });
 }
 
 export async function listSkillRuns(skillId: string): Promise<SkillRun[]> {
