@@ -32,6 +32,8 @@ class PolicyDecision:
     guidance: str | None = None
     suggested_alternative: dict[str, Any] | None = None
     approval_id: str | None = None
+    approval_required_role: str | None = None
+    approval_timeout_seconds: int | None = None
     fired_predicates: list[str] = field(default_factory=list)
 
 
@@ -92,6 +94,8 @@ class RealPolicyEvaluator:
                     guidance=rule.then.guidance,
                     suggested_alternative=rule.then.suggested_alternative,
                     approval_id=None,
+                    approval_required_role=rule.then.approval_required_role,
+                    approval_timeout_seconds=rule.then.approval_timeout_seconds,
                     fired_predicates=fired,
                 )
         return PolicyDecision(

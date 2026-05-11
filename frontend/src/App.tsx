@@ -6,11 +6,13 @@ import { BrainHealthCard } from "@/components/BrainHealthCard";
 import { CommandPalette } from "@/components/CommandPalette";
 import { EdgeLegend } from "@/components/EdgeLegend";
 import { EntityInspector } from "@/components/EntityInspector";
+import { PendingApprovalsBadge } from "@/components/PendingApprovalsBadge";
 import { QueryBar } from "@/components/QueryBar";
 import { StatusFooter } from "@/components/StatusFooter";
 import { BrainSocket } from "@/lib/websocket";
 import { AgentsPage } from "@/pages/AgentsPage";
 import { ActivityPage } from "@/pages/agents/ActivityPage";
+import { ApprovalsPage } from "@/pages/agents/ApprovalsPage";
 import { RuntimePage } from "@/pages/agents/RuntimePage";
 import { SchedulesPage } from "@/pages/agents/SchedulesPage";
 import { TriggersPage } from "@/pages/agents/TriggersPage";
@@ -43,6 +45,7 @@ const agentNavItems = [
   ["/agents/triggers", "Triggers"],
   ["/agents/runtime", "Runtime"],
   ["/agents/activity", "Activity"],
+  ["/agents/approvals", "Approvals"],
   ["/settings", "Settings"],
 ] as const;
 
@@ -58,6 +61,7 @@ function NavIcon({ label }: { label: string }) {
   if (label === "Triggers") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m13 2-8 12h6l-1 8 9-13h-6l1-7Z" /></svg>;
   if (label === "Runtime") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 2v4m0 12v4M4.9 4.9l2.8 2.8m8.6 8.6 2.8 2.8M2 12h4m12 0h4M4.9 19.1l2.8-2.8m8.6-8.6 2.8-2.8" /><circle cx="12" cy="12" r="4" /></svg>;
   if (label === "Activity") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 12h4l2-6 4 12 2-6h4" /></svg>;
+  if (label === "Approvals") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 3 4 7v5c0 4 3 7 8 9 5-2 8-5 8-9V7l-8-4Z" /><path d="M9 12l2 2 4-5" /></svg>;
   return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="3.5"/><path d="m19 12 2-1-1-3-2-.3-.7-1.8 1.2-1.7-2.3-2.3-1.7 1.2-1.8-.7L12 1 9 2l-.3 2-1.8.7-1.7-1.2L2.9 5.8l1.2 1.7L3.4 9.3 1.5 9.6v3l1.9.3.7 1.8-1.2 1.7 2.3 2.3 1.7-1.2 1.8.7.3 2h3l.3-2 1.8-.7 1.7 1.2 2.3-2.3-1.2-1.7.7-1.8 2-.3Z"/></svg>;
 }
 
@@ -167,9 +171,12 @@ function StudioShell() {
               <div className="mt-2 text-[12px] text-[#7fa2c8]">Think in graph. Act with agents.</div>
             </div>
           )}
-          <div className="ml-auto mt-[-4px] flex h-[38px] items-center gap-2 rounded-lg border border-[#1d3452] bg-[#071328] px-4 text-[16px] text-[#14e0a7]">
-            <span className={`h-2.5 w-2.5 rounded-full ${connectionStatus === "live" ? "bg-[#16f0a9]" : "bg-[#5f728f]"}`} />
-            LIVE
+          <div className="ml-auto mt-[-4px] flex items-center gap-2">
+            <PendingApprovalsBadge />
+            <div className="flex h-[38px] items-center gap-2 rounded-lg border border-[#1d3452] bg-[#071328] px-4 text-[16px] text-[#14e0a7]">
+              <span className={`h-2.5 w-2.5 rounded-full ${connectionStatus === "live" ? "bg-[#16f0a9]" : "bg-[#5f728f]"}`} />
+              LIVE
+            </div>
           </div>
         </header>
       ) : null}
@@ -246,6 +253,7 @@ export function App() {
           <Route path="/agents/triggers" element={<TriggersPage />} />
           <Route path="/agents/runtime" element={<RuntimePage />} />
           <Route path="/agents/activity" element={<ActivityPage />} />
+          <Route path="/agents/approvals" element={<ApprovalsPage />} />
           <Route path="/skills" element={<SkillsPage />} />
           <Route path="/explore/*" element={<ExplorePage />} />
           <Route path="/insights" element={<InsightsPage />} />

@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.api.search import _score_title
 from axiom.govern.agent_registry import ensure_agent_registry_schema
+from axiom.govern.approvals import create_approval_request, ensure_approvals_schema
 from axiom.govern.demo_flag import is_demo_target
 from axiom.govern.ledger import demo_receipt
 from axiom.govern.passports import (
@@ -177,6 +178,7 @@ class AxiomMCPService:
             ensure_agent_registry_schema(bind)
             ensure_skills_schema(bind)
             ensure_sources_schema(bind)
+            ensure_approvals_schema(bind)
         ensure_system_passport(session_factory)
         self._hydrate_action_history_from_receipts()
 
@@ -288,6 +290,8 @@ class AxiomMCPService:
             ),
         )
         out = self._action_output_from_receipt(persisted)
+        if evaluation.get("approval_id"):
+            out["approval_id"] = evaluation["approval_id"]
         self._action_history[action_id] = out
         return persisted, out
 
@@ -328,6 +332,26 @@ class AxiomMCPService:
                 },
             )
             real_decision = self._policy.evaluate(action, passport, entity)
+            approval_id = None
+            if real_decision.mode == "pause":
+                approval = create_approval_request(
+                    self._session_factory,
+                    action,
+                    passport,
+                    real_decision,
+                    event_callback=lambda event_type, payload: self._emit_action_events(
+                        [
+                            {
+                                "type": event_type,
+                                "source_id": None,
+                                "persisted_id": payload.get("id"),
+                                "payload": payload,
+                                "timestamp": int(datetime.utcnow().timestamp() * 1000),
+                            }
+                        ]
+                    ),
+                )
+                approval_id = approval.id
             decision_payload = {
                 "decision": real_decision.mode,
                 "reason": real_decision.reason,
@@ -335,7 +359,7 @@ class AxiomMCPService:
                 "guidance": real_decision.guidance,
                 "suggested_alternative": real_decision.suggested_alternative
                 or ({"entity_id": suggested_alternative} if suggested_alternative else None),
-                "approval_id": real_decision.approval_id,
+                "approval_id": approval_id or real_decision.approval_id,
                 "fired_predicates": real_decision.fired_predicates,
             }
         else:
@@ -790,6 +814,19 @@ class AxiomMCPService:
                 "policy_id": evaluation["policy_id"],
                 "guidance": evaluation["guidance"],
                 "suggested_alternative": evaluation["suggested_alternative"],
+                "demo": True,
+            }
+            if idempotency_key:
+                self._idempotency[("skill_runner", idempotency_key)] = (time.monotonic(), out)
+            return out
+        if str(evaluation["decision"]) == "pause":
+            out = {
+                "status": "pending_approval",
+                "action_id": action_id,
+                "decision": "pause",
+                "reason": evaluation["reason"],
+                "policy_id": evaluation["policy_id"],
+                "approval_id": evaluation.get("approval_id"),
                 "demo": True,
             }
             if idempotency_key:

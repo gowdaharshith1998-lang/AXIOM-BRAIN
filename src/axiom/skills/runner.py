@@ -11,6 +11,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from axiom.govern.approvals import create_approval_request
 from axiom.govern.llm_keys import get_provider_key_plaintext_with_session
 from axiom.govern.policy_evaluator import DemoPolicyEvaluator, get_policy_evaluator
 from axiom.govern.receipts import ReceiptInsert, chain_insert_receipt
@@ -220,7 +221,7 @@ def _run_skill_with_session(
         )
         if isinstance(evaluator, RealPolicyEvaluator):
             decision = evaluator.evaluate(
-                ActionRequest(
+                action_request := ActionRequest(
                     agent_name=agent_name,
                     intent=f"skill:{skill.name}",
                     target_entity_id=None,
@@ -231,6 +232,22 @@ def _run_skill_with_session(
                 None,
                 None,
             )
+            if decision.mode == "pause":
+                approval = create_approval_request(
+                    session_factory,
+                    action_request,
+                    None,
+                    decision,
+                )
+                return {
+                    "status": "pending_approval",
+                    "decision": "pause",
+                    "reason": decision.reason,
+                    "policy_id": decision.policy_id,
+                    "approval_id": approval.id,
+                    "expires_at": approval.expires_at.isoformat(),
+                    "skill": skill_snapshot,
+                }
             if decision.mode in {"deny", "correct", "pause"}:
                 receipt_id = _chain_skill_run_receipt(
                     session_factory,

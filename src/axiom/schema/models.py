@@ -303,6 +303,33 @@ class WatchdogAlert(Base):
     demo_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
+class ApprovalRequest(Base):
+    __tablename__ = "approval_requests"
+    __table_args__ = (
+        Index("ix_approval_requests_status_created", "status", "created_at"),
+        Index("ix_approval_requests_required_role_status", "required_role", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    action_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    agent_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    passport_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    intent: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    target_entity_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    proposed_action: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    policy_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    reason: Mapped[str] = mapped_column(String, nullable=False)
+    guidance: Mapped[str | None] = mapped_column(String, nullable=True)
+    required_role: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    resolution_note: Mapped[str | None] = mapped_column(String, nullable=True)
+    resume_token: Mapped[str] = mapped_column(String(32), nullable=False, unique=True, index=True)
+
+
 Index("ix_edges_src_rel", Edge.source_id, Edge.relationship)
 Index("ix_edges_tgt_rel", Edge.target_id, Edge.relationship)
 Index("ix_entities_type_created", Entity.type, Entity.created_at)

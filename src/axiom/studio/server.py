@@ -26,6 +26,15 @@ from axiom.govern.agent_registry import (
     ensure_agent_registry_schema,
     get_agents,
 )
+from axiom.govern.approvals import (
+    approval_to_dict,
+    approve_request,
+    deny_request,
+    ensure_approvals_schema,
+    expire_old_requests,
+    get_approval,
+    list_pending_approvals,
+)
 from axiom.govern.cluster_checks import (
     cleanup_cluster_check_runs,
     cluster_check_run_row,
@@ -181,6 +190,11 @@ class WatchdogResolveIn(BaseModel):
     resolution_note: str = ""
 
 
+class ApprovalResolveIn(BaseModel):
+    by_user: str
+    note: str | None = None
+
+
 class InternalSearchIn(BaseModel):
     query: str = ""
     mode: SearchMode = "hybrid"
@@ -317,6 +331,7 @@ def create_app(
     ensure_sources_schema(engine)
     ensure_entity_embeddings_schema(engine)
     ensure_watchdog_alerts_schema(engine)
+    ensure_approvals_schema(engine)
     session_local = sessionmaker(bind=engine, future=True)
     broadcaster = EventBroadcaster()
     policy_evaluator = get_policy_evaluator(session_local)
@@ -955,6 +970,75 @@ def create_app(
             if rule.rule_id == rule_id:
                 return _policy_rule_row(rule)
         raise HTTPException(status_code=404, detail="policy rule not found")
+
+    async def publish_approval_event(event_type: str, payload: dict[str, Any]) -> None:
+        await broadcaster.publish(
+            {
+                "type": event_type,
+                "source_id": None,
+                "persisted_id": payload.get("id"),
+                "timestamp": datetime_now_ms(),
+                "payload": payload,
+            }
+        )
+
+    @app.get("/api/internal/approvals")
+    def get_internal_approvals(
+        status: str = Query("pending"),
+        role: str | None = None,
+    ) -> dict[str, Any]:
+        rows = list_pending_approvals(session_local, filter_by_role=role, status=status)
+        return {"approvals": [approval_to_dict(row) for row in rows], "count": len(rows)}
+
+    @app.get("/api/internal/approvals/{approval_id}")
+    def get_internal_approval(approval_id: str) -> dict[str, Any]:
+        try:
+            return approval_to_dict(get_approval(session_local, approval_id))
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="approval not found") from exc
+
+    @app.post("/api/internal/approvals/{approval_id}/approve")
+    async def post_internal_approval_approve(
+        approval_id: str,
+        body: ApprovalResolveIn = Body(...),
+    ) -> dict[str, Any]:
+        if not body.by_user:
+            raise HTTPException(status_code=422, detail="by_user is required")
+        try:
+            payload = approval_to_dict(
+                approve_request(session_local, approval_id, by_user=body.by_user, note=body.note)
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="approval not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        await publish_approval_event("approval_approved", payload)
+        return payload
+
+    @app.post("/api/internal/approvals/{approval_id}/deny")
+    async def post_internal_approval_deny(
+        approval_id: str,
+        body: ApprovalResolveIn = Body(...),
+    ) -> dict[str, Any]:
+        if not body.by_user or not body.note:
+            raise HTTPException(status_code=422, detail="by_user and note are required")
+        try:
+            payload = approval_to_dict(
+                deny_request(session_local, approval_id, by_user=body.by_user, note=body.note)
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="approval not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        await publish_approval_event("approval_denied", payload)
+        return payload
+
+    @app.post("/api/internal/approvals/expire")
+    async def post_internal_approvals_expire() -> dict[str, Any]:
+        rows = expire_old_requests(session_local)
+        for row in rows:
+            await publish_approval_event("approval_expired", approval_to_dict(row))
+        return {"approvals": [approval_to_dict(row) for row in rows], "count": len(rows)}
 
     async def publish_skill_event(
         event_type: str,
