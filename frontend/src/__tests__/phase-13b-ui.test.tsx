@@ -22,6 +22,8 @@ const skillsApi = vi.hoisted(() => ({
   archiveSkill: vi.fn(),
   listSkillRuns: vi.fn(),
   runSkill: vi.fn(),
+  uploadSkillMd: vi.fn(),
+  downloadSkillMd: vi.fn(),
 }));
 const watchdogApi = vi.hoisted(() => ({
   listWatchdogAlerts: vi.fn(),
@@ -109,6 +111,19 @@ const run = {
   agent_name: "researcher",
 };
 
+const skillMd = `---
+name: summarize_thread
+description: Summarize thread
+intent: summarize
+llm_provider: anthropic
+llm_model: claude-3-haiku-20240307
+scope_clusters: [support]
+trigger_type: manual
+output_schema:
+  type: object
+---
+Summarize {thread}`;
+
 const alert = {
   alert_id: "al_1",
   entity_id: "ticket_1",
@@ -165,6 +180,8 @@ describe("Phase 13.B UI", () => {
     skillsApi.archiveSkill.mockResolvedValue({ ...skill, status: "archived" });
     skillsApi.listSkillRuns.mockResolvedValue([run]);
     skillsApi.runSkill.mockResolvedValue({ run: { ...run, id: "run_submit" }, skill });
+    skillsApi.uploadSkillMd.mockResolvedValue({ ...skill, id: "sk_md", name: "summarize_thread" });
+    skillsApi.downloadSkillMd.mockResolvedValue(skillMd);
     watchdogApi.listWatchdogAlerts.mockResolvedValue([alert]);
     watchdogApi.acknowledgeWatchdogAlert.mockResolvedValue({ ...alert, status: "acknowledged" });
     watchdogApi.resolveWatchdogAlert.mockResolvedValue({ ...alert, status: "resolved", resolved_at: "2026-05-10T00:10:00" });
@@ -201,11 +218,42 @@ describe("Phase 13.B UI", () => {
   it("register-skill modal posts to backend", async () => {
     render(<SkillsPage />);
     fireEvent.click(screen.getByRole("button", { name: /Register Skill/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Form" }));
     const dialog = await screen.findByRole("form", { name: "Register Skill" });
     fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "extract_company" } });
     fireEvent.change(within(dialog).getByLabelText("Prompt Template"), { target: { value: "Extract {text}" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Register" }));
     await waitFor(() => expect(skillsApi.registerSkill).toHaveBeenCalledWith(expect.objectContaining({ name: "extract_company" })));
+  });
+
+  it("upload_md_tab_renders_drag_drop_zone", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Register Skill/ }));
+    expect(await screen.findByText("Upload SKILL.md")).toBeInTheDocument();
+    expect(screen.getByText("Drop a SKILL.md file here or paste content below.")).toBeInTheDocument();
+  });
+
+  it("upload_md_tab_parses_pasted_content_to_preview", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Register Skill/ }));
+    fireEvent.change(await screen.findByLabelText("SKILL.md content"), { target: { value: skillMd } });
+    expect(await screen.findByText("summarize_thread")).toBeInTheDocument();
+    expect(screen.getByText("anthropic / claude-3-haiku-20240307")).toBeInTheDocument();
+  });
+
+  it("upload_md_tab_shows_validation_errors_inline", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Register Skill/ }));
+    fireEvent.change(await screen.findByLabelText("SKILL.md content"), { target: { value: "---\\nname: broken\\n---\\nBody" } });
+    expect(await screen.findByText(/line 2/)).toBeInTheDocument();
+  });
+
+  it("upload_md_tab_submit_calls_upload_endpoint", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Register Skill/ }));
+    fireEvent.change(await screen.findByLabelText("SKILL.md content"), { target: { value: skillMd } });
+    fireEvent.click(screen.getByRole("button", { name: "Register SKILL.md" }));
+    await waitFor(() => expect(skillsApi.uploadSkillMd).toHaveBeenCalledWith(skillMd));
   });
 
   it("skills table renders and filters", async () => {
@@ -270,6 +318,24 @@ describe("Phase 13.B UI", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open" }));
     fireEvent.click(await screen.findByRole("button", { name: /Archive/ }));
     await waitFor(() => expect(skillsApi.archiveSkill).toHaveBeenCalledWith("sk_1"));
+  });
+
+  it("download_skill_md_button_triggers_download", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Download SKILL.md" }));
+    await waitFor(() => expect(skillsApi.downloadSkillMd).toHaveBeenCalledWith("sk_1"));
+  });
+
+  it("form_tab_still_works_for_fallback_registration", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Register Skill/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Form" }));
+    const dialog = await screen.findByRole("form", { name: "Register Skill" });
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "extract_company" } });
+    fireEvent.change(within(dialog).getByLabelText("Prompt Template"), { target: { value: "Extract {text}" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Register" }));
+    await waitFor(() => expect(skillsApi.registerSkill).toHaveBeenCalledWith(expect.objectContaining({ name: "extract_company" })));
   });
 
   it("agent drawer shows recent receipts and can revoke passport", async () => {

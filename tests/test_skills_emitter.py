@@ -20,6 +20,7 @@ from axiom.skills.registry import (
     register_skill_with_session,
 )
 from axiom.skills.runner import run_skill
+from axiom.skills.skill_md import SkillManifestError, parse_skill_md, serialize_skill_md
 from axiom.vault.crypto import ENV_VAR
 
 
@@ -63,6 +64,74 @@ def _register_priority_skill(session: Session):
             "properties": {"priority": {"type": "string"}},
         },
     )
+
+
+SKILL_MD = """---
+name: classify_ticket_priority
+description: Classify support ticket priority from text
+intent: classify
+llm_provider: anthropic
+llm_model: claude-3-haiku-20240307
+scope_clusters: [customer_support, incidents_ops]
+trigger_type: event
+trigger_config:
+  event_type: ticket.created
+output_schema:
+  type: object
+  required: [priority]
+  properties:
+    priority:
+      type: string
+---
+Classify this support ticket.
+
+Ticket: {ticket_title}
+"""
+
+
+def test_parse_skill_md_extracts_frontmatter_and_body() -> None:
+    manifest = parse_skill_md(SKILL_MD)
+    assert manifest.name == "classify_ticket_priority"
+    assert manifest.scope_clusters == ["customer_support", "incidents_ops"]
+    assert manifest.trigger_config == {"event_type": "ticket.created"}
+    assert manifest.prompt_template == "Classify this support ticket.\n\nTicket: {ticket_title}\n"
+
+
+def test_parse_skill_md_missing_required_field_raises() -> None:
+    with pytest.raises(SkillManifestError, match="line 2"):
+        parse_skill_md("---\nname: missing_intent\n---\nBody\n")
+
+
+def test_parse_skill_md_invalid_yaml_raises_with_line_number() -> None:
+    with pytest.raises(SkillManifestError, match="line 3"):
+        parse_skill_md("---\nname: bad\noutput_schema: [unterminated\n---\nBody\n")
+
+
+def test_parse_skill_md_handles_unicode_in_body() -> None:
+    manifest = parse_skill_md(SKILL_MD + "\nEscalate if customer says café.\n")
+    assert "café" in manifest.prompt_template
+
+
+def test_serialize_skill_md_is_deterministic(skill_db: tuple[sessionmaker[Session], str]) -> None:
+    sf, _db_url = skill_db
+    with sf() as session:
+        skill = _register_priority_skill(session)
+        first = serialize_skill_md(skill)
+        second = serialize_skill_md(skill)
+    assert first == second
+    assert first.startswith("---\n")
+
+
+def test_serialize_then_parse_roundtrip_preserves_fields(
+    skill_db: tuple[sessionmaker[Session], str]
+) -> None:
+    sf, _db_url = skill_db
+    with sf() as session:
+        skill = _register_priority_skill(session)
+        manifest = parse_skill_md(serialize_skill_md(skill))
+    assert manifest.name == "classify_ticket_priority"
+    assert manifest.output_schema["required"] == ["priority"]
+    assert manifest.prompt_template == "Classify: {ticket}"
 
 
 def test_skills_registry_crud(skill_db: tuple[sessionmaker[Session], str]) -> None:
@@ -293,6 +362,35 @@ def test_skill_api_endpoints(skill_db: tuple[sessionmaker[Session], str]) -> Non
         assert client.get(f"/api/internal/skills/{skill_id}/runs").json()["runs"] == []
         archived = client.post(f"/api/internal/skills/{skill_id}/archive").json()
         assert archived["status"] == "archived"
+
+
+def test_upload_md_endpoint_registers_skill(skill_db: tuple[sessionmaker[Session], str]) -> None:
+    _sf, db_url = skill_db
+    from axiom.studio.server import create_app
+
+    app = create_app(db_url=db_url, enable_organizer=False)
+    with TestClient(app) as client:
+        uploaded = client.post("/api/internal/skills/upload-md", json={"content": SKILL_MD})
+        assert uploaded.status_code == 200
+        assert uploaded.json()["name"] == "classify_ticket_priority"
+        assert uploaded.json()["trigger_type"] == "event"
+
+
+def test_download_md_endpoint_returns_valid_skill_md(
+    skill_db: tuple[sessionmaker[Session], str]
+) -> None:
+    _sf, db_url = skill_db
+    from axiom.studio.server import create_app
+
+    app = create_app(db_url=db_url, enable_organizer=False)
+    with TestClient(app) as client:
+        uploaded = client.post("/api/internal/skills/upload-md", json={"content": SKILL_MD})
+        skill_id = uploaded.json()["id"]
+        response = client.get(f"/api/internal/skills/{skill_id}/md")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/markdown")
+        manifest = parse_skill_md(response.text)
+        assert manifest.name == "classify_ticket_priority"
 
 
 def test_skill_archive_ws_broadcasts(skill_db: tuple[sessionmaker[Session], str]) -> None:

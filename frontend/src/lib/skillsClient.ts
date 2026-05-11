@@ -89,6 +89,19 @@ export async function runSkill(
   });
 }
 
+export async function uploadSkillMd(content: string): Promise<Skill> {
+  return request<Skill>("/api/internal/skills/upload-md", {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  });
+}
+
+export async function downloadSkillMd(skillId: string): Promise<string> {
+  const response = await fetch(`/api/internal/skills/${encodeURIComponent(skillId)}/md`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.text();
+}
+
 export async function listSkillRuns(skillId: string): Promise<SkillRun[]> {
   const data = await request<{ runs: SkillRun[] }>(
     `/api/internal/skills/${encodeURIComponent(skillId)}/runs`,

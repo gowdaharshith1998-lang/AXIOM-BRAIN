@@ -7,6 +7,8 @@ import {
   listSkills,
   registerSkill,
   runSkill,
+  uploadSkillMd,
+  downloadSkillMd,
   type Skill,
   type SkillRun,
 } from "@/lib/skillsClient";
@@ -68,6 +70,14 @@ type RunField = {
 };
 
 type RunFormValue = string | boolean;
+type RegisterTab = "upload" | "form";
+type MdPreview = {
+  name: string;
+  description: string;
+  intent: string;
+  llm_provider: string;
+  llm_model: string;
+};
 
 const blankForm: SkillForm = {
   name: "",
@@ -107,13 +117,41 @@ function coerceRunPayload(fields: RunField[], values: Record<string, RunFormValu
   }));
 }
 
+function parseSkillMdPreview(content: string): { preview: MdPreview | null; error: string | null } {
+  if (!content.trim()) return { preview: null, error: null };
+  const lines = content.replace(/\\n/g, "\n").split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") return { preview: null, error: "line 1: SKILL.md must start with ---" };
+  const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+  if (end < 0) return { preview: null, error: "line 1: missing closing ---" };
+  const fields: Record<string, string> = {};
+  for (let index = 1; index < end; index += 1) {
+    const match = /^([a-zA-Z_][\w-]*):\s*(.*)$/.exec(lines[index]);
+    if (match) fields[match[1]] = match[2].replace(/^["']|["']$/g, "");
+  }
+  for (const key of ["name", "description", "intent", "llm_provider", "llm_model"]) {
+    if (!fields[key]) return { preview: null, error: `line 2: missing required field ${key}` };
+  }
+  return {
+    preview: {
+      name: fields.name,
+      description: fields.description,
+      intent: fields.intent,
+      llm_provider: fields.llm_provider,
+      llm_model: fields.llm_model,
+    },
+    error: null,
+  };
+}
+
 export function SkillsPage() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [runs, setRuns] = useState<Record<string, SkillRun[]>>({});
   const [selected, setSelected] = useState<Skill | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [registerTab, setRegisterTab] = useState<RegisterTab>("upload");
   const [runModalSkill, setRunModalSkill] = useState<Skill | null>(null);
   const [form, setForm] = useState<SkillForm>(blankForm);
+  const [skillMdContent, setSkillMdContent] = useState("");
   const [filter, setFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -123,6 +161,8 @@ export function SkillsPage() {
   const [runError, setRunError] = useState<string | null>(null);
   const [runResult, setRunResult] = useState<SkillRun | null>(null);
   const [lastRunInput, setLastRunInput] = useState<Record<string, unknown> | null>(null);
+
+  const mdPreview = useMemo(() => parseSkillMdPreview(skillMdContent), [skillMdContent]);
 
   async function load() {
     const rows = await listSkills();
@@ -216,6 +256,16 @@ export function SkillsPage() {
     }
   }
 
+  async function submitSkillMd(event: FormEvent) {
+    event.preventDefault();
+    if (mdPreview.error || !mdPreview.preview) return;
+    const created = await uploadSkillMd(skillMdContent);
+    setSkills((current) => [created, ...current.filter((skill) => skill.id !== created.id)]);
+    setModalOpen(false);
+    setSkillMdContent("");
+    setRegisterTab("upload");
+  }
+
   async function submitSkill(event: FormEvent) {
     event.preventDefault();
     if (!formValid) return;
@@ -231,6 +281,12 @@ export function SkillsPage() {
     setSkills((current) => [created, ...current.filter((skill) => skill.id !== created.id)]);
     setModalOpen(false);
     setForm(blankForm);
+  }
+
+  async function downloadSelectedSkillMd(skill: Skill) {
+    const content = await downloadSkillMd(skill.id);
+    setToast(`Downloaded SKILL.md for ${skill.name}`);
+    void navigator.clipboard?.writeText(content);
   }
 
   async function archiveSelected(skill: Skill) {
@@ -292,21 +348,54 @@ export function SkillsPage() {
 
       {modalOpen ? (
         <div className="agents-modal-backdrop">
-          <form className="agents-modal" aria-label="Register Skill" onSubmit={submitSkill}>
+          <form className="agents-modal" aria-label="Register Skill" onSubmit={registerTab === "upload" ? submitSkillMd : submitSkill}>
             <div className="agents-modal-head">
               <h2>Register Skill</h2>
               <button type="button" aria-label="Close" onClick={() => setModalOpen(false)}><Icon name="x" /></button>
             </div>
-            <label>Name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
-            <label>Description<input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
-            <label>Intent<select value={form.intent} onChange={(event) => setForm({ ...form, intent: event.target.value })}>
-              {["classify", "summarize", "extract", "transform", "monitor"].map((intent) => <option key={intent}>{intent}</option>)}
-            </select></label>
-            <label>Prompt Template<textarea value={form.prompt_template} onChange={(event) => setForm({ ...form, prompt_template: event.target.value })} /></label>
-            <label>Provider<input value={form.llm_provider} onChange={(event) => setForm({ ...form, llm_provider: event.target.value })} /></label>
-            <label>Model<input value={form.llm_model} onChange={(event) => setForm({ ...form, llm_model: event.target.value })} /></label>
-            <label>Scope Clusters<input value={form.scope_clusters} onChange={(event) => setForm({ ...form, scope_clusters: event.target.value })} /></label>
-            <button type="submit" className="agents-primary" disabled={!formValid}>Register</button>
+            <div className="agents-panel-head">
+              <button type="button" className={registerTab === "upload" ? "agents-primary" : "agents-secondary"} onClick={() => setRegisterTab("upload")}>Upload SKILL.md</button>
+              <button type="button" className={registerTab === "form" ? "agents-primary" : "agents-secondary"} onClick={() => setRegisterTab("form")}>Form</button>
+            </div>
+            {registerTab === "upload" ? (
+              <>
+                <div
+                  className="agents-empty"
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const file = event.dataTransfer.files[0];
+                    if (file) void file.text().then(setSkillMdContent);
+                  }}
+                >
+                  Drop a SKILL.md file here or paste content below.
+                </div>
+                <label>SKILL.md content<textarea value={skillMdContent} onChange={(event) => setSkillMdContent(event.target.value)} /></label>
+                {mdPreview.error ? <p className="agents-error">{mdPreview.error}</p> : null}
+                {mdPreview.preview ? (
+                  <div className="agents-drawer-row">
+                    <b>{mdPreview.preview.name}</b>
+                    <span>{mdPreview.preview.description}</span>
+                    <Pill>{mdPreview.preview.intent}</Pill>
+                    <code>{mdPreview.preview.llm_provider} / {mdPreview.preview.llm_model}</code>
+                  </div>
+                ) : null}
+                <button type="submit" className="agents-primary" disabled={!mdPreview.preview || Boolean(mdPreview.error)}>Register SKILL.md</button>
+              </>
+            ) : (
+              <>
+                <label>Name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+                <label>Description<input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
+                <label>Intent<select value={form.intent} onChange={(event) => setForm({ ...form, intent: event.target.value })}>
+                  {["classify", "summarize", "extract", "transform", "monitor"].map((intent) => <option key={intent}>{intent}</option>)}
+                </select></label>
+                <label>Prompt Template<textarea value={form.prompt_template} onChange={(event) => setForm({ ...form, prompt_template: event.target.value })} /></label>
+                <label>Provider<input value={form.llm_provider} onChange={(event) => setForm({ ...form, llm_provider: event.target.value })} /></label>
+                <label>Model<input value={form.llm_model} onChange={(event) => setForm({ ...form, llm_model: event.target.value })} /></label>
+                <label>Scope Clusters<input value={form.scope_clusters} onChange={(event) => setForm({ ...form, scope_clusters: event.target.value })} /></label>
+                <button type="submit" className="agents-primary" disabled={!formValid}>Register</button>
+              </>
+            )}
           </form>
         </div>
       ) : null}
@@ -359,6 +448,9 @@ export function SkillsPage() {
           <pre className="agents-code-block">{selected.prompt_template}</pre>
           <button type="button" className="agents-secondary" onClick={() => archiveSelected(selected)} disabled={selected.status === "archived"}>
             <Icon name="archive" /> Archive
+          </button>
+          <button type="button" className="agents-secondary" onClick={() => downloadSelectedSkillMd(selected)}>
+            <Icon name="copy" /> Download SKILL.md
           </button>
           <h3>Recent Runs</h3>
           {(runs[selected.id] ?? []).length ? runs[selected.id].slice(0, 8).map((run) => (
