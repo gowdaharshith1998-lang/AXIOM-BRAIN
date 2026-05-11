@@ -4,6 +4,7 @@ import hashlib
 import json
 import secrets
 import time
+from base64 import b64decode, b64encode
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -11,6 +12,7 @@ from sqlalchemy import Engine, inspect, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.schema.models import AgentPassport, PassportCredential
+from axiom.sign.ed25519_signer import load_or_create_keypair, sign, verify
 
 SYSTEM_PASSPORT_ID = "demo_passport"
 SYSTEM_PASSPORT_TOKEN = "demo_passport"
@@ -64,13 +66,29 @@ def _canonical_passport_payload(row: AgentPassport) -> dict[str, Any]:
     }
 
 
-def _demo_signature(row: AgentPassport) -> str:
+def _sign_passport(row: AgentPassport) -> str:
     canonical = json.dumps(
         _canonical_passport_payload(row),
         sort_keys=True,
         separators=(",", ":"),
-    )
-    return hashlib.sha256(f"axiom-demo-passport:{canonical}".encode("utf-8")).hexdigest()
+    ).encode("utf-8")
+    return b64encode(sign(canonical)).decode("ascii")
+
+
+_demo_signature = _sign_passport
+
+
+def _verify_passport_signature(row: AgentPassport) -> bool:
+    canonical = json.dumps(
+        _canonical_passport_payload(row),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    try:
+        signature = b64decode(row.issuer_signature, validate=True)
+    except Exception:  # noqa: BLE001
+        return False
+    return verify(canonical, signature, load_or_create_keypair().public_key_bytes)
 
 
 def _clear_cache() -> None:
@@ -140,10 +158,10 @@ def _issue_passport_with_session(
         revoked_at=None,
         revocation_reason=None,
         issuer_signature="",
-        signing_scheme="demo",
+        signing_scheme="ed25519",
         created_at=now,
     )
-    row.issuer_signature = _demo_signature(row)
+    row.issuer_signature = _sign_passport(row)
     session.add(row)
     session.add(
         PassportCredential(
@@ -210,7 +228,7 @@ def _validate_passport(row: AgentPassport) -> None:
     now = datetime.utcnow()
     if row.signing_scheme not in VALID_SIGNING_SCHEMES:
         raise PassportError("unsupported passport signing scheme")
-    if row.signing_scheme == "demo" and row.issuer_signature != _demo_signature(row):
+    if row.signing_scheme in {"demo", "ed25519", "hybrid"} and not _verify_passport_signature(row):
         raise PassportError("passport signature verification failed")
     if row.not_before is not None and now < row.not_before:
         raise PassportError("passport not yet valid")
@@ -262,7 +280,7 @@ def revoke_passport(
             raise LookupError(passport_id)
         row.revoked_at = datetime.utcnow()
         row.revocation_reason = reason or "revoked"
-        row.issuer_signature = _demo_signature(row)
+        row.issuer_signature = _sign_passport(row)
         session.add(row)
         session.commit()
         session.refresh(row)
@@ -281,7 +299,7 @@ def toggle_kill_switch(
         if row is None:
             raise LookupError(passport_id)
         row.kill_switch = enabled
-        row.issuer_signature = _demo_signature(row)
+        row.issuer_signature = _sign_passport(row)
         session.add(row)
         session.commit()
         session.refresh(row)

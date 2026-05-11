@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from base64 import b64encode
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.govern.agent_registry import upsert_agent_observation
 from axiom.schema.models import Receipt
+from axiom.sign.ed25519_signer import sign
 
 RECEIPT_COLUMNS = {
     "id",
@@ -117,6 +119,15 @@ def canonical_receipt_payload(receipt: Receipt) -> dict[str, Any]:
     return payload
 
 
+def canonical_payload(receipt: Receipt) -> bytes:
+    payload = receipt_to_dict(receipt)
+    for key in ("signature", "sig", "this_hash", "prev_hash"):
+        payload.pop(key, None)
+    if payload.get("passport_id") is None:
+        payload.pop("passport_id", None)
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
 def compute_receipt_hash(receipt: Receipt) -> str:
     canonical = json.dumps(
         canonical_receipt_payload(receipt),
@@ -170,14 +181,15 @@ def chain_insert_receipt(
                 passport_id=payload.passport_id,
                 guidance=payload.guidance,
                 suggested_alternative=payload.suggested_alternative,
-                signing_scheme=payload.signing_scheme,
-                signature=payload.signature,
+                signing_scheme="ed25519",
+                signature="",
                 prev_hash=previous.this_hash if previous is not None else None,
                 this_hash="",
                 reserved_state=payload.reserved_state,
                 demo_flag=payload.demo_flag,
                 created_at=created_at,
             )
+            receipt.signature = b64encode(sign(canonical_payload(receipt))).decode("ascii")
             receipt.this_hash = compute_receipt_hash(receipt)
             session.add(receipt)
             upsert_agent_observation(
@@ -201,16 +213,7 @@ def chain_insert_receipt(
 
 
 def verify_receipt_chain(session: Session, receipt_id: str) -> str:
-    rows = session.execute(
-        select(Receipt).order_by(Receipt.created_at, Receipt.id)
-    ).scalars().all()
-    previous_hash: str | None = None
-    for row in rows:
-        if row.prev_hash != previous_hash:
-            return "broken"
-        if compute_receipt_hash(row) != row.this_hash:
-            return "broken"
-        previous_hash = row.this_hash
-        if row.id == receipt_id:
-            return "verified"
-    raise LookupError(receipt_id)
+    from axiom.govern.verify import verify_receipt_chain as verify_chain
+
+    result = verify_chain(session, receipt_id)
+    return "verified" if result["chain_verified"] else "broken"

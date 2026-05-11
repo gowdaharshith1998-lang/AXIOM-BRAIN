@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 from collections.abc import AsyncIterator, Callable
@@ -46,8 +47,8 @@ from axiom.govern.passports import (
 from axiom.govern.receipts import (
     ensure_receipts_schema,
     receipt_to_dict,
-    verify_receipt_chain,
 )
+from axiom.govern.verify import verify_receipt_chain
 from axiom.govern.snapshots import (
     backfill_snapshots_from_receipts,
     ensure_snapshots_schema,
@@ -84,6 +85,7 @@ from axiom.schema.models import (
     Receipt,
     Source,
 )
+from axiom.sign.ed25519_signer import load_or_create_keypair
 from axiom.skills.registry import (
     SkillNotFound,
     activate_skill_with_session,
@@ -1288,13 +1290,21 @@ def create_app(
             if receipt is None:
                 raise HTTPException(status_code=404, detail="receipt not found")
             try:
-                verification_status = verify_receipt_chain(session, receipt_id)
+                verification = verify_receipt_chain(session, receipt_id)
             except LookupError as exc:
                 raise HTTPException(status_code=404, detail="receipt not found") from exc
             return {
                 **_receipt_row(receipt),
-                "verification_status": verification_status,
+                "verification_status": "verified" if verification["verified"] else "broken",
+                "chain_verified": verification["chain_verified"],
+                "signature_verified": verification["signature_verified"],
+                "signature_reason": verification["signature_reason"],
             }
+
+    @app.get("/api/internal/signing-pubkey")
+    def get_internal_signing_pubkey() -> dict[str, str]:
+        keypair = load_or_create_keypair()
+        return {"public_key": base64.b64encode(keypair.public_key_bytes).decode("ascii")}
 
     @app.get("/api/internal/merkle-status")
     def get_internal_merkle_status() -> dict[str, Any]:

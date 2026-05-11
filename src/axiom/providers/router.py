@@ -7,6 +7,8 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
+from sqlalchemy.exc import OperationalError
+
 from axiom.providers.registry import get_provider
 from axiom.vault import SecretNotFound, VaultCorrupt, VaultLocked, get_secret, list_secrets
 from axiom.vault.models import VALID_STATUSES, SecretStatus
@@ -37,6 +39,10 @@ def _vault_status_for(provider_id: str, key_name: str) -> SecretStatus | None:
         return None
 
 
+def _is_missing_vault_table(exc: OperationalError) -> bool:
+    return "no such table: secrets" in str(exc).lower()
+
+
 def get_active_llm_key(provider_id: str) -> KeyResolution:
     """Return the active API key for ``provider_id`` (vault ``default``, then env)."""
     global _vault_locked_env_fallback_logged
@@ -51,6 +57,10 @@ def get_active_llm_key(provider_id: str) -> KeyResolution:
         return KeyResolution(key=key, source="vault", vault_status=vstatus)
     except SecretNotFound:
         pass
+    except OperationalError as exc:
+        if not _is_missing_vault_table(exc):
+            raise
+        logger.debug("vault secrets table missing; falling back to env for %s", provider_id)
     except VaultLocked:
         vault_was_locked = True
     except VaultCorrupt:

@@ -6,7 +6,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, get_type_hints
 from uuid import uuid4
 
 import httpx
@@ -1139,7 +1139,21 @@ def build_mcp_server(
 
     mcp = FastMCP(name="AXIOM MCP")
 
-    @mcp.tool(name="axiom_query_brain", description="Smart search over entities with 1-hop expansion")
+    def tool(
+        *,
+        name: str,
+        description: str,
+        annotations: Any | None = None,
+    ) -> Any:
+        def decorator(fn: Any) -> Any:
+            # MCP 1.9.4 expects runtime annotation classes when checking for Context.
+            fn.__annotations__ = get_type_hints(fn)
+            mcp.add_tool(fn, name=name, description=description, annotations=annotations)
+            return fn
+
+        return decorator
+
+    @tool(name="axiom_query_brain", description="Smart search over entities with 1-hop expansion")
     def axiom_query_brain(
         query: str,
         max_results: int = 8,
@@ -1155,7 +1169,7 @@ def build_mcp_server(
         )
         return service.query_brain(query, max_results, entity_types, cluster_id, mode)
 
-    @mcp.tool(name="axiom_get_entity", description="Fetch one entity and optional neighbors")
+    @tool(name="axiom_get_entity", description="Fetch one entity and optional neighbors")
     def axiom_get_entity(
         entity_id: str,
         include_neighbors: bool = False,
@@ -1173,7 +1187,7 @@ def build_mcp_server(
         except LookupError as exc:
             raise ToolError(str(exc)) from exc
 
-    @mcp.tool(name="axiom_traverse", description="BFS graph traversal with cycle detection")
+    @tool(name="axiom_traverse", description="BFS graph traversal with cycle detection")
     def axiom_traverse(
         from_id: str,
         edge_types: list[str] | None = None,
@@ -1192,7 +1206,7 @@ def build_mcp_server(
         except LookupError as exc:
             raise ToolError(str(exc)) from exc
 
-    @mcp.tool(name="axiom_list_sources", description="List connected sources")
+    @tool(name="axiom_list_sources", description="List connected sources")
     def axiom_list_sources(passport_token: str | None = None) -> dict[str, Any]:
         service._require_passport_scope(
             passport_token=passport_token,
@@ -1201,7 +1215,7 @@ def build_mcp_server(
         )
         return service.list_sources()
 
-    @mcp.tool(name="axiom_record_action", description="Record an external agent action with demo policy evaluation")
+    @tool(name="axiom_record_action", description="Record an external agent action with demo policy evaluation")
     def axiom_record_action(
         agent_name: str,
         intent: str,
@@ -1219,7 +1233,7 @@ def build_mcp_server(
             passport_token=passport_token,
         )
 
-    @mcp.tool(name="axiom_check_policy", description="Pre-flight policy check for an action proposal")
+    @tool(name="axiom_check_policy", description="Pre-flight policy check for an action proposal")
     def axiom_check_policy(
         agent_name: str,
         intent: str,
@@ -1235,7 +1249,7 @@ def build_mcp_server(
             passport_token=passport_token,
         )
 
-    @mcp.tool(
+    @tool(
         name="axiom_request_human_approval",
         description="Escalate an action for human approval via in-memory queue",
     )
@@ -1255,7 +1269,7 @@ def build_mcp_server(
         except LookupError as exc:
             raise ToolError(str(exc)) from exc
 
-    @mcp.tool(name="axiom_list_skills", description="List registered runnable skills")
+    @tool(name="axiom_list_skills", description="List registered runnable skills")
     def axiom_list_skills(
         status: str | None = None,
         intent: str | None = None,
@@ -1271,7 +1285,7 @@ def build_mcp_server(
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
 
-    @mcp.tool(name="axiom_get_skill", description="Fetch a registered skill by id")
+    @tool(name="axiom_get_skill", description="Fetch a registered skill by id")
     def axiom_get_skill(skill_id: str, passport_token: str | None = None) -> dict[str, Any]:
         try:
             service._require_passport_scope(
@@ -1284,7 +1298,7 @@ def build_mcp_server(
         except SkillNotFound as exc:
             raise ToolError(str(exc)) from exc
 
-    @mcp.tool(name="axiom_run_skill", description="Run a registered skill with an input payload")
+    @tool(name="axiom_run_skill", description="Run a registered skill with an input payload")
     def axiom_run_skill(
         skill_id: str,
         input_payload: dict[str, Any],
@@ -1301,7 +1315,7 @@ def build_mcp_server(
         except SkillNotFound as exc:
             raise ToolError(str(exc)) from exc
 
-    @mcp.tool(name="axiom_register_skill", description="Register a draft skill")
+    @tool(name="axiom_register_skill", description="Register a draft skill")
     def axiom_register_skill(
         name: str,
         description: str,
@@ -1328,7 +1342,7 @@ def build_mcp_server(
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
 
-    @mcp.tool(name="axiom_archive_skill", description="Archive a skill")
+    @tool(name="axiom_archive_skill", description="Archive a skill")
     def axiom_archive_skill(skill_id: str, passport_token: str | None = None) -> dict[str, Any]:
         try:
             return service.archive_skill(skill_id, passport_token=passport_token)

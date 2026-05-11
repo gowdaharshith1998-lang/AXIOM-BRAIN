@@ -342,8 +342,8 @@ class WatchdogAgent:
                     passport_id=WATCHDOG_PASSPORT_ID,
                     guidance=alert.suggested_action,
                     suggested_alternative=None,
-                    signing_scheme="demo",
-                    signature=f"demo-watchdog:{alert.alert_id}",
+                    signing_scheme="ed25519",
+                    signature="",
                     demo_flag=True,
                 ),
             )

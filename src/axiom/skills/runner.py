@@ -6,7 +6,6 @@ from collections.abc import Callable
 from datetime import datetime
 from string import Formatter
 from typing import Any
-from uuid import uuid4
 
 import httpx
 from sqlalchemy.orm import Session, sessionmaker
@@ -205,8 +204,8 @@ def _run_skill_with_session(
                 policy_id=receipt_policy_id,
                 guidance=None,
                 suggested_alternative=None,
-                signing_scheme="demo",
-                signature=uuid4().hex,
+                signing_scheme="ed25519",
+                signature="",
                 passport_id=receipt_passport_id,
                 demo_flag=False,
             ),

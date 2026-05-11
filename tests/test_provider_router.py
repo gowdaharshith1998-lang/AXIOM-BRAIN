@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 import axiom.providers.router as router_mod
 from axiom.providers.router import KeyResolution, get_active_llm_key, get_active_llm_key_anthropic
@@ -57,6 +58,20 @@ def test_secret_not_found_falls_back_to_env(monkeypatch: pytest.MonkeyPatch) -> 
         raise SecretNotFound(p, k)
 
     monkeypatch.setattr(router_mod, "get_secret", boom)
+
+    res = get_active_llm_key("anthropic")
+    assert res.source == "env"
+    assert res.key == "env-key-secret"
+    assert res.vault_status is None
+
+
+def test_missing_vault_table_falls_back_to_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key-secret")
+
+    def missing_table(_p: str, _k: str) -> str:
+        raise OperationalError("SELECT * FROM secrets", {}, Exception("no such table: secrets"))
+
+    monkeypatch.setattr(router_mod, "get_secret", missing_table)
 
     res = get_active_llm_key("anthropic")
     assert res.source == "env"
