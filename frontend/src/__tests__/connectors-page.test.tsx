@@ -29,6 +29,7 @@ describe("ConnectorsPage", () => {
           connectors: [
             { vendor: "github", status: "connected", account_label: "Octo Org", last_sync_at: null },
             { vendor: "linear", status: "connected", account_label: "Linear Workspace", last_sync_at: null },
+            { vendor: "slack", status: "connected", account_label: "Axiom HQ", last_sync_at: null },
           ],
         });
       }
@@ -37,6 +38,9 @@ describe("ConnectorsPage", () => {
       }
       if (url === "/api/internal/connectors/linear/install") {
         return jsonResponse({ authorize_url: "https://linear.app/oauth/authorize?state=csrf" });
+      }
+      if (url === "/api/internal/connectors/slack/install") {
+        return jsonResponse({ authorize_url: "https://slack.com/oauth/v2/authorize?state=csrf" });
       }
       return jsonResponse({});
     });
@@ -67,7 +71,7 @@ describe("ConnectorsPage", () => {
   it("github_connected_row_shows_account_label", async () => {
     renderPage();
     expect(await screen.findByText("Octo Org")).toBeInTheDocument();
-    expect(screen.getAllByText("Connected")).toHaveLength(2);
+    expect(screen.getAllByText("Connected")).toHaveLength(3);
   });
 
   it("github_sync_now_button_calls_sync_endpoint", async () => {
@@ -92,5 +96,23 @@ describe("ConnectorsPage", () => {
   it("linear_connected_row_shows_workspace_label", async () => {
     renderPage();
     expect(await screen.findByText("Linear Workspace")).toBeInTheDocument();
+  });
+
+  it("slack_connect_button_opens_oauth_popup", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === "/api/internal/connectors/status") return jsonResponse({ connectors: [] });
+      if (url === "/api/internal/connectors/slack/install") {
+        return jsonResponse({ authorize_url: "https://slack.com/oauth/v2/authorize?state=csrf" });
+      }
+      return jsonResponse({});
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Slack" }));
+    await waitFor(() => expect(window.open).toHaveBeenCalledWith("https://slack.com/oauth/v2/authorize?state=csrf", "axiom-slack-oauth", "width=720,height=780"));
+  });
+
+  it("slack_connected_row_shows_team_name", async () => {
+    renderPage();
+    expect(await screen.findByText("Axiom HQ")).toBeInTheDocument();
   });
 });

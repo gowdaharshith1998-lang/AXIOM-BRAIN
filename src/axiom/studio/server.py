@@ -59,6 +59,21 @@ from axiom.connectors.linear.oauth import LINEAR_SCOPES, LinearOAuth
 from axiom.connectors.linear.webhook import LinearWebhookHandler
 from axiom.connectors.registry import ensure_connectors_schema
 from axiom.connectors.registry import list_installed as list_connectors
+from axiom.connectors.slack.ingest import channel_to_message_edge as slack_channel_to_message_edge
+from axiom.connectors.slack.ingest import fetch_channels as slack_fetch_channels
+from axiom.connectors.slack.ingest import (
+    fetch_recent_messages_per_channel as slack_fetch_recent_messages_per_channel,
+)
+from axiom.connectors.slack.ingest import fetch_users as slack_fetch_users
+from axiom.connectors.slack.ingest import message_mention_edges as slack_message_mention_edges
+from axiom.connectors.slack.ingest import normalize_channel as slack_normalize_channel
+from axiom.connectors.slack.ingest import normalize_message as slack_normalize_message
+from axiom.connectors.slack.ingest import normalize_user as slack_normalize_user
+from axiom.connectors.slack.ingest import (
+    thread_parent_child_edge as slack_thread_parent_child_edge,
+)
+from axiom.connectors.slack.oauth import SLACK_BOT_SCOPES, SlackOAuth
+from axiom.connectors.slack.webhook import SlackWebhookHandler
 from axiom.govern.agent_actions import emit_demo_agent_actions
 from axiom.govern.agent_registry import (
     AgentType,
@@ -999,6 +1014,199 @@ def create_app(
             return {"vendor": "linear", "status": "disconnected"}
         return {
             "vendor": "linear",
+            "status": row.status,
+            "account_label": row.account_label,
+            "last_sync_at": _iso(row.last_sync_at),
+        }
+
+    def slack_enabled() -> bool:
+        return os.environ.get("AXIOM_CONNECTOR_SLACK_ENABLED", "").lower() in {"1", "true", "yes"}
+
+    def slack_config() -> ConnectorConfig:
+        return ConnectorConfig(
+            id="slack",
+            vendor="slack",
+            oauth_client_id=os.environ.get("AXIOM_SLACK_CLIENT_ID"),
+            oauth_client_secret=os.environ.get("AXIOM_SLACK_CLIENT_SECRET"),
+            redirect_uri=os.environ.get(
+                "AXIOM_SLACK_REDIRECT_URI",
+                "/api/internal/connectors/slack/callback",
+            ),
+            scopes=SLACK_BOT_SCOPES,
+            webhook_secret=os.environ.get("AXIOM_SLACK_SIGNING_SECRET"),
+            workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
+        )
+
+    def require_slack_enabled() -> None:
+        if not slack_enabled():
+            raise HTTPException(status_code=503, detail="Slack connector disabled")
+
+    @app.post("/api/internal/connectors/slack/install")
+    def post_slack_install() -> dict[str, Any]:
+        require_slack_enabled()
+        config = slack_config()
+        state = new_id()
+        with session_local() as session:
+            row = session.get(ConnectorConfigRow, config.id)
+            if row is None:
+                row = ConnectorConfigRow(
+                    id=config.id,
+                    vendor="slack",
+                    oauth_client_id=config.oauth_client_id,
+                    oauth_client_secret=config.oauth_client_secret,
+                    redirect_uri=config.redirect_uri,
+                    scopes=config.scopes,
+                    webhook_secret=config.webhook_secret,
+                    workspace_id=config.workspace_id,
+                    install_state=state,
+                )
+            else:
+                row.install_state = state
+                row.oauth_client_id = config.oauth_client_id
+                row.oauth_client_secret = config.oauth_client_secret
+                row.redirect_uri = config.redirect_uri
+                row.scopes = config.scopes
+                row.webhook_secret = config.webhook_secret
+            session.add(row)
+            session.commit()
+        return {"authorize_url": SlackOAuth(config).authorize_url(state), "state": state}
+
+    @app.get("/api/internal/connectors/slack/callback")
+    def get_slack_callback(code: str, state: str) -> dict[str, Any]:
+        require_slack_enabled()
+        config = slack_config()
+        oauth_state = SlackOAuth(config).exchange_code(code)
+        with session_local() as session:
+            config_row = session.get(ConnectorConfigRow, config.id)
+            if config_row is None:
+                config_row = ConnectorConfigRow(
+                    id=config.id,
+                    vendor="slack",
+                    oauth_client_id=config.oauth_client_id,
+                    oauth_client_secret=config.oauth_client_secret,
+                    redirect_uri=config.redirect_uri,
+                    scopes=config.scopes,
+                    webhook_secret=config.webhook_secret,
+                    workspace_id=config.workspace_id,
+                    install_state=state,
+                )
+                session.add(config_row)
+            row = ConnectorStateRow(
+                id=oauth_state.id,
+                connector_id=config.id,
+                vendor="slack",
+                access_token=oauth_state.access_token,
+                refresh_token=oauth_state.refresh_token,
+                token_expires_at=oauth_state.token_expires_at,
+                account_id=oauth_state.account_id,
+                account_label=oauth_state.account_label or "Slack Workspace",
+                installed_by=oauth_state.installed_by,
+                status="connected",
+            )
+            session.add(row)
+            session.commit()
+        return {
+            "status": "connected",
+            "account_label": oauth_state.account_label or "Slack Workspace",
+        }
+
+    @app.post("/api/internal/connectors/slack/sync")
+    async def post_slack_sync() -> dict[str, Any]:
+        require_slack_enabled()
+        with session_local() as session:
+            state = session.execute(
+                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "slack")
+            ).scalars().first()
+            if state is None:
+                raise HTTPException(status_code=404, detail="Slack connector not installed")
+            token_state = SimpleNamespace(access_token=state.access_token)
+            entities: list[dict[str, Any]] = []
+            edges: list[dict[str, Any]] = []
+            for user in slack_fetch_users(token_state):
+                entities.append(slack_normalize_user(user))
+            for channel in slack_fetch_channels(token_state):
+                channel_entity = slack_normalize_channel(channel)
+                entities.append(channel_entity)
+                channel_id = str(channel["id"])
+                for message in slack_fetch_recent_messages_per_channel(token_state, channel_id):
+                    message_entity = slack_normalize_message(channel_id, message)
+                    entities.append(message_entity)
+                    edges.append(
+                        slack_channel_to_message_edge(
+                            channel_entity["nick"],
+                            message_entity["nick"],
+                        )
+                    )
+                    parent_ts = message.get("thread_ts")
+                    if parent_ts and parent_ts != message.get("ts"):
+                        edges.append(
+                            slack_thread_parent_child_edge(
+                                f"message:{channel_id}:{parent_ts}",
+                                message_entity["nick"],
+                            )
+                        )
+                    edges.extend(
+                        slack_message_mention_edges(
+                            message_entity["nick"],
+                            str(message.get("text") or ""),
+                        )
+                    )
+            count = await apply_to_brain(session, entities, edges, broadcaster=broadcaster)
+            state.last_sync_at = datetime.utcnow()
+            session.add(state)
+            session.commit()
+        return {"status": "ok", "ingested": count}
+
+    @app.post("/api/internal/connectors/slack/webhook", response_model=None)
+    async def post_slack_webhook(request: Request) -> dict[str, Any] | PlainTextResponse:
+        require_slack_enabled()
+        body = await request.body()
+        headers = dict(request.headers)
+        handler = SlackWebhookHandler(os.environ.get("AXIOM_SLACK_SIGNING_SECRET", ""))
+        parsed_request = SimpleNamespace(body=body, headers=headers)
+        challenge = handler.challenge_response(parsed_request)
+        if challenge is not None:
+            return PlainTextResponse(challenge)
+        signature_ok = handler.verify(parsed_request)
+        events = handler.parse(parsed_request)
+        with session_local() as session:
+            for event in events:
+                session.add(
+                    ConnectorEventRow(
+                        vendor="slack",
+                        connector_state_id=None,
+                        event_type=event.event_type,
+                        external_id=event.external_id,
+                        payload=event.payload,
+                        signature_ok=signature_ok,
+                        received_at=datetime.utcnow(),
+                        event_timestamp=event.timestamp,
+                    )
+                )
+            session.commit()
+        for event in events:
+            await broadcaster.publish(
+                {
+                    "type": "connector_event_received",
+                    "source_id": "slack",
+                    "persisted_id": event.external_id,
+                    "timestamp": datetime_now_ms(),
+                    "payload": {"vendor": "slack", "event_type": event.event_type},
+                }
+            )
+        return {"ok": signature_ok, "events": len(events)}
+
+    @app.get("/api/internal/connectors/slack/status")
+    def get_slack_status() -> dict[str, Any]:
+        require_slack_enabled()
+        with session_local() as session:
+            row = session.execute(
+                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "slack")
+            ).scalars().first()
+        if row is None:
+            return {"vendor": "slack", "status": "disconnected"}
+        return {
+            "vendor": "slack",
             "status": row.status,
             "account_label": row.account_label,
             "last_sync_at": _iso(row.last_sync_at),
