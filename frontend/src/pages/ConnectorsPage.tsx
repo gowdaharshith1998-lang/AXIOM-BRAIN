@@ -56,6 +56,7 @@ export function ConnectorsPage() {
           {vendors.map((vendor) => {
             const status = byVendor.get(vendor.id);
             const connected = status?.status === "connected";
+            const watchMode = vendor.id === "notion" ? "Polling" : null;
             return (
               <div
                 key={vendor.id}
@@ -68,7 +69,10 @@ export function ConnectorsPage() {
                   </span>
                 </div>
                 <div className="min-w-0 text-[#a9bed8]">
-                  {connected ? status?.account_label || "Connected account" : "No account connected"}
+                  <span>{connected ? status?.account_label || "Connected account" : "No account connected"}</span>
+                  {connected && watchMode ? (
+                    <span className="ml-2 settings-status-muted">{watchMode}</span>
+                  ) : null}
                 </div>
                 <div className="flex items-center justify-end gap-2">
                   {connected ? (

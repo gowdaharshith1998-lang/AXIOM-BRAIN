@@ -30,6 +30,7 @@ describe("ConnectorsPage", () => {
             { vendor: "github", status: "connected", account_label: "Octo Org", last_sync_at: null },
             { vendor: "linear", status: "connected", account_label: "Linear Workspace", last_sync_at: null },
             { vendor: "slack", status: "connected", account_label: "Axiom HQ", last_sync_at: null },
+            { vendor: "notion", status: "connected", account_label: "Axiom Wiki", last_sync_at: null },
           ],
         });
       }
@@ -41,6 +42,9 @@ describe("ConnectorsPage", () => {
       }
       if (url === "/api/internal/connectors/slack/install") {
         return jsonResponse({ authorize_url: "https://slack.com/oauth/v2/authorize?state=csrf" });
+      }
+      if (url === "/api/internal/connectors/notion/install") {
+        return jsonResponse({ authorize_url: "https://api.notion.com/v1/oauth/authorize?state=csrf" });
       }
       return jsonResponse({});
     });
@@ -71,7 +75,7 @@ describe("ConnectorsPage", () => {
   it("github_connected_row_shows_account_label", async () => {
     renderPage();
     expect(await screen.findByText("Octo Org")).toBeInTheDocument();
-    expect(screen.getAllByText("Connected")).toHaveLength(3);
+    expect(screen.getAllByText("Connected")).toHaveLength(4);
   });
 
   it("github_sync_now_button_calls_sync_endpoint", async () => {
@@ -114,5 +118,24 @@ describe("ConnectorsPage", () => {
   it("slack_connected_row_shows_team_name", async () => {
     renderPage();
     expect(await screen.findByText("Axiom HQ")).toBeInTheDocument();
+  });
+
+  it("notion_connect_button_opens_oauth_popup", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === "/api/internal/connectors/status") return jsonResponse({ connectors: [] });
+      if (url === "/api/internal/connectors/notion/install") {
+        return jsonResponse({ authorize_url: "https://api.notion.com/v1/oauth/authorize?state=csrf" });
+      }
+      return jsonResponse({});
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Notion" }));
+    await waitFor(() => expect(window.open).toHaveBeenCalledWith("https://api.notion.com/v1/oauth/authorize?state=csrf", "axiom-notion-oauth", "width=720,height=780"));
+  });
+
+  it("notion_connected_row_shows_polling_badge", async () => {
+    renderPage();
+    expect(await screen.findByText("Axiom Wiki")).toBeInTheDocument();
+    expect(screen.getByText("Polling")).toBeInTheDocument();
   });
 });

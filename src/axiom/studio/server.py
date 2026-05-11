@@ -57,6 +57,13 @@ from axiom.connectors.linear.ingest import project_to_issue_edge as linear_proje
 from axiom.connectors.linear.ingest import team_to_issue_edge as linear_team_to_issue_edge
 from axiom.connectors.linear.oauth import LINEAR_SCOPES, LinearOAuth
 from axiom.connectors.linear.webhook import LinearWebhookHandler
+from axiom.connectors.notion.ingest import database_to_page_edge as notion_database_to_page_edge
+from axiom.connectors.notion.ingest import fetch_databases as notion_fetch_databases
+from axiom.connectors.notion.ingest import fetch_pages_in_database as notion_fetch_pages_in_database
+from axiom.connectors.notion.ingest import normalize_database as notion_normalize_database
+from axiom.connectors.notion.ingest import normalize_page as notion_normalize_page
+from axiom.connectors.notion.oauth import NotionOAuth
+from axiom.connectors.notion.poller import NotionPoller
 from axiom.connectors.registry import ensure_connectors_schema
 from axiom.connectors.registry import list_installed as list_connectors
 from axiom.connectors.slack.ingest import channel_to_message_edge as slack_channel_to_message_edge
@@ -1210,6 +1217,177 @@ def create_app(
             "status": row.status,
             "account_label": row.account_label,
             "last_sync_at": _iso(row.last_sync_at),
+        }
+
+    def notion_enabled() -> bool:
+        return os.environ.get("AXIOM_CONNECTOR_NOTION_ENABLED", "").lower() in {"1", "true", "yes"}
+
+    def notion_config() -> ConnectorConfig:
+        return ConnectorConfig(
+            id="notion",
+            vendor="notion",
+            oauth_client_id=os.environ.get("AXIOM_NOTION_CLIENT_ID"),
+            oauth_client_secret=os.environ.get("AXIOM_NOTION_CLIENT_SECRET"),
+            redirect_uri=os.environ.get(
+                "AXIOM_NOTION_REDIRECT_URI",
+                "/api/internal/connectors/notion/callback",
+            ),
+            workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
+        )
+
+    def require_notion_enabled() -> None:
+        if not notion_enabled():
+            raise HTTPException(status_code=503, detail="Notion connector disabled")
+
+    @app.post("/api/internal/connectors/notion/install")
+    def post_notion_install() -> dict[str, Any]:
+        require_notion_enabled()
+        config = notion_config()
+        state = new_id()
+        with session_local() as session:
+            row = session.get(ConnectorConfigRow, config.id)
+            if row is None:
+                row = ConnectorConfigRow(
+                    id=config.id,
+                    vendor="notion",
+                    oauth_client_id=config.oauth_client_id,
+                    oauth_client_secret=config.oauth_client_secret,
+                    redirect_uri=config.redirect_uri,
+                    scopes=[],
+                    workspace_id=config.workspace_id,
+                    install_state=state,
+                )
+            else:
+                row.install_state = state
+                row.oauth_client_id = config.oauth_client_id
+                row.oauth_client_secret = config.oauth_client_secret
+                row.redirect_uri = config.redirect_uri
+            session.add(row)
+            session.commit()
+        return {"authorize_url": NotionOAuth(config).authorize_url(state), "state": state}
+
+    @app.get("/api/internal/connectors/notion/callback")
+    def get_notion_callback(code: str, state: str) -> dict[str, Any]:
+        require_notion_enabled()
+        config = notion_config()
+        oauth_state = NotionOAuth(config).exchange_code(code)
+        with session_local() as session:
+            config_row = session.get(ConnectorConfigRow, config.id)
+            if config_row is None:
+                config_row = ConnectorConfigRow(
+                    id=config.id,
+                    vendor="notion",
+                    oauth_client_id=config.oauth_client_id,
+                    oauth_client_secret=config.oauth_client_secret,
+                    redirect_uri=config.redirect_uri,
+                    scopes=[],
+                    workspace_id=config.workspace_id,
+                    install_state=state,
+                )
+                session.add(config_row)
+            row = ConnectorStateRow(
+                id=oauth_state.id,
+                connector_id=config.id,
+                vendor="notion",
+                access_token=oauth_state.access_token,
+                refresh_token=oauth_state.refresh_token,
+                token_expires_at=oauth_state.token_expires_at,
+                account_id=oauth_state.account_id,
+                account_label=oauth_state.account_label or "Notion Workspace",
+                installed_by=oauth_state.installed_by,
+                status="connected",
+            )
+            session.add(row)
+            session.commit()
+        return {
+            "status": "connected",
+            "account_label": oauth_state.account_label or "Notion Workspace",
+            "watch_mode": "polling",
+        }
+
+    @app.post("/api/internal/connectors/notion/sync")
+    async def post_notion_sync() -> dict[str, Any]:
+        require_notion_enabled()
+        with session_local() as session:
+            state = session.execute(
+                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "notion")
+            ).scalars().first()
+            if state is None:
+                raise HTTPException(status_code=404, detail="Notion connector not installed")
+            token_state = SimpleNamespace(access_token=state.access_token)
+            entities: list[dict[str, Any]] = []
+            edges: list[dict[str, Any]] = []
+            for database in notion_fetch_databases(token_state):
+                database_entity = notion_normalize_database(database)
+                entities.append(database_entity)
+                for page in notion_fetch_pages_in_database(token_state, str(database["id"])):
+                    page_entity = notion_normalize_page(page)
+                    entities.append(page_entity)
+                    edges.append(
+                        notion_database_to_page_edge(
+                            database_entity["nick"],
+                            page_entity["nick"],
+                        )
+                    )
+            count = await apply_to_brain(session, entities, edges, broadcaster=broadcaster)
+            state.last_sync_at = datetime.utcnow()
+            session.add(state)
+            session.commit()
+        return {"status": "ok", "ingested": count, "watch_mode": "polling"}
+
+    @app.post("/api/internal/connectors/notion/poll")
+    async def post_notion_poll() -> dict[str, Any]:
+        require_notion_enabled()
+        with session_local() as session:
+            state = session.execute(
+                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "notion")
+            ).scalars().first()
+            if state is None:
+                raise HTTPException(status_code=404, detail="Notion connector not installed")
+            events = NotionPoller(state=SimpleNamespace(access_token=state.access_token)).poll_once()
+            for event in events:
+                session.add(
+                    ConnectorEventRow(
+                        vendor="notion",
+                        connector_state_id=state.id,
+                        event_type=event.event_type,
+                        external_id=event.external_id,
+                        payload=event.payload,
+                        signature_ok=True,
+                        received_at=datetime.utcnow(),
+                        event_timestamp=event.timestamp,
+                    )
+                )
+            state.last_sync_at = datetime.utcnow()
+            session.add(state)
+            session.commit()
+        for event in events:
+            await broadcaster.publish(
+                {
+                    "type": "connector_event_received",
+                    "source_id": "notion",
+                    "persisted_id": event.external_id,
+                    "timestamp": datetime_now_ms(),
+                    "payload": {"vendor": "notion", "event_type": event.event_type},
+                }
+            )
+        return {"status": "ok", "events": len(events), "watch_mode": "polling"}
+
+    @app.get("/api/internal/connectors/notion/status")
+    def get_notion_status() -> dict[str, Any]:
+        require_notion_enabled()
+        with session_local() as session:
+            row = session.execute(
+                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "notion")
+            ).scalars().first()
+        if row is None:
+            return {"vendor": "notion", "status": "disconnected", "watch_mode": "polling"}
+        return {
+            "vendor": "notion",
+            "status": row.status,
+            "account_label": row.account_label,
+            "last_sync_at": _iso(row.last_sync_at),
+            "watch_mode": "polling",
         }
 
     @app.get("/api/internal/connectors/status")
