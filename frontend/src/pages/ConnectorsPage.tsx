@@ -30,6 +30,20 @@ export function ConnectorsPage() {
   const [statuses, setStatuses] = useState<ConnectorStatus[]>([]);
   const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
   const [drawerVendor, setDrawerVendor] = useState<string | null>(null);
+  const [actionMessages, setActionMessages] = useState<Record<string, string>>({});
+
+  function setActionMessage(vendor: string, message: string) {
+    setActionMessages((existing) => ({ ...existing, [vendor]: message }));
+  }
+
+  async function responseMessage(response: Response, fallback: string) {
+    try {
+      const payload = await response.json();
+      return String(payload.detail || payload.error || fallback);
+    } catch {
+      return fallback;
+    }
+  }
 
   async function load() {
     const response = await fetch("/api/internal/connectors/status");
@@ -87,36 +101,87 @@ export function ConnectorsPage() {
   );
 
   async function connect(vendor: string) {
-    const response = await fetch(`/api/internal/connectors/${vendor}/install`, { method: "POST" });
-    if (!response.ok) return;
-    const payload = await response.json();
-    if (typeof payload.authorize_url === "string") {
-      window.open(payload.authorize_url, `axiom-${vendor}-oauth`, "width=720,height=780");
+    setActionMessage(vendor, "Connecting...");
+    try {
+      const response = await fetch(`/api/internal/connectors/${vendor}/install`, { method: "POST" });
+      if (!response.ok) {
+        setActionMessage(vendor, await responseMessage(response, "Connector install failed"));
+        return;
+      }
+      const payload = await response.json();
+      if (typeof payload.authorize_url === "string") {
+        window.open(payload.authorize_url, `axiom-${vendor}-oauth`, "width=720,height=780");
+        setActionMessage(vendor, "Opening authorization");
+        return;
+      }
+      setActionMessage(vendor, "Authorize URL unavailable");
+    } catch {
+      setActionMessage(vendor, "Connector request failed");
     }
   }
 
   async function sync(vendor: string) {
-    await fetch(`/api/internal/connectors/${vendor}/sync`, { method: "POST" });
-    await load();
+    setActionMessage(vendor, "Syncing...");
+    try {
+      const response = await fetch(`/api/internal/connectors/${vendor}/sync`, { method: "POST" });
+      if (!response.ok) {
+        setActionMessage(vendor, await responseMessage(response, "Connector sync failed"));
+        return;
+      }
+      await load();
+      setActionMessage(vendor, "Sync complete");
+    } catch {
+      setActionMessage(vendor, "Connector request failed");
+    }
   }
 
   async function testConnection(vendor: string) {
-    await fetch(`/api/internal/connectors/${vendor}/test`, { method: "POST" });
+    setActionMessage(vendor, "Testing...");
+    try {
+      const response = await fetch(`/api/internal/connectors/${vendor}/test`, { method: "POST" });
+      if (!response.ok) {
+        setActionMessage(vendor, await responseMessage(response, "Connection test failed"));
+        return;
+      }
+      const payload = await response.json();
+      setActionMessage(vendor, payload.ok ? "Connection OK" : `Connection ${payload.status || "failed"}`);
+    } catch {
+      setActionMessage(vendor, "Connector request failed");
+    }
   }
 
   async function viewEvents(vendor: string) {
     setDrawerVendor(vendor);
-    const response = await fetch(`/api/internal/connectors/${vendor}/events`);
-    if (!response.ok) return;
-    const payload = await response.json();
-    if (Array.isArray(payload.events)) {
-      setRecentEvents((existing) => [...payload.events, ...existing].slice(0, 50));
+    setActionMessage(vendor, "Loading events...");
+    try {
+      const response = await fetch(`/api/internal/connectors/${vendor}/events`);
+      if (!response.ok) {
+        setActionMessage(vendor, await responseMessage(response, "Could not load events"));
+        return;
+      }
+      const payload = await response.json();
+      if (Array.isArray(payload.events)) {
+        setRecentEvents((existing) => [...payload.events, ...existing].slice(0, 50));
+        setActionMessage(vendor, `${payload.events.length} recent events`);
+      }
+    } catch {
+      setActionMessage(vendor, "Connector request failed");
     }
   }
 
   async function disconnect(vendor: string) {
-    await fetch(`/api/internal/connectors/${vendor}`, { method: "DELETE" });
-    await load();
+    setActionMessage(vendor, "Disconnecting...");
+    try {
+      const response = await fetch(`/api/internal/connectors/${vendor}`, { method: "DELETE" });
+      if (!response.ok) {
+        setActionMessage(vendor, await responseMessage(response, "Disconnect failed"));
+        return;
+      }
+      await load();
+      setActionMessage(vendor, "Disconnected");
+    } catch {
+      setActionMessage(vendor, "Connector request failed");
+    }
   }
 
   return (
@@ -143,6 +208,11 @@ export function ConnectorsPage() {
                   <span>{connected ? status?.account_label || "Connected account" : "No account connected"}</span>
                   {connected && watchMode ? (
                     <span className="ml-2 settings-status-muted">{watchMode}</span>
+                  ) : null}
+                  {actionMessages[vendor.id] ? (
+                    <div className="mt-1 truncate text-[12px] text-[#f6b770]" role="status">
+                      {actionMessages[vendor.id]}
+                    </div>
                   ) : null}
                 </div>
                 <div className="grid grid-cols-4 gap-2 text-[12px] text-[#a9bed8]">

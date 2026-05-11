@@ -25,6 +25,10 @@ function jsonResponse(payload: unknown) {
   return Promise.resolve(new Response(JSON.stringify(payload), { status: 200 }));
 }
 
+function jsonError(payload: unknown, status: number) {
+  return Promise.resolve(new Response(JSON.stringify(payload), { status }));
+}
+
 function renderPage() {
   render(
     <MemoryRouter>
@@ -224,5 +228,20 @@ describe("ConnectorsPage", () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Test GitHub" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/internal/connectors/github/test", { method: "POST" }));
+  });
+
+  it("connect_button_surfaces_disabled_feature_flag_error", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === "/api/internal/connectors/status") return jsonResponse({ connectors: [] });
+      if (url === "/api/internal/connectors/github/install") {
+        return jsonError({ detail: "GitHub connector disabled" }, 503);
+      }
+      return jsonResponse({});
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Connect GitHub" }));
+
+    expect(await screen.findByText("GitHub connector disabled")).toBeInTheDocument();
   });
 });
