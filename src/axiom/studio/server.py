@@ -789,7 +789,12 @@ def create_app(
                 severity=severity,
                 limit=limit,
             )
-            total = int(session.execute(select(func.count(ClusterCheckRun.id))).scalar_one())
+            count_query = select(func.count(ClusterCheckRun.id))
+            if cluster:
+                count_query = count_query.where(ClusterCheckRun.cluster_id == cluster)
+            if severity:
+                count_query = count_query.where(ClusterCheckRun.severity == severity)
+            total = int(session.execute(count_query).scalar_one())
         return {
             "checks": [cluster_check_run_row(row) for row in rows],
             "total_count": total,

@@ -42,6 +42,30 @@ def _db(tmp_path: Path, name: str = "cluster_checks.db") -> tuple[str, sessionma
     return db_url, sf
 
 
+def _add_check_run(
+    session: Session,
+    run_id: str,
+    *,
+    cluster_id: str,
+    severity: str,
+    offset_minutes: int = 0,
+) -> None:
+    run_at = datetime.utcnow() + timedelta(minutes=offset_minutes)
+    session.add(
+        ClusterCheckRun(
+            id=run_id,
+            run_at=run_at,
+            cluster_id=cluster_id,
+            check_type="cluster_health",
+            severity=severity,
+            entity_count=0,
+            last_ingest_at=None,
+            owner="organizer",
+            reason="test",
+        )
+    )
+
+
 def test_record_cluster_check_runs_writes_one_row_per_cluster(db_session: Session) -> None:
     written = record_cluster_check_runs(db_session, _snapshot())
 
@@ -75,6 +99,108 @@ def test_cluster_checks_endpoint_filters_cluster_and_severity(tmp_path: Path) ->
     assert len(payload["checks"]) == 1
     assert payload["checks"][0]["cluster_id"] == "billing_payments"
     assert payload["checks"][0]["severity"] == "degraded"
+
+
+def test_cluster_check_total_count_matches_filtered_rows(tmp_path: Path) -> None:
+    db_url, sf = _db(tmp_path)
+    with sf() as session:
+        _add_check_run(
+            session,
+            "billing_critical",
+            cluster_id="billing_payments",
+            severity="critical",
+            offset_minutes=1,
+        )
+        _add_check_run(
+            session,
+            "knowledge_critical",
+            cluster_id="knowledge_graph",
+            severity="critical",
+            offset_minutes=2,
+        )
+        _add_check_run(
+            session,
+            "billing_healthy",
+            cluster_id="billing_payments",
+            severity="healthy",
+            offset_minutes=3,
+        )
+        session.commit()
+
+    client = TestClient(create_app(db_url=db_url, enable_organizer=False))
+    payload = client.get(
+        "/api/internal/cluster-checks?cluster=billing_payments&severity=critical"
+    ).json()
+
+    assert payload["total_count"] == 1
+    assert len(payload["checks"]) == 1
+    assert payload["checks"][0]["id"] == "billing_critical"
+
+
+def test_cluster_check_total_count_with_severity_filter(tmp_path: Path) -> None:
+    db_url, sf = _db(tmp_path)
+    with sf() as session:
+        _add_check_run(
+            session,
+            "critical_1",
+            cluster_id="billing_payments",
+            severity="critical",
+            offset_minutes=1,
+        )
+        _add_check_run(
+            session,
+            "critical_2",
+            cluster_id="knowledge_graph",
+            severity="critical",
+            offset_minutes=2,
+        )
+        _add_check_run(
+            session,
+            "healthy_1",
+            cluster_id="identity_access",
+            severity="healthy",
+            offset_minutes=3,
+        )
+        session.commit()
+
+    client = TestClient(create_app(db_url=db_url, enable_organizer=False))
+    payload = client.get("/api/internal/cluster-checks?severity=critical").json()
+
+    assert payload["total_count"] == 2
+    assert {row["id"] for row in payload["checks"]} == {"critical_1", "critical_2"}
+
+
+def test_cluster_check_total_count_with_cluster_filter(tmp_path: Path) -> None:
+    db_url, sf = _db(tmp_path)
+    with sf() as session:
+        _add_check_run(
+            session,
+            "billing_1",
+            cluster_id="billing_payments",
+            severity="critical",
+            offset_minutes=1,
+        )
+        _add_check_run(
+            session,
+            "billing_2",
+            cluster_id="billing_payments",
+            severity="healthy",
+            offset_minutes=2,
+        )
+        _add_check_run(
+            session,
+            "knowledge_1",
+            cluster_id="knowledge_graph",
+            severity="critical",
+            offset_minutes=3,
+        )
+        session.commit()
+
+    client = TestClient(create_app(db_url=db_url, enable_organizer=False))
+    payload = client.get("/api/internal/cluster-checks?cluster=billing_payments").json()
+
+    assert payload["total_count"] == 2
+    assert {row["id"] for row in payload["checks"]} == {"billing_1", "billing_2"}
 
 
 def test_cluster_checks_summary_percentages_and_last_change(db_session: Session) -> None:
