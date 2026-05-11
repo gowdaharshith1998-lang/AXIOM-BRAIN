@@ -41,6 +41,7 @@ from axiom.skills.registry import (
     skill_to_dict,
 )
 from axiom.skills.runner import run_skill
+from axiom.skills.skill_md import serialize_skill_md
 from axiom.storage import crud
 from axiom.storage.db import init_engine
 from axiom.studio.sources import ensure_sources_schema, real_sources_snapshot
@@ -612,14 +613,21 @@ class AxiomMCPService:
             "demo": item["demo"],
         }
 
+    def _skill_discovery_payload(self, row: Any) -> dict[str, Any]:
+        payload = skill_to_dict(row)
+        payload["skill_md"] = serialize_skill_md(row)
+        payload["skill_md_media_type"] = "text/markdown"
+        return payload
+
     def list_skills(self, status: str | None = None, intent: str | None = None) -> dict[str, Any]:
         with self._session_factory() as session:
             rows = list_skills_with_session(session, status=status, intent=intent)
-        return {"skills": [skill_to_dict(row) for row in rows], "count": len(rows)}
+            skills = [self._skill_discovery_payload(row) for row in rows]
+        return {"skills": skills, "count": len(skills)}
 
     def get_skill(self, skill_id: str) -> dict[str, Any]:
         with self._session_factory() as session:
-            return {"skill": skill_to_dict(get_skill_with_session(session, skill_id))}
+            return {"skill": self._skill_discovery_payload(get_skill_with_session(session, skill_id))}
 
     def register_skill(
         self,
@@ -1286,7 +1294,7 @@ def build_mcp_server(
         except LookupError as exc:
             raise ToolError(str(exc)) from exc
 
-    @tool(name="axiom_list_skills", description="List registered runnable skills")
+    @tool(name="axiom_list_skills", description="List registered runnable skills with SKILL.md content")
     def axiom_list_skills(
         status: str | None = None,
         intent: str | None = None,
@@ -1302,7 +1310,7 @@ def build_mcp_server(
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
 
-    @tool(name="axiom_get_skill", description="Fetch a registered skill by id")
+    @tool(name="axiom_get_skill", description="Fetch a registered skill by id with SKILL.md content")
     def axiom_get_skill(skill_id: str, passport_token: str | None = None) -> dict[str, Any]:
         try:
             service._require_passport_scope(

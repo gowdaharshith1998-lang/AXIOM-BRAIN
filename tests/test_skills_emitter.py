@@ -66,6 +66,12 @@ def _register_priority_skill(session: Session):
     )
 
 
+def _mcp_payload(result):
+    if isinstance(result, list) and result and hasattr(result[0], "text"):
+        return json.loads(result[0].text)
+    return result
+
+
 def _process_entity(session: Session, entity_id: str = "process_refund") -> Entity:
     process = Entity(
         id=entity_id,
@@ -503,9 +509,17 @@ async def test_skill_mcp_tool_wiring(
             "llm_model": "claude-3-haiku",
         },
     )
+    registered = _mcp_payload(registered)
     assert registered
-    listed = await mcp.call_tool("axiom_list_skills", {})
+    listed = _mcp_payload(await mcp.call_tool("axiom_list_skills", {}))
     assert listed
+    discovered = listed["skills"][0]
+    assert discovered["skill_md"].startswith("---\n")
+    assert "name: summarize_note" in discovered["skill_md"]
+    assert "Summarize {note}" in discovered["skill_md"]
+
+    fetched = _mcp_payload(await mcp.call_tool("axiom_get_skill", {"skill_id": registered["skill"]["id"]}))
+    assert fetched["skill"]["skill_md"] == discovered["skill_md"]
 
 
 def test_skill_api_endpoints(skill_db: tuple[sessionmaker[Session], str]) -> None:
