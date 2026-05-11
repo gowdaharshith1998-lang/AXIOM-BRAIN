@@ -25,10 +25,6 @@ function jsonResponse(payload: unknown) {
   return Promise.resolve(new Response(JSON.stringify(payload), { status: 200 }));
 }
 
-function jsonError(payload: unknown, status: number) {
-  return Promise.resolve(new Response(JSON.stringify(payload), { status }));
-}
-
 function renderPage() {
   render(
     <MemoryRouter>
@@ -230,11 +226,10 @@ describe("ConnectorsPage", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/internal/connectors/github/test", { method: "POST" }));
   });
 
-  it("connect_button_surfaces_disabled_feature_flag_error", async () => {
+  it("connect_button_opens_setup_when_connector_needs_oauth_config", async () => {
     fetchMock.mockImplementation((url: string) => {
-      if (url === "/api/internal/connectors/status") return jsonResponse({ connectors: [] });
-      if (url === "/api/internal/connectors/github/install") {
-        return jsonError({ detail: "GitHub connector disabled" }, 503);
+      if (url === "/api/internal/connectors/status") {
+        return jsonResponse({ connectors: [{ vendor: "github", status: "disconnected", configured: false }] });
       }
       return jsonResponse({});
     });
@@ -242,6 +237,43 @@ describe("ConnectorsPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Connect GitHub" }));
 
-    expect(await screen.findByText("GitHub connector disabled")).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Set up GitHub connector" })).toBeInTheDocument();
+    expect(screen.getByText("Connector setup required")).toBeInTheDocument();
+  });
+
+  it("connector_setup_saves_config_then_opens_authorization", async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/internal/connectors/status") {
+        return jsonResponse({ connectors: [{ vendor: "github", status: "disconnected", configured: false }] });
+      }
+      if (url === "/api/internal/connectors/github/config") {
+        expect(init?.method).toBe("PUT");
+        expect(JSON.parse(String(init?.body))).toEqual(expect.objectContaining({
+          oauth_client_id: "client-id",
+          oauth_client_secret: "client-secret",
+        }));
+        return jsonResponse({ vendor: "github", configured: true });
+      }
+      if (url === "/api/internal/connectors/github/install") {
+        return jsonResponse({ authorize_url: "https://github.com/login/oauth/authorize?client_id=client-id" });
+      }
+      return jsonResponse({});
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Connect GitHub" }));
+    fireEvent.change(await screen.findByLabelText("OAuth client ID"), { target: { value: "client-id" } });
+    fireEvent.change(screen.getByLabelText("OAuth client secret"), { target: { value: "client-secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save & Connect" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/internal/connectors/github/install",
+      { method: "POST" },
+    ));
+    await waitFor(() => expect(window.open).toHaveBeenCalledWith(
+      "https://github.com/login/oauth/authorize?client_id=client-id",
+      "axiom-github-oauth",
+      "width=720,height=780",
+    ));
   });
 });

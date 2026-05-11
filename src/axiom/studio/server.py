@@ -239,6 +239,14 @@ class CompileSkillsIn(BaseModel):
     process_ids: list[str] | None = None
 
 
+class ConnectorConfigIn(BaseModel):
+    oauth_client_id: str
+    oauth_client_secret: str
+    redirect_uri: str | None = None
+    webhook_secret: str | None = None
+    workspace_id: str | None = None
+
+
 class PassportIn(BaseModel):
     agent_name: str
     agent_class: str
@@ -676,39 +684,52 @@ def create_app(
             pass
         return {"settings": existing}
 
-    def github_enabled() -> bool:
-        return os.environ.get("AXIOM_CONNECTOR_GITHUB_ENABLED", "").lower() in {"1", "true", "yes"}
+    CONNECTOR_VENDORS = {"github", "linear", "slack", "notion", "gmail"}
 
-    def github_config() -> ConnectorConfig:
+    def _connector_config_row_to_config(row: ConnectorConfigRow) -> ConnectorConfig:
         return ConnectorConfig(
-            id="github",
-            vendor="github",
-            oauth_client_id=os.environ.get("AXIOM_GITHUB_CLIENT_ID"),
-            oauth_client_secret=os.environ.get("AXIOM_GITHUB_CLIENT_SECRET"),
-            redirect_uri=os.environ.get(
-                "AXIOM_GITHUB_REDIRECT_URI",
-                "/api/internal/connectors/github/callback",
-            ),
-            scopes=GITHUB_SCOPES,
-            webhook_secret=os.environ.get("AXIOM_GITHUB_WEBHOOK_SECRET"),
-            workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
+            id=row.id,
+            vendor=row.vendor,
+            oauth_client_id=row.oauth_client_id,
+            oauth_client_secret=row.oauth_client_secret,
+            redirect_uri=row.redirect_uri,
+            scopes=list(row.scopes or []),
+            webhook_secret=row.webhook_secret,
+            workspace_id=row.workspace_id,
+            install_state=row.install_state,
         )
 
-    def require_github_enabled() -> None:
-        if not github_enabled():
-            raise HTTPException(status_code=503, detail="GitHub connector disabled")
+    def _saved_connector_config(vendor: str) -> ConnectorConfig | None:
+        with session_local() as session:
+            row = session.execute(
+                select(ConnectorConfigRow).where(ConnectorConfigRow.vendor == vendor)
+            ).scalars().first()
+            return _connector_config_row_to_config(row) if row is not None else None
 
-    @app.post("/api/internal/connectors/github/install")
-    def post_github_install() -> dict[str, Any]:
-        require_github_enabled()
-        config = github_config()
-        state = new_id()
+    def _with_saved_connector_config(fallback: ConnectorConfig) -> ConnectorConfig:
+        return _saved_connector_config(fallback.vendor) or fallback
+
+    def _connector_configured(config: ConnectorConfig) -> bool:
+        return bool(
+            (config.oauth_client_id or "").strip()
+            and (config.oauth_client_secret or "").strip()
+            and (config.redirect_uri or "").strip()
+        )
+
+    def _require_connector_configured(config: ConnectorConfig, label: str) -> None:
+        if not _connector_configured(config):
+            raise HTTPException(
+                status_code=409,
+                detail=f"{label} connector setup required",
+            )
+
+    def _persist_connector_install_config(config: ConnectorConfig, state: str) -> None:
         with session_local() as session:
             row = session.get(ConnectorConfigRow, config.id)
             if row is None:
                 row = ConnectorConfigRow(
                     id=config.id,
-                    vendor="github",
+                    vendor=config.vendor,
                     oauth_client_id=config.oauth_client_id,
                     oauth_client_secret=config.oauth_client_secret,
                     redirect_uri=config.redirect_uri,
@@ -724,8 +745,75 @@ def create_app(
                 row.redirect_uri = config.redirect_uri
                 row.scopes = config.scopes
                 row.webhook_secret = config.webhook_secret
+                row.workspace_id = config.workspace_id
             session.add(row)
             session.commit()
+
+    def _connector_config_for(vendor: str) -> ConnectorConfig:
+        if vendor == "github":
+            return github_config()
+        if vendor == "linear":
+            return linear_config()
+        if vendor == "slack":
+            return slack_config()
+        if vendor == "notion":
+            return notion_config()
+        if vendor == "gmail":
+            return gmail_config()
+        raise HTTPException(status_code=404, detail="connector not found")
+
+    @app.put("/api/internal/connectors/{vendor}/config")
+    def put_connector_config(vendor: str, body: ConnectorConfigIn = Body(...)) -> dict[str, Any]:
+        if vendor not in CONNECTOR_VENDORS:
+            raise HTTPException(status_code=404, detail="connector not found")
+        default = _connector_config_for(vendor)
+        redirect_uri = (body.redirect_uri or default.redirect_uri or "").strip()
+        config = ConnectorConfig(
+            id=vendor,
+            vendor=vendor,
+            oauth_client_id=body.oauth_client_id.strip(),
+            oauth_client_secret=body.oauth_client_secret.strip(),
+            redirect_uri=redirect_uri,
+            scopes=default.scopes,
+            webhook_secret=(body.webhook_secret or "").strip() or default.webhook_secret,
+            workspace_id=(body.workspace_id or "").strip() or default.workspace_id,
+        )
+        _require_connector_configured(config, vendor.title())
+        _persist_connector_install_config(config, "configured")
+        return {
+            "vendor": vendor,
+            "configured": True,
+            "redirect_uri": config.redirect_uri,
+            "watch_mode": "polling" if vendor == "notion" else "webhook",
+        }
+
+    def github_enabled() -> bool:
+        return _connector_configured(github_config())
+
+    def github_config() -> ConnectorConfig:
+        return _with_saved_connector_config(ConnectorConfig(
+            id="github",
+            vendor="github",
+            oauth_client_id=os.environ.get("AXIOM_GITHUB_CLIENT_ID"),
+            oauth_client_secret=os.environ.get("AXIOM_GITHUB_CLIENT_SECRET"),
+            redirect_uri=os.environ.get(
+                "AXIOM_GITHUB_REDIRECT_URI",
+                "/api/internal/connectors/github/callback",
+            ),
+            scopes=GITHUB_SCOPES,
+            webhook_secret=os.environ.get("AXIOM_GITHUB_WEBHOOK_SECRET"),
+            workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
+        ))
+
+    def require_github_enabled() -> None:
+        _require_connector_configured(github_config(), "GitHub")
+
+    @app.post("/api/internal/connectors/github/install")
+    def post_github_install() -> dict[str, Any]:
+        require_github_enabled()
+        config = github_config()
+        state = new_id()
+        _persist_connector_install_config(config, state)
         return {"authorize_url": GitHubOAuth(config).authorize_url(state), "state": state}
 
     @app.get("/api/internal/connectors/github/callback")
@@ -850,10 +938,10 @@ def create_app(
         }
 
     def linear_enabled() -> bool:
-        return os.environ.get("AXIOM_CONNECTOR_LINEAR_ENABLED", "").lower() in {"1", "true", "yes"}
+        return _connector_configured(linear_config())
 
     def linear_config() -> ConnectorConfig:
-        return ConnectorConfig(
+        return _with_saved_connector_config(ConnectorConfig(
             id="linear",
             vendor="linear",
             oauth_client_id=os.environ.get("AXIOM_LINEAR_CLIENT_ID"),
@@ -865,40 +953,17 @@ def create_app(
             scopes=LINEAR_SCOPES,
             webhook_secret=os.environ.get("AXIOM_LINEAR_WEBHOOK_SECRET"),
             workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
-        )
+        ))
 
     def require_linear_enabled() -> None:
-        if not linear_enabled():
-            raise HTTPException(status_code=503, detail="Linear connector disabled")
+        _require_connector_configured(linear_config(), "Linear")
 
     @app.post("/api/internal/connectors/linear/install")
     def post_linear_install() -> dict[str, Any]:
         require_linear_enabled()
         config = linear_config()
         state = new_id()
-        with session_local() as session:
-            row = session.get(ConnectorConfigRow, config.id)
-            if row is None:
-                row = ConnectorConfigRow(
-                    id=config.id,
-                    vendor="linear",
-                    oauth_client_id=config.oauth_client_id,
-                    oauth_client_secret=config.oauth_client_secret,
-                    redirect_uri=config.redirect_uri,
-                    scopes=config.scopes,
-                    webhook_secret=config.webhook_secret,
-                    workspace_id=config.workspace_id,
-                    install_state=state,
-                )
-            else:
-                row.install_state = state
-                row.oauth_client_id = config.oauth_client_id
-                row.oauth_client_secret = config.oauth_client_secret
-                row.redirect_uri = config.redirect_uri
-                row.scopes = config.scopes
-                row.webhook_secret = config.webhook_secret
-            session.add(row)
-            session.commit()
+        _persist_connector_install_config(config, state)
         return {"authorize_url": LinearOAuth(config).authorize_url(state), "state": state}
 
     @app.get("/api/internal/connectors/linear/callback")
@@ -1036,10 +1101,10 @@ def create_app(
         }
 
     def slack_enabled() -> bool:
-        return os.environ.get("AXIOM_CONNECTOR_SLACK_ENABLED", "").lower() in {"1", "true", "yes"}
+        return _connector_configured(slack_config())
 
     def slack_config() -> ConnectorConfig:
-        return ConnectorConfig(
+        return _with_saved_connector_config(ConnectorConfig(
             id="slack",
             vendor="slack",
             oauth_client_id=os.environ.get("AXIOM_SLACK_CLIENT_ID"),
@@ -1051,40 +1116,17 @@ def create_app(
             scopes=SLACK_BOT_SCOPES,
             webhook_secret=os.environ.get("AXIOM_SLACK_SIGNING_SECRET"),
             workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
-        )
+        ))
 
     def require_slack_enabled() -> None:
-        if not slack_enabled():
-            raise HTTPException(status_code=503, detail="Slack connector disabled")
+        _require_connector_configured(slack_config(), "Slack")
 
     @app.post("/api/internal/connectors/slack/install")
     def post_slack_install() -> dict[str, Any]:
         require_slack_enabled()
         config = slack_config()
         state = new_id()
-        with session_local() as session:
-            row = session.get(ConnectorConfigRow, config.id)
-            if row is None:
-                row = ConnectorConfigRow(
-                    id=config.id,
-                    vendor="slack",
-                    oauth_client_id=config.oauth_client_id,
-                    oauth_client_secret=config.oauth_client_secret,
-                    redirect_uri=config.redirect_uri,
-                    scopes=config.scopes,
-                    webhook_secret=config.webhook_secret,
-                    workspace_id=config.workspace_id,
-                    install_state=state,
-                )
-            else:
-                row.install_state = state
-                row.oauth_client_id = config.oauth_client_id
-                row.oauth_client_secret = config.oauth_client_secret
-                row.redirect_uri = config.redirect_uri
-                row.scopes = config.scopes
-                row.webhook_secret = config.webhook_secret
-            session.add(row)
-            session.commit()
+        _persist_connector_install_config(config, state)
         return {"authorize_url": SlackOAuth(config).authorize_url(state), "state": state}
 
     @app.get("/api/internal/connectors/slack/callback")
@@ -1229,10 +1271,10 @@ def create_app(
         }
 
     def notion_enabled() -> bool:
-        return os.environ.get("AXIOM_CONNECTOR_NOTION_ENABLED", "").lower() in {"1", "true", "yes"}
+        return _connector_configured(notion_config())
 
     def notion_config() -> ConnectorConfig:
-        return ConnectorConfig(
+        return _with_saved_connector_config(ConnectorConfig(
             id="notion",
             vendor="notion",
             oauth_client_id=os.environ.get("AXIOM_NOTION_CLIENT_ID"),
@@ -1242,37 +1284,17 @@ def create_app(
                 "/api/internal/connectors/notion/callback",
             ),
             workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
-        )
+        ))
 
     def require_notion_enabled() -> None:
-        if not notion_enabled():
-            raise HTTPException(status_code=503, detail="Notion connector disabled")
+        _require_connector_configured(notion_config(), "Notion")
 
     @app.post("/api/internal/connectors/notion/install")
     def post_notion_install() -> dict[str, Any]:
         require_notion_enabled()
         config = notion_config()
         state = new_id()
-        with session_local() as session:
-            row = session.get(ConnectorConfigRow, config.id)
-            if row is None:
-                row = ConnectorConfigRow(
-                    id=config.id,
-                    vendor="notion",
-                    oauth_client_id=config.oauth_client_id,
-                    oauth_client_secret=config.oauth_client_secret,
-                    redirect_uri=config.redirect_uri,
-                    scopes=[],
-                    workspace_id=config.workspace_id,
-                    install_state=state,
-                )
-            else:
-                row.install_state = state
-                row.oauth_client_id = config.oauth_client_id
-                row.oauth_client_secret = config.oauth_client_secret
-                row.redirect_uri = config.redirect_uri
-            session.add(row)
-            session.commit()
+        _persist_connector_install_config(config, state)
         return {"authorize_url": NotionOAuth(config).authorize_url(state), "state": state}
 
     @app.get("/api/internal/connectors/notion/callback")
@@ -1400,10 +1422,10 @@ def create_app(
         }
 
     def gmail_enabled() -> bool:
-        return os.environ.get("AXIOM_CONNECTOR_GMAIL_ENABLED", "").lower() in {"1", "true", "yes"}
+        return _connector_configured(gmail_config())
 
     def gmail_config() -> ConnectorConfig:
-        return ConnectorConfig(
+        return _with_saved_connector_config(ConnectorConfig(
             id="gmail",
             vendor="gmail",
             oauth_client_id=os.environ.get("AXIOM_GMAIL_CLIENT_ID"),
@@ -1414,38 +1436,17 @@ def create_app(
             ),
             scopes=GMAIL_SCOPES,
             workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
-        )
+        ))
 
     def require_gmail_enabled() -> None:
-        if not gmail_enabled():
-            raise HTTPException(status_code=503, detail="Gmail connector disabled")
+        _require_connector_configured(gmail_config(), "Gmail")
 
     @app.post("/api/internal/connectors/gmail/install")
     def post_gmail_install() -> dict[str, Any]:
         require_gmail_enabled()
         config = gmail_config()
         state = new_id()
-        with session_local() as session:
-            row = session.get(ConnectorConfigRow, config.id)
-            if row is None:
-                row = ConnectorConfigRow(
-                    id=config.id,
-                    vendor="gmail",
-                    oauth_client_id=config.oauth_client_id,
-                    oauth_client_secret=config.oauth_client_secret,
-                    redirect_uri=config.redirect_uri,
-                    scopes=config.scopes,
-                    workspace_id=config.workspace_id,
-                    install_state=state,
-                )
-            else:
-                row.install_state = state
-                row.oauth_client_id = config.oauth_client_id
-                row.oauth_client_secret = config.oauth_client_secret
-                row.redirect_uri = config.redirect_uri
-                row.scopes = config.scopes
-            session.add(row)
-            session.commit()
+        _persist_connector_install_config(config, state)
         return {"authorize_url": GmailOAuth(config).authorize_url(state), "state": state}
 
     @app.get("/api/internal/connectors/gmail/callback")
@@ -1636,7 +1637,12 @@ def create_app(
         event_cutoff = now - timedelta(hours=24)
         receipt_cutoff = now - timedelta(days=7)
         metrics: dict[str, dict[str, Any]] = {}
+        configured: dict[str, bool] = {}
         with session_local() as session:
+            config_rows = {
+                row.vendor: _connector_config_row_to_config(row)
+                for row in session.execute(select(ConnectorConfigRow)).scalars().all()
+            }
             for vendor in vendors:
                 entities_ingested = session.execute(
                     select(func.count(Entity.id)).where(Entity.source_id.startswith(f"{vendor}:"))
@@ -1659,6 +1665,9 @@ def create_app(
                     "events_24h": int(events_24h or 0),
                     "writes_blocked_week": int(writes_blocked or 0),
                 }
+                configured[vendor] = _connector_configured(
+                    config_rows.get(vendor) or _connector_config_for(vendor)
+                )
         return {
             "connectors": [
                 {
@@ -1666,6 +1675,7 @@ def create_app(
                     "status": installed.get(vendor, {}).get("status", "disconnected"),
                     "account_label": installed.get(vendor, {}).get("account_label"),
                     "last_sync_at": installed.get(vendor, {}).get("last_sync_at"),
+                    "configured": configured[vendor],
                     **metrics[vendor],
                     "watch_mode": "polling" if vendor == "notion" else "webhook",
                 }

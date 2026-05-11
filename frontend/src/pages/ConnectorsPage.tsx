@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 type ConnectorStatus = {
   vendor: string;
   status: "connected" | "disconnected" | "error";
+  configured?: boolean;
   account_label?: string | null;
   last_sync_at?: string | null;
   entities_ingested?: number;
@@ -18,6 +19,14 @@ type RecentEvent = {
   received_at?: string;
 };
 
+type SetupForm = {
+  oauth_client_id: string;
+  oauth_client_secret: string;
+  redirect_uri: string;
+  webhook_secret: string;
+  workspace_id: string;
+};
+
 const vendors = [
   { id: "github", label: "GitHub" },
   { id: "linear", label: "Linear" },
@@ -31,6 +40,8 @@ export function ConnectorsPage() {
   const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
   const [drawerVendor, setDrawerVendor] = useState<string | null>(null);
   const [actionMessages, setActionMessages] = useState<Record<string, string>>({});
+  const [setupVendor, setSetupVendor] = useState<string | null>(null);
+  const [setupForm, setSetupForm] = useState<SetupForm>(() => emptySetupForm("github"));
 
   function setActionMessage(vendor: string, message: string) {
     setActionMessages((existing) => ({ ...existing, [vendor]: message }));
@@ -100,12 +111,19 @@ export function ConnectorsPage() {
     [statuses],
   );
 
-  async function connect(vendor: string) {
+  function openSetup(vendor: string) {
+    setSetupVendor(vendor);
+    setSetupForm(emptySetupForm(vendor));
+  }
+
+  async function startInstall(vendor: string) {
     setActionMessage(vendor, "Connecting...");
     try {
       const response = await fetch(`/api/internal/connectors/${vendor}/install`, { method: "POST" });
       if (!response.ok) {
-        setActionMessage(vendor, await responseMessage(response, "Connector install failed"));
+        const message = await responseMessage(response, "Connector install failed");
+        setActionMessage(vendor, message);
+        if (response.status === 409) openSetup(vendor);
         return;
       }
       const payload = await response.json();
@@ -115,6 +133,40 @@ export function ConnectorsPage() {
         return;
       }
       setActionMessage(vendor, "Authorize URL unavailable");
+    } catch {
+      setActionMessage(vendor, "Connector request failed");
+    }
+  }
+
+  async function connect(vendor: string) {
+    const status = byVendor.get(vendor);
+    if (status?.configured === false) {
+      setActionMessage(vendor, "Connector setup required");
+      openSetup(vendor);
+      return;
+    }
+    await startInstall(vendor);
+  }
+
+  async function saveSetup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!setupVendor) return;
+    const vendor = setupVendor;
+    setActionMessage(vendor, "Saving connector setup...");
+    try {
+      const response = await fetch(`/api/internal/connectors/${vendor}/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(setupForm),
+      });
+      if (!response.ok) {
+        setActionMessage(vendor, await responseMessage(response, "Connector setup failed"));
+        return;
+      }
+      await load();
+      setSetupVendor(null);
+      setActionMessage(vendor, "Connector setup saved");
+      await startInstall(vendor);
     } catch {
       setActionMessage(vendor, "Connector request failed");
     }
@@ -192,6 +244,7 @@ export function ConnectorsPage() {
           {vendors.map((vendor) => {
             const status = byVendor.get(vendor.id);
             const connected = status?.status === "connected";
+            const configured = status?.configured !== false;
             const watchMode = status?.watch_mode === "polling" ? "Polling" : null;
             return (
               <div
@@ -205,7 +258,7 @@ export function ConnectorsPage() {
                   </span>
                 </div>
                 <div className="min-w-0 text-[#a9bed8]">
-                  <span>{connected ? status?.account_label || "Connected account" : "No account connected"}</span>
+                  <span>{connected ? status?.account_label || "Connected account" : configured ? "No account connected" : "Setup required"}</span>
                   {connected && watchMode ? (
                     <span className="ml-2 settings-status-muted">{watchMode}</span>
                   ) : null}
@@ -285,6 +338,102 @@ export function ConnectorsPage() {
           </div>
         </section>
       ) : null}
+      {setupVendor ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/72 px-4 backdrop-blur-sm">
+          <form
+            className="w-full max-w-lg rounded-xl border border-[#1a3550]/80 bg-[#06101b]/95 p-6 shadow-[0_0_60px_rgba(0,0,0,0.55)]"
+            onSubmit={(event) => void saveSetup(event)}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Set up ${labelFor(setupVendor)} connector`}
+          >
+            <h3 className="settings-panel-title">Set up {labelFor(setupVendor)}</h3>
+            <p className="mt-2 text-[13px] text-[#9aa8c4]">
+              Add the OAuth app credentials, then AXIOM will open the provider authorization flow.
+            </p>
+            <div className="mt-5 space-y-3">
+              <ConnectorSetupField
+                label="OAuth client ID"
+                value={setupForm.oauth_client_id}
+                onChange={(value) => setSetupForm((form) => ({ ...form, oauth_client_id: value }))}
+              />
+              <ConnectorSetupField
+                label="OAuth client secret"
+                type="password"
+                value={setupForm.oauth_client_secret}
+                onChange={(value) => setSetupForm((form) => ({ ...form, oauth_client_secret: value }))}
+              />
+              <ConnectorSetupField
+                label="Redirect URI"
+                value={setupForm.redirect_uri}
+                onChange={(value) => setSetupForm((form) => ({ ...form, redirect_uri: value }))}
+              />
+              <ConnectorSetupField
+                label={setupVendor === "slack" ? "Signing secret" : "Webhook secret"}
+                type="password"
+                value={setupForm.webhook_secret}
+                onChange={(value) => setSetupForm((form) => ({ ...form, webhook_secret: value }))}
+              />
+              <ConnectorSetupField
+                label="Workspace ID"
+                value={setupForm.workspace_id}
+                onChange={(value) => setSetupForm((form) => ({ ...form, workspace_id: value }))}
+              />
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" className="settings-action-muted" onClick={() => setSetupVendor(null)}>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="settings-action"
+                disabled={!setupForm.oauth_client_id.trim() || !setupForm.oauth_client_secret.trim() || !setupForm.redirect_uri.trim()}
+              >
+                Save & Connect
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function emptySetupForm(vendor: string): SetupForm {
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  return {
+    oauth_client_id: "",
+    oauth_client_secret: "",
+    redirect_uri: `${origin}/api/internal/connectors/${vendor}/callback`,
+    webhook_secret: "",
+    workspace_id: "",
+  };
+}
+
+function labelFor(vendor: string): string {
+  return vendors.find((item) => item.id === vendor)?.label ?? vendor;
+}
+
+function ConnectorSetupField({
+  label,
+  value,
+  onChange,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+}) {
+  return (
+    <label className="block text-[13px] text-[#a9bed8]">
+      <span className="mb-1 block">{label}</span>
+      <input
+        className="h-[38px] w-full rounded-md border border-[#223b5c] bg-[#071225] px-3 text-[#e6f0ff] outline-none focus:border-[#2389ff]"
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
   );
 }
