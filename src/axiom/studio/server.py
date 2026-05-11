@@ -891,10 +891,16 @@ def create_app(
     def get_internal_skills(
         status: str | None = None,
         intent: str | None = None,
+        trigger_type: str | None = None,
     ) -> dict[str, Any]:
         try:
             with session_local() as session:
-                rows = list_skills_with_session(session, status=status, intent=intent)
+                rows = list_skills_with_session(
+                    session,
+                    status=status,
+                    intent=intent,
+                    trigger_type=trigger_type,
+                )
         except Exception as exc:  # noqa: BLE001
             _raise_skill_error(exc)
         return {"skills": [skill_to_dict(row) for row in rows]}

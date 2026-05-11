@@ -10,6 +10,7 @@ export type MCPStats = {
   tools: MCPToolStat[];
   connected_clients: number;
   active_agents: string[];
+  observed_agents?: string[];
   last_tool_call: number | null;
   recent_actions: Array<{
     agent_name: string;

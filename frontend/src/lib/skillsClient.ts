@@ -3,6 +3,8 @@ export type Skill = {
   name: string;
   description: string;
   intent: string;
+  trigger_type: string;
+  trigger_config: Record<string, unknown>;
   prompt_template: string;
   llm_provider: string;
   llm_model: string;
@@ -50,8 +52,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function listSkills(): Promise<Skill[]> {
-  const data = await request<{ skills: Skill[] }>("/api/internal/skills");
+export async function listSkills(options: { triggerType?: string } = {}): Promise<Skill[]> {
+  const params = new URLSearchParams();
+  if (options.triggerType) params.set("trigger_type", options.triggerType);
+  const query = params.toString();
+  const data = await request<{ skills: Skill[] }>(`/api/internal/skills${query ? `?${query}` : ""}`);
   return data.skills;
 }
 

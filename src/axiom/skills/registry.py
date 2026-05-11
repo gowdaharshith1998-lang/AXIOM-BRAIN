@@ -178,12 +178,17 @@ def list_skills_with_session(
     *,
     status: str | None = None,
     intent: str | None = None,
+    trigger_type: str | None = None,
 ) -> list[Skill]:
     stmt = select(Skill)
     if status is not None:
         stmt = stmt.where(Skill.status == _validate_choice(status, VALID_STATUSES, "status"))
     if intent is not None:
         stmt = stmt.where(Skill.intent == _validate_choice(intent, VALID_INTENTS, "intent"))
+    if trigger_type is not None:
+        stmt = stmt.where(
+            Skill.trigger_type == _validate_choice(trigger_type, VALID_TRIGGER_TYPES, "trigger_type")
+        )
     stmt = stmt.order_by(desc(Skill.created_at), Skill.name)
     return session.execute(stmt).scalars().all()
 

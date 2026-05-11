@@ -10,6 +10,10 @@ import { QueryBar } from "@/components/QueryBar";
 import { StatusFooter } from "@/components/StatusFooter";
 import { BrainSocket } from "@/lib/websocket";
 import { AgentsPage } from "@/pages/AgentsPage";
+import { ActivityPage } from "@/pages/agents/ActivityPage";
+import { RuntimePage } from "@/pages/agents/RuntimePage";
+import { SchedulesPage } from "@/pages/agents/SchedulesPage";
+import { TriggersPage } from "@/pages/agents/TriggersPage";
 import { ExplorePage } from "@/pages/ExplorePage";
 import { GovernancePage } from "@/pages/GovernancePage";
 import { InsightsPage } from "@/pages/InsightsPage";
@@ -237,7 +241,11 @@ export function App() {
           <Route path="/graph" element={<GraphPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/settings/passports" element={<PassportsPage />} />
-          <Route path="/agents/*" element={<AgentsPage />} />
+          <Route path="/agents" element={<AgentsPage />} />
+          <Route path="/agents/schedules" element={<SchedulesPage />} />
+          <Route path="/agents/triggers" element={<TriggersPage />} />
+          <Route path="/agents/runtime" element={<RuntimePage />} />
+          <Route path="/agents/activity" element={<ActivityPage />} />
           <Route path="/skills" element={<SkillsPage />} />
           <Route path="/explore/*" element={<ExplorePage />} />
           <Route path="/insights" element={<InsightsPage />} />

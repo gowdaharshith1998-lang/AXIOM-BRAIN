@@ -70,6 +70,13 @@ export async function listAgentReceipts(agentName: string): Promise<ReceiptRow[]
   return data.receipts;
 }
 
+export async function listRecentReceipts(limit = 50): Promise<ReceiptRow[]> {
+  const data = await request<{ receipts: ReceiptRow[] }>(
+    `/api/internal/receipts?limit=${encodeURIComponent(String(limit))}`,
+  );
+  return data.receipts;
+}
+
 export function passportLabel(passport: Passport): string {
   return `${passport.agent_name} · ${passport.status} · ${passport.passport_id.slice(0, 8)}`;
 }
