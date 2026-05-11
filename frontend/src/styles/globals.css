@@ -284,7 +284,9 @@ body {
 }
 
 .explore-tabs a,
-.explore-tabs button {
+.explore-tabs button,
+.explore-tabs select,
+.explore-tab-note {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -298,6 +300,14 @@ body {
   color: #93a5bd;
   font-size: 12px;
   text-decoration: none;
+}
+
+.explore-tabs select {
+  outline: 0;
+}
+
+.explore-tab-note {
+  cursor: default;
 }
 
 .explore-tabs a.is-active {
@@ -503,6 +513,11 @@ body {
   border-radius: 6px;
   background: rgba(17, 55, 113, 0.42);
   color: #dce9ff;
+}
+
+.explore-pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
 }
 
 .explore-side {
@@ -1200,6 +1215,7 @@ body {
 
 .gov-select,
 .gov-filters button,
+.gov-filter-chip,
 .gov-table-tools button,
 .gov-lineage-controls button,
 .gov-wide-button,
@@ -1399,9 +1415,20 @@ body {
 }
 
 .gov-filters button strong,
+.gov-filter-chip strong,
 .gov-lineage-controls strong {
   color: #e7f1ff;
   font-weight: 500;
+}
+
+.gov-filter-chip {
+  min-height: 34px;
+  border: 1px solid #213c5f;
+  border-radius: 6px;
+  background: rgba(5, 15, 31, 0.72);
+  padding: 0 12px;
+  color: #8ea6c5;
+  font-size: 12px;
 }
 
 .gov-side-stack {
@@ -2220,6 +2247,10 @@ body {
   background: rgba(5, 15, 31, 0.75);
   padding: 0 14px;
   color: #dbe8f8;
+}
+
+.ins-filter-button {
+  cursor: default;
 }
 
 .ins-select span {

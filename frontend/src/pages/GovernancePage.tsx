@@ -362,11 +362,11 @@ function SearchAndFilters({ placeholder, dense = false }: { placeholder: string;
   return (
     <div className={cx("gov-filters", dense && "is-dense")}>
       <label className="gov-search"><Icon name="search" /> <input placeholder={placeholder} /></label>
-      <button type="button">Scope <strong>All</strong></button>
-      <button type="button">Status <strong>All</strong></button>
-      <button type="button">Category <strong>All</strong></button>
-      <button type="button"><Icon name="filter" /> More Filters</button>
-      {dense ? <button type="button"><Icon name="download" /> Export</button> : <button type="button" aria-label="List"><Icon name="menu" /></button>}
+      <span className="gov-filter-chip">Scope <strong>All</strong></span>
+      <span className="gov-filter-chip">Status <strong>All</strong></span>
+      <span className="gov-filter-chip">Category <strong>All</strong></span>
+      <span className="gov-filter-chip"><Icon name="filter" /> Search filters applied live</span>
+      {dense ? <span className="gov-filter-chip"><Icon name="download" /> Export in receipts tab</span> : <span className="gov-filter-chip" aria-label="List"><Icon name="menu" /></span>}
     </div>
   );
 }
@@ -451,7 +451,7 @@ function OverviewPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
               <span>Source<br /><b>receipts table</b></span>
             </div>
           </div>
-          <button type="button" className="gov-wide-button">Current Sequence {formatNumber(summary.current_seq)}</button>
+          <div className="gov-wide-button">Current Sequence {formatNumber(summary.current_seq)}</div>
         </Panel>
       </div>
     </>
@@ -615,7 +615,7 @@ function ChecksPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
       </div>
       <div className="gov-grid checks-main">
         <Panel title="Checks Queue" action={<StatusPill>Live</StatusPill>}>
-          <div className="gov-table-tools"><button type="button"><Icon name="filter" /> Filters</button><label className="gov-search"><Icon name="search" /><input placeholder="Search checks..." /></label></div>
+          <div className="gov-table-tools"><span className="gov-filter-chip"><Icon name="filter" /> Search checks</span><label className="gov-search"><Icon name="search" /><input placeholder="Search checks..." /></label></div>
           <GovernanceTable
             columns={[
               { key: "entity", label: "Entity" },
@@ -713,9 +713,9 @@ function LineagePage({ snapshot }: { snapshot: GovernanceSnapshot }) {
   return (
     <>
       <div className="gov-lineage-controls">
-        <button type="button">Source <strong>entities and edges tables</strong></button>
-        <button type="button">Records <strong>{formatNumber(snapshot.summary.graph_entity_count)}</strong></button>
-        <button type="button">Edges <strong>{formatNumber(snapshot.summary.graph_edge_count)}</strong></button>
+        <span className="gov-filter-chip">Source <strong>entities and edges tables</strong></span>
+        <span className="gov-filter-chip">Records <strong>{formatNumber(snapshot.summary.graph_entity_count)}</strong></span>
+        <span className="gov-filter-chip">Edges <strong>{formatNumber(snapshot.summary.graph_edge_count)}</strong></span>
       </div>
       <div className="gov-grid lineage-kpis">
         <KpiCard title="Entities" value={formatNumber(snapshot.summary.graph_entity_count)} detail="Stored graph nodes" accent="green" icon="shield" />
@@ -766,7 +766,13 @@ function LineagePage({ snapshot }: { snapshot: GovernanceSnapshot }) {
 }
 
 function AuditLogPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
-  const rows = snapshot.audit_events.map((event) => ({
+  const [sourceFilter, setSourceFilter] = useState<"all" | "actions" | "mcp">("all");
+  const filteredEvents = snapshot.audit_events.filter((event) => {
+    if (sourceFilter === "actions") return event.category !== "mcp_event";
+    if (sourceFilter === "mcp") return event.category === "mcp_event";
+    return true;
+  });
+  const rows = filteredEvents.map((event) => ({
     timestamp: formatEventTime(event),
     actor: <span className="gov-name-cell"><Icon name={event.actor?.includes("@") ? "user" : "code"} />{recorded(event.actor)}</span>,
     action: recorded(event.action),
@@ -775,7 +781,7 @@ function AuditLogPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
     result: <StatusPill tone={resultTone(event.result)}>{titleCase(event.result)}</StatusPill>,
     source: event.source,
   }));
-  const first = snapshot.audit_events[0];
+  const first = filteredEvents[0];
   return (
     <>
       <div className="gov-grid audit-kpis">
@@ -786,7 +792,11 @@ function AuditLogPage({ snapshot }: { snapshot: GovernanceSnapshot }) {
         <KpiCard title="Sources" value={formatNumber(snapshot.summary.source_count)} detail="Recorded source rows" accent="amber" icon="database" />
       </div>
       <div className="gov-audit-tabs">
-        {["All Events", "Persisted Actions", "MCP Events"].map((item, index) => <button key={item} type="button" className={index === 0 ? "is-active" : ""}>{item}</button>)}
+        {[
+          ["all", "All Events"],
+          ["actions", "Persisted Actions"],
+          ["mcp", "MCP Events"],
+        ].map(([id, label]) => <button key={id} type="button" className={sourceFilter === id ? "is-active" : ""} onClick={() => setSourceFilter(id as typeof sourceFilter)}>{label}</button>)}
       </div>
       <SearchAndFilters placeholder="Search events, actors, entities, actions..." />
       <div className="gov-grid audit-main">

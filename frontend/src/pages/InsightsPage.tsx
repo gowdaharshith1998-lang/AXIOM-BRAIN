@@ -212,7 +212,7 @@ function HeaderTools({ timeRange, setTimeRange, dataAsOf }: { timeRange: string;
         </select>
         <Icon name="calendar" />
       </label>
-      <button type="button"><Icon name="filter" /> Filters</button>
+      <span className="ins-filter-button"><Icon name="filter" /> Time range filters metrics</span>
     </div>
   );
 }
@@ -446,7 +446,7 @@ function TrendsTab({ data }: { data: RealData }) {
       <div className="ins-trends-top">
         <div className="ins-date"><span>{data.days}-day window</span><Icon name="calendar" /></div>
         <label className="ins-search"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search real metrics..." /></label>
-        <button type="button" className="ins-filter-button"><Icon name="filter" /> Filters</button>
+        <span className="ins-filter-button"><Icon name="filter" /> Search filters metrics</span>
         <TrendHighlight title="Most Connected Entity" value={buildDegreeRows(data.entities, data.edges)[0]?.entity ? titleForEntity(buildDegreeRows(data.entities, data.edges)[0].entity) : "N/A"} delta={buildDegreeRows(data.entities, data.edges)[0] ? `${buildDegreeRows(data.entities, data.edges)[0].degree} edges` : "No edges"} accent="blue" />
         <TrendHighlight title="Active Real Agents" value={formatNumber(realAgentNames(data).length)} delta="From non-demo actions and MCP stats" accent="green" />
         <TrendHighlight title="Success Rate" value={formatPercent(receiptSuccessRate(data.receipts), 1)} delta="From real receipts" accent="purple" />
@@ -454,7 +454,7 @@ function TrendsTab({ data }: { data: RealData }) {
 
       <div className="ins-grid ins-trend-grid">
         {cards.map((card) => (
-          <Panel key={card.title} title={card.title} action={<button type="button" className="ins-icon-button"><Icon name="menu" /></button>}>
+          <Panel key={card.title} title={card.title} action={<span className="ins-icon-button" aria-hidden="true"><Icon name="menu" /></span>}>
             <div className="ins-trend-metric"><strong>{formatNumber(card.value)}</strong><span>{card.detail}</span></div>
             <MiniLineChart accent={card.accent} points={card.points} />
           </Panel>

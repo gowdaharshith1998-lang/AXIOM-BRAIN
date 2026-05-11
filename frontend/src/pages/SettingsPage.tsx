@@ -179,7 +179,7 @@ export function SettingsPage() {
             </div>
           </div>
           <Panel title="Invite Member" subtitle="Add a new member to your workspace.">
-            <button disabled title="Phase 11 — multi-tenant" className="h-[38px] w-full rounded-md border border-[#2b558a] text-[#88add5] opacity-70">Send Invitation</button>
+            <div title="Phase 11 — multi-tenant" className="flex h-[38px] w-full items-center justify-center rounded-md border border-[#2b558a] text-[#88add5] opacity-70">Invitations are not enabled yet</div>
           </Panel>
         </div>
       )}

@@ -266,7 +266,7 @@ function tableColumns(section: Section): TableColumn[] {
 }
 
 function buildRows(entities: Entity[], graphIndex: GraphIndex, selectedId: string | null, onSelect: (entity: Entity) => void): TableRow[] {
-  return entities.slice(0, 10).map((entity) => {
+  return entities.map((entity) => {
     const status = statusFor(entity);
     const degree = degreeFor(entity, graphIndex);
     return {
@@ -299,6 +299,7 @@ function DataTable({ columns, rows }: { columns: TableColumn[]; rows: TableRow[]
 }
 
 function DetailPanel({ entity, connected, graphIndex }: { entity: Entity | null; connected: Entity[]; graphIndex: GraphIndex }) {
+  const [activeTab, setActiveTab] = useState<"details" | "relationships" | "activity">("details");
   if (!entity) {
     return (
       <aside className="explore-side">
@@ -316,24 +317,48 @@ function DetailPanel({ entity, connected, graphIndex }: { entity: Entity | null;
   return (
     <aside className="explore-side">
       <section className="explore-panel detail-panel">
-        <div className="explore-side-tabs"><button className="is-active">Entity Details</button><button>Relationships</button><button>Activity</button></div>
-        <div className="explore-detail-head">
-          <HexIcon name={iconForEntity(entity)} accent={accentForEntity(entity)} />
-          <div><strong>{titleForEntity(entity)}</strong><span>{titleCase(entity.type)}</span><small>{textField(entity, ["description", "summary"], titleCase(entity.cluster_id ?? ""))}</small></div>
-          <StatusPill value={status} />
+        <div className="explore-side-tabs">
+          <button type="button" className={activeTab === "details" ? "is-active" : ""} onClick={() => setActiveTab("details")}>Entity Details</button>
+          <button type="button" className={activeTab === "relationships" ? "is-active" : ""} onClick={() => setActiveTab("relationships")}>Relationships</button>
+          <button type="button" className={activeTab === "activity" ? "is-active" : ""} onClick={() => setActiveTab("activity")}>Activity</button>
         </div>
-        <div className="explore-score"><span>Confidence Score</span><b>{score}%</b><i style={{ width: `${score}%` }} /></div>
-        <div className="explore-detail-grid">
-          <span>Last Updated</span><b>{formatRelative(entity.updated_at)}</b>
-          <span>Owner</span><b>{textField(entity, ["owner", "assignee", "author"])}</b>
-          <span>Team</span><b>{textField(entity, ["team", "department"], titleCase(entity.cluster_id ?? ""))}</b>
-          <span>Criticality</span><b><StatusPill value={score > 94 || degree > 20 ? "High" : score > 88 ? "Medium" : "Low"} /></b>
-          <span>Connected Entities</span><b>{degree}</b>
-        </div>
-        <div className="explore-source-dots">
-          {["#3da3ff", "#ff9d2e", "#18d7a4", "#7c5cff", "#29c6ff"].map((color, index) => <span key={color} style={{ background: color }}>{index < 4 ? "" : "+3"}</span>)}
-        </div>
-        <button type="button" className="explore-wide-button">View Full Details <Icon name="arrow" /></button>
+        {activeTab === "details" ? (
+          <>
+            <div className="explore-detail-head">
+              <HexIcon name={iconForEntity(entity)} accent={accentForEntity(entity)} />
+              <div><strong>{titleForEntity(entity)}</strong><span>{titleCase(entity.type)}</span><small>{textField(entity, ["description", "summary"], titleCase(entity.cluster_id ?? ""))}</small></div>
+              <StatusPill value={status} />
+            </div>
+            <div className="explore-score"><span>Confidence Score</span><b>{score}%</b><i style={{ width: `${score}%` }} /></div>
+            <div className="explore-detail-grid">
+              <span>Last Updated</span><b>{formatRelative(entity.updated_at)}</b>
+              <span>Owner</span><b>{textField(entity, ["owner", "assignee", "author"])}</b>
+              <span>Team</span><b>{textField(entity, ["team", "department"], titleCase(entity.cluster_id ?? ""))}</b>
+              <span>Criticality</span><b><StatusPill value={score > 94 || degree > 20 ? "High" : score > 88 ? "Medium" : "Low"} /></b>
+              <span>Connected Entities</span><b>{degree}</b>
+            </div>
+            <div className="explore-source-dots">
+              {["#3da3ff", "#ff9d2e", "#18d7a4", "#7c5cff", "#29c6ff"].map((color, index) => <span key={color} style={{ background: color }}>{index < 4 ? "" : "+3"}</span>)}
+            </div>
+            <button type="button" className="explore-wide-button" onClick={() => setActiveTab("relationships")}>View Relationships <Icon name="arrow" /></button>
+          </>
+        ) : activeTab === "relationships" ? (
+          <div className="explore-connection-map">
+            <div className="explore-node-core"><HexIcon name={iconForEntity(entity)} accent="blue" /></div>
+            {connected.slice(0, 5).map((item, index) => (
+              <div key={item.id} className="explore-connection-item">
+                <span><HexIcon name={iconForEntity(item)} accent={accentForEntity(item)} /><b>{titleForEntity(item)}</b><small>{titleCase(item.type)}</small></span>
+                <strong>{Math.max(1, degreeFor(item, graphIndex))} connections</strong>
+                <i style={{ "--i": index } as React.CSSProperties} />
+              </div>
+            ))}
+            {connected.length === 0 ? <p className="explore-muted">No direct graph connections recorded.</p> : null}
+          </div>
+        ) : (
+          <div className="explore-timeline">
+            {timeline.map((item, index) => <div key={`${item}-${index}`}><HexIcon name={index === 0 ? "doc" : "hex"} accent={index % 2 ? "purple" : "blue"} /><span>{item}</span><small>{index === 0 ? formatRelative(entity.updated_at) : `${index}m ago`}</small></div>)}
+          </div>
+        )}
       </section>
       <section className="explore-panel">
         <h2>Top Connections</h2>
@@ -354,13 +379,13 @@ function DetailPanel({ entity, connected, graphIndex }: { entity: Entity | null;
         <div className="explore-timeline">
           {timeline.map((item, index) => <div key={`${item}-${index}`}><HexIcon name={index === 0 ? "doc" : "hex"} accent={index % 2 ? "purple" : "blue"} /><span>{item}</span><small>{index === 0 ? formatRelative(entity.updated_at) : `${index}m ago`}</small></div>)}
         </div>
-        <button type="button" className="explore-wide-button">View Full Timeline <Icon name="arrow" /></button>
+        <button type="button" className="explore-wide-button" onClick={() => setActiveTab("activity")}>View Full Timeline <Icon name="arrow" /></button>
       </section>
     </aside>
   );
 }
 
-function SuggestedSearches({ section }: { section: Section }) {
+function SuggestedSearches({ section, onPick }: { section: Section; onPick: (value: string) => void }) {
   const items = section === "all"
     ? ["What decisions affected billing?", "Who owns payroll integration?", "Show open security incidents", "Which systems depend on Stripe?", "What policies govern data retention?"]
     : [`Show related ${sections.find((item) => item.id === section)?.label.toLowerCase()}`, "Find stale records", "Show high-confidence entities", "List missing owners", "Trace dependencies"];
@@ -368,7 +393,7 @@ function SuggestedSearches({ section }: { section: Section }) {
     <section className="explore-suggestions">
       <h2>Suggested Searches</h2>
       <div>
-        {items.map((item, index) => <button key={item} type="button"><strong>{item}</strong><span>{index + 3} related entities</span></button>)}
+        {items.map((item, index) => <button key={item} type="button" onClick={() => onPick(item)}><strong>{item}</strong><span>{index + 3} related entities</span></button>)}
       </div>
     </section>
   );
@@ -383,6 +408,8 @@ export function ExplorePage() {
   const [data, setData] = useState<ExploreData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState<"all" | "high-confidence" | "missing-owner" | "recent">("all");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -406,7 +433,17 @@ export function ExplorePage() {
   const entities = data?.entities ?? [];
   const edges = data?.edges ?? [];
   const graphIndex = useMemo(() => buildGraphIndex(edges), [edges]);
-  const sorted = useMemo(() => sortEntities(filterEntities(entities, section, query), graphIndex), [entities, graphIndex, section, query]);
+  const filtered = useMemo(() => {
+    const rows = filterEntities(entities, section, query);
+    if (activeFilter === "high-confidence") return rows.filter((entity) => confidence(entity) >= 90);
+    if (activeFilter === "missing-owner") return rows.filter((entity) => textField(entity, ["owner", "assignee", "author"], "") === "");
+    if (activeFilter === "recent") {
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      return rows.filter((entity) => new Date(entity.updated_at || entity.created_at).getTime() >= cutoff);
+    }
+    return rows;
+  }, [activeFilter, entities, query, section]);
+  const sorted = useMemo(() => sortEntities(filtered, graphIndex), [filtered, graphIndex]);
   const selected = useMemo(() => sorted.find((entity) => entity.id === selectedId) ?? sorted[0] ?? null, [selectedId, sorted]);
   const entitiesById = useMemo(() => new Map(entities.map((entity) => [entity.id, entity])), [entities]);
   const connected = useMemo(() => connectedEntities(selected, entitiesById, graphIndex), [selected, entitiesById, graphIndex]);
@@ -418,10 +455,20 @@ export function ExplorePage() {
   }, [entities]);
 
   const columns = tableColumns(section);
-  const rows = buildRows(sorted, graphIndex, selected?.id ?? null, (entity) => setSelectedId(entity.id));
+  const totalPages = Math.max(1, Math.ceil(sorted.length / 10));
+  const pageRows = sorted.slice((page - 1) * 10, page * 10);
+  const rows = buildRows(pageRows, graphIndex, selected?.id ?? null, (entity) => setSelectedId(entity.id));
   const sectionCount = sorted.length;
   const clusterRows = Object.values(data?.clusterHealth ?? {}).filter((item) => typeof item.ingest_rate_per_min === "number");
   const eventsPerMin = clusterRows.reduce((sum, item) => sum + item.ingest_rate_per_min, 0);
+
+  useEffect(() => {
+    setPage(1);
+  }, [activeFilter, query, section]);
+
+  useEffect(() => {
+    setPage((value) => Math.min(value, totalPages));
+  }, [totalPages]);
 
   return (
     <div className="explore-stage">
@@ -448,10 +495,15 @@ export function ExplorePage() {
             {item.label}
           </Link>
         ))}
-        <button type="button">More⌄</button>
+        <span className="explore-tab-note">All categories shown</span>
         <span className="explore-tab-spacer" />
-        <button type="button"><Icon name="filter" /> Filters</button>
-        <button type="button"><Icon name="saved" /> Saved Views</button>
+        <select aria-label="Explore filter" value={activeFilter} onChange={(event) => setActiveFilter(event.target.value as typeof activeFilter)}>
+          <option value="all">All Records</option>
+          <option value="high-confidence">High Confidence</option>
+          <option value="missing-owner">Missing Owner</option>
+          <option value="recent">Updated This Week</option>
+        </select>
+        <button type="button" onClick={() => { setQuery(""); setActiveFilter("all"); }}><Icon name="saved" /> Reset View</button>
       </nav>
 
       <main className="explore-grid">
@@ -462,9 +514,15 @@ export function ExplorePage() {
               <span>{formatNumber(sectionCount)} results</span>
             </div>
             {error ? <div className="explore-empty-row">Unable to load Explore data: {error}</div> : <DataTable columns={columns} rows={rows} />}
-            <div className="explore-pagination"><button type="button">‹</button><b>1</b><span>2</span><span>3</span><span>4</span><span>5</span><span>...</span><span>{Math.max(1, Math.ceil(sectionCount / 10))}</span><button type="button">›</button></div>
+            <div className="explore-pagination">
+              <button type="button" disabled={page === 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>‹</button>
+              <b>{page}</b>
+              <span>of</span>
+              <span>{totalPages}</span>
+              <button type="button" disabled={page === totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>›</button>
+            </div>
           </section>
-          <SuggestedSearches section={section} />
+          <SuggestedSearches section={section} onPick={setQuery} />
         </div>
         <DetailPanel entity={selected} connected={connected} graphIndex={graphIndex} />
       </main>
