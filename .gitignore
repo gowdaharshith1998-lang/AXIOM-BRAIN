@@ -28,6 +28,7 @@ axiom_studio_settings.json
 output/
 .playwright-cli/
 .playwright-mcp/
+.worktrees/
 
 # Ruflo / claude-flow init artifacts (added 2026-05-06 via Phase 5 pre-flight)
 .claude/
