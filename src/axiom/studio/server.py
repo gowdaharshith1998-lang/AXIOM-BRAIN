@@ -46,6 +46,15 @@ from axiom.connectors.github.ingest import (
 )
 from axiom.connectors.github.oauth import GITHUB_SCOPES, GitHubOAuth
 from axiom.connectors.github.webhook import GitHubWebhookHandler
+from axiom.connectors.gmail.ingest import fetch_labels as gmail_fetch_labels
+from axiom.connectors.gmail.ingest import fetch_messages_in_thread as gmail_fetch_messages_in_thread
+from axiom.connectors.gmail.ingest import fetch_threads as gmail_fetch_threads
+from axiom.connectors.gmail.ingest import normalize_label as gmail_normalize_label
+from axiom.connectors.gmail.ingest import normalize_message as gmail_normalize_message
+from axiom.connectors.gmail.ingest import normalize_thread as gmail_normalize_thread
+from axiom.connectors.gmail.ingest import thread_to_message_edge as gmail_thread_to_message_edge
+from axiom.connectors.gmail.oauth import GMAIL_SCOPES, GmailOAuth
+from axiom.connectors.gmail.webhook import GmailWebhookHandler
 from axiom.connectors.ingest import apply_to_brain
 from axiom.connectors.linear.ingest import fetch_issues_for_team as linear_fetch_issues_for_team
 from axiom.connectors.linear.ingest import fetch_projects as linear_fetch_projects
@@ -1389,6 +1398,184 @@ def create_app(
             "last_sync_at": _iso(row.last_sync_at),
             "watch_mode": "polling",
         }
+
+    def gmail_enabled() -> bool:
+        return os.environ.get("AXIOM_CONNECTOR_GMAIL_ENABLED", "").lower() in {"1", "true", "yes"}
+
+    def gmail_config() -> ConnectorConfig:
+        return ConnectorConfig(
+            id="gmail",
+            vendor="gmail",
+            oauth_client_id=os.environ.get("AXIOM_GMAIL_CLIENT_ID"),
+            oauth_client_secret=os.environ.get("AXIOM_GMAIL_CLIENT_SECRET"),
+            redirect_uri=os.environ.get(
+                "AXIOM_GMAIL_REDIRECT_URI",
+                "/api/internal/connectors/gmail/callback",
+            ),
+            scopes=GMAIL_SCOPES,
+            workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
+        )
+
+    def require_gmail_enabled() -> None:
+        if not gmail_enabled():
+            raise HTTPException(status_code=503, detail="Gmail connector disabled")
+
+    @app.post("/api/internal/connectors/gmail/install")
+    def post_gmail_install() -> dict[str, Any]:
+        require_gmail_enabled()
+        config = gmail_config()
+        state = new_id()
+        with session_local() as session:
+            row = session.get(ConnectorConfigRow, config.id)
+            if row is None:
+                row = ConnectorConfigRow(
+                    id=config.id,
+                    vendor="gmail",
+                    oauth_client_id=config.oauth_client_id,
+                    oauth_client_secret=config.oauth_client_secret,
+                    redirect_uri=config.redirect_uri,
+                    scopes=config.scopes,
+                    workspace_id=config.workspace_id,
+                    install_state=state,
+                )
+            else:
+                row.install_state = state
+                row.oauth_client_id = config.oauth_client_id
+                row.oauth_client_secret = config.oauth_client_secret
+                row.redirect_uri = config.redirect_uri
+                row.scopes = config.scopes
+            session.add(row)
+            session.commit()
+        return {"authorize_url": GmailOAuth(config).authorize_url(state), "state": state}
+
+    @app.get("/api/internal/connectors/gmail/callback")
+    def get_gmail_callback(code: str, state: str) -> dict[str, Any]:
+        require_gmail_enabled()
+        config = gmail_config()
+        oauth_state = GmailOAuth(config).exchange_code(code)
+        with session_local() as session:
+            config_row = session.get(ConnectorConfigRow, config.id)
+            if config_row is None:
+                config_row = ConnectorConfigRow(
+                    id=config.id,
+                    vendor="gmail",
+                    oauth_client_id=config.oauth_client_id,
+                    oauth_client_secret=config.oauth_client_secret,
+                    redirect_uri=config.redirect_uri,
+                    scopes=config.scopes,
+                    workspace_id=config.workspace_id,
+                    install_state=state,
+                )
+                session.add(config_row)
+            row = ConnectorStateRow(
+                id=oauth_state.id,
+                connector_id=config.id,
+                vendor="gmail",
+                access_token=oauth_state.access_token,
+                refresh_token=oauth_state.refresh_token,
+                token_expires_at=oauth_state.token_expires_at,
+                account_id=oauth_state.account_id,
+                account_label=oauth_state.account_label or "Gmail",
+                installed_by=oauth_state.installed_by,
+                status="connected",
+            )
+            session.add(row)
+            session.commit()
+        return {"status": "connected", "account_label": oauth_state.account_label or "Gmail"}
+
+    @app.post("/api/internal/connectors/gmail/sync")
+    async def post_gmail_sync() -> dict[str, Any]:
+        require_gmail_enabled()
+        with session_local() as session:
+            state = session.execute(
+                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "gmail")
+            ).scalars().first()
+            if state is None:
+                raise HTTPException(status_code=404, detail="Gmail connector not installed")
+            token_state = SimpleNamespace(access_token=state.access_token)
+            entities: list[dict[str, Any]] = []
+            edges: list[dict[str, Any]] = []
+            for label in gmail_fetch_labels(token_state):
+                entities.append(gmail_normalize_label(label))
+            for thread in gmail_fetch_threads(token_state):
+                thread_entity = gmail_normalize_thread(thread)
+                entities.append(thread_entity)
+                for message in gmail_fetch_messages_in_thread(token_state, str(thread["id"])):
+                    message_entity = gmail_normalize_message(message)
+                    entities.append(message_entity)
+                    edges.append(
+                        gmail_thread_to_message_edge(thread_entity["nick"], message_entity["nick"])
+                    )
+            count = await apply_to_brain(session, entities, edges, broadcaster=broadcaster)
+            state.last_sync_at = datetime.utcnow()
+            session.add(state)
+            session.commit()
+        return {"status": "ok", "ingested": count}
+
+    @app.post("/api/internal/connectors/gmail/webhook")
+    async def post_gmail_webhook(request: Request) -> dict[str, Any]:
+        require_gmail_enabled()
+        body = await request.body()
+        headers = dict(request.headers)
+        handler = GmailWebhookHandler()
+        parsed_request = SimpleNamespace(body=body, headers=headers)
+        signature_ok = handler.verify(parsed_request)
+        events = handler.parse(parsed_request)
+        with session_local() as session:
+            for event in events:
+                session.add(
+                    ConnectorEventRow(
+                        vendor="gmail",
+                        connector_state_id=None,
+                        event_type=event.event_type,
+                        external_id=event.external_id,
+                        payload=event.payload,
+                        signature_ok=signature_ok,
+                        received_at=datetime.utcnow(),
+                        event_timestamp=event.timestamp,
+                    )
+                )
+            session.commit()
+        for event in events:
+            await broadcaster.publish(
+                {
+                    "type": "connector_event_received",
+                    "source_id": "gmail",
+                    "persisted_id": event.external_id,
+                    "timestamp": datetime_now_ms(),
+                    "payload": {"vendor": "gmail", "event_type": event.event_type},
+                }
+            )
+        return {"ok": signature_ok, "events": len(events)}
+
+    @app.get("/api/internal/connectors/gmail/status")
+    def get_gmail_status() -> dict[str, Any]:
+        require_gmail_enabled()
+        with session_local() as session:
+            row = session.execute(
+                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "gmail")
+            ).scalars().first()
+        if row is None:
+            return {"vendor": "gmail", "status": "disconnected"}
+        return {
+            "vendor": "gmail",
+            "status": row.status,
+            "account_label": row.account_label,
+            "last_sync_at": _iso(row.last_sync_at),
+        }
+
+    @app.delete("/api/internal/connectors/{vendor}")
+    def delete_connector(vendor: str) -> dict[str, Any]:
+        if vendor not in {"github", "linear", "slack", "notion", "gmail"}:
+            raise HTTPException(status_code=404, detail="connector not found")
+        with session_local() as session:
+            rows = session.execute(
+                select(ConnectorStateRow).where(ConnectorStateRow.vendor == vendor)
+            ).scalars().all()
+            for row in rows:
+                session.delete(row)
+            session.commit()
+        return {"status": "disconnected", "vendor": vendor, "revoked": len(rows)}
 
     @app.get("/api/internal/connectors/status")
     def get_connectors_status() -> dict[str, Any]:

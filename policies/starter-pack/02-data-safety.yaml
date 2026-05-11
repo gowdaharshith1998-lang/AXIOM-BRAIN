@@ -1,4 +1,15 @@
 rules:
+  - rule_id: starter.data.external_email_to_internal
+    description: Pause forwarding external Gmail into internal workflows for security review.
+    severity: critical
+    when: connector.vendor(entity) == "gmail" and connector.is_external(entity) == true and action.intent == "forward"
+    then:
+      type: pause
+      reason: "External Gmail forward requested for {entity_id}"
+      approval_required_role: security
+      approval_timeout_seconds: 3600
+    metadata: {category: data_safety, customer_facing: true, tags: [gmail, external, approval]}
+
   - rule_id: starter.data.pii_in_payload
     description: Correct actions that include obvious personal data in their payload.
     severity: warning

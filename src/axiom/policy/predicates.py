@@ -147,6 +147,69 @@ def time_off_hours_utc(
     return hour >= start_hour or hour < end_hour
 
 
+def connector_vendor(
+    _action: Any,
+    _passport: Any,
+    entity: Any,
+    _session: Session | None,
+    target: Any = None,
+) -> str:
+    target_entity = target if target is not None else entity
+    source_id = str(getattr(target_entity, "source_id", "") or "")
+    vendor = source_id.split(":", 1)[0] if ":" in source_id else ""
+    if vendor in {"gmail", "slack", "notion", "linear", "github", "synthetic"}:
+        return vendor
+    data = getattr(target_entity, "data", None)
+    if isinstance(data, dict) and isinstance(data.get("vendor"), str):
+        return str(data["vendor"])
+    return "synthetic"
+
+
+def connector_is_external(
+    _action: Any,
+    _passport: Any,
+    entity: Any,
+    _session: Session | None,
+    target: Any = None,
+) -> bool:
+    target_entity = target if target is not None else entity
+    data = getattr(target_entity, "data", None)
+    if not isinstance(data, dict):
+        return False
+    if data.get("external") is True:
+        return True
+    vendor = connector_vendor(_action, _passport, target_entity, _session)
+    if vendor == "gmail":
+        sender = str(data.get("from") or data.get("sender") or "")
+        workspace_domain = str(data.get("workspace_domain") or "")
+        if not sender or not workspace_domain or "@" not in sender:
+            return False
+        return sender.rsplit("@", 1)[1].lower() != workspace_domain.lower()
+    if vendor == "slack":
+        return data.get("is_im") is True and data.get("is_member") is False
+    return False
+
+
+def connector_sensitive_label(
+    _action: Any,
+    _passport: Any,
+    entity: Any,
+    _session: Session | None,
+    target: Any = None,
+) -> bool:
+    target_entity = target if target is not None else entity
+    data = getattr(target_entity, "data", None)
+    if not isinstance(data, dict):
+        return False
+    raw_labels = data.get("labels") or data.get("labelIds") or data.get("label_ids") or []
+    if isinstance(raw_labels, str):
+        labels = [raw_labels]
+    else:
+        labels = [str(label) for label in raw_labels]
+    sensitive = {"confidential", "legal", "executive"}
+    return any(label.lower() in sensitive for label in labels)
+
+
 PREDICATES: dict[str, PredicateFunc] = {
     "contains_pii": contains_pii_predicate,
     "now": now_predicate,
@@ -155,6 +218,9 @@ PREDICATES: dict[str, PredicateFunc] = {
     "watchdog.alert_count": watchdog_alert_count,
     "rate.same_action_within": rate_same_action_within,
     "time.off_hours_utc": time_off_hours_utc,
+    "connector.is_external": connector_is_external,
+    "connector.vendor": connector_vendor,
+    "connector.sensitive_label": connector_sensitive_label,
 }
 
 

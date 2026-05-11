@@ -31,6 +31,7 @@ describe("ConnectorsPage", () => {
             { vendor: "linear", status: "connected", account_label: "Linear Workspace", last_sync_at: null },
             { vendor: "slack", status: "connected", account_label: "Axiom HQ", last_sync_at: null },
             { vendor: "notion", status: "connected", account_label: "Axiom Wiki", last_sync_at: null },
+            { vendor: "gmail", status: "connected", account_label: "founder@axiom.local", last_sync_at: null },
           ],
         });
       }
@@ -45,6 +46,9 @@ describe("ConnectorsPage", () => {
       }
       if (url === "/api/internal/connectors/notion/install") {
         return jsonResponse({ authorize_url: "https://api.notion.com/v1/oauth/authorize?state=csrf" });
+      }
+      if (url === "/api/internal/connectors/gmail/install") {
+        return jsonResponse({ authorize_url: "https://accounts.google.com/o/oauth2/v2/auth?state=csrf" });
       }
       return jsonResponse({});
     });
@@ -75,7 +79,7 @@ describe("ConnectorsPage", () => {
   it("github_connected_row_shows_account_label", async () => {
     renderPage();
     expect(await screen.findByText("Octo Org")).toBeInTheDocument();
-    expect(screen.getAllByText("Connected")).toHaveLength(4);
+    expect(screen.getAllByText("Connected")).toHaveLength(5);
   });
 
   it("github_sync_now_button_calls_sync_endpoint", async () => {
@@ -137,5 +141,29 @@ describe("ConnectorsPage", () => {
     renderPage();
     expect(await screen.findByText("Axiom Wiki")).toBeInTheDocument();
     expect(screen.getByText("Polling")).toBeInTheDocument();
+  });
+
+  it("gmail_connect_button_opens_google_oauth", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === "/api/internal/connectors/status") return jsonResponse({ connectors: [] });
+      if (url === "/api/internal/connectors/gmail/install") {
+        return jsonResponse({ authorize_url: "https://accounts.google.com/o/oauth2/v2/auth?state=csrf" });
+      }
+      return jsonResponse({});
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Gmail" }));
+    await waitFor(() => expect(window.open).toHaveBeenCalledWith("https://accounts.google.com/o/oauth2/v2/auth?state=csrf", "axiom-gmail-oauth", "width=720,height=780"));
+  });
+
+  it("gmail_connected_row_shows_email_label", async () => {
+    renderPage();
+    expect(await screen.findByText("founder@axiom.local")).toBeInTheDocument();
+  });
+
+  it("connectors_page_disconnect_button_revokes_token", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Disconnect Gmail" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/internal/connectors/gmail", { method: "DELETE" }));
   });
 });

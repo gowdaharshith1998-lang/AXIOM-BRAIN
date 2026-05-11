@@ -94,13 +94,14 @@ def _decision(
     )
 
 
-def test_starter_pack_loads_all_15_rules(starter_rules) -> None:
-    assert len(starter_rules) == 15
+def test_starter_pack_loads_all_16_rules(starter_rules) -> None:
+    assert len(starter_rules) == 16
 
 
 def test_default_policy_root_includes_starter_pack_rules() -> None:
     rule_ids = {rule.rule_id for rule in load_policies_from_dir(Path("policies"))}
     assert "starter.passport.revoked" in rule_ids
+    assert "starter.data.external_email_to_internal" in rule_ids
     assert "starter.watchdog.cluster_outlier" in rule_ids
 
 
@@ -246,7 +247,10 @@ def test_starter_pack_watchdog_critical_alert_pauses(
     assert decision.policy_id == "starter.watchdog.critical_alert_on_target"
 
 
-def test_starter_pack_watchdog_outlier_corrects(starter_rules, starter_sf: sessionmaker[Session]) -> None:
+def test_starter_pack_watchdog_outlier_corrects(
+    starter_rules,
+    starter_sf: sessionmaker[Session],
+) -> None:
     with starter_sf() as session:
         session.add(_entity())
         session.add(

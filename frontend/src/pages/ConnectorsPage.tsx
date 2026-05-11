@@ -48,6 +48,11 @@ export function ConnectorsPage() {
     await load();
   }
 
+  async function disconnect(vendor: string) {
+    await fetch(`/api/internal/connectors/${vendor}`, { method: "DELETE" });
+    await load();
+  }
+
   return (
     <div className="settings-stage">
       <section className="settings-panel">
@@ -85,7 +90,12 @@ export function ConnectorsPage() {
                       >
                         Sync Now
                       </button>
-                      <button type="button" className="settings-action-muted">
+                      <button
+                        type="button"
+                        className="settings-action-muted"
+                        onClick={() => void disconnect(vendor.id)}
+                        aria-label={`Disconnect ${vendor.label}`}
+                      >
                         Disconnect
                       </button>
                     </>
