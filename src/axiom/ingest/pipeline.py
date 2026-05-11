@@ -43,7 +43,11 @@ class IngestPipeline:
             full_data["metadata"] = metadata
 
             entity_dto = crud.create_entity(
-                self.session, entity_type, full_data, source_id=event.source_id
+                self.session,
+                entity_type,
+                full_data,
+                source_id=event.source_id,
+                cluster_id=payload.get("cluster_id"),
             )
             if isinstance(nick, str) and nick:
                 self._nick_to_id[nick] = entity_dto.id
@@ -99,4 +103,3 @@ class IngestPipeline:
                 "payload": {},
             }
         )
-

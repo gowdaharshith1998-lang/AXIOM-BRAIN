@@ -215,10 +215,75 @@ class LLMProviderKey(Base):
     provider: Mapped[str] = mapped_column(String(32), primary_key=True)
     encrypted_key: Mapped[str] = mapped_column(String(8192), nullable=False)
     key_fingerprint: Mapped[str] = mapped_column(String(4), nullable=False)
-    connected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    connected_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
     last_tested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_test_status: Mapped[str] = mapped_column(String(16), nullable=False, default="untested")
     demo_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class ConnectorConfigRow(Base):
+    __tablename__ = "connector_configs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    vendor: Mapped[str] = mapped_column(String(32), nullable=False, index=True, unique=True)
+    oauth_client_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    oauth_client_secret: Mapped[str | None] = mapped_column(String, nullable=True)
+    redirect_uri: Mapped[str | None] = mapped_column(String, nullable=True)
+    scopes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    webhook_secret: Mapped[str | None] = mapped_column(String, nullable=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    install_state: Mapped[str] = mapped_column(String(32), nullable=False, default="not_installed")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True
+    )
+
+
+class ConnectorStateRow(Base):
+    __tablename__ = "connector_states"
+    __table_args__ = (
+        Index("ix_connector_states_vendor_status", "vendor", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    connector_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("connector_configs.id"), nullable=False, index=True
+    )
+    vendor: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    access_token: Mapped[str] = mapped_column(String, nullable=False)
+    refresh_token: Mapped[str | None] = mapped_column(String, nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    account_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    account_label: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    installed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="connected", index=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True
+    )
+
+
+class ConnectorEventRow(Base):
+    __tablename__ = "connector_events"
+    __table_args__ = (
+        Index("ix_connector_events_vendor_received", "vendor", "received_at"),
+        Index("ix_connector_events_external", "vendor", "external_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    vendor: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    connector_state_id: Mapped[str | None] = mapped_column(
+        String(32), ForeignKey("connector_states.id"), nullable=True, index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    external_id: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    signature_ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    event_timestamp: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
 
 class Action(Base):
@@ -268,12 +333,16 @@ class SkillRun(Base):
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    skill_id: Mapped[str] = mapped_column(String(32), ForeignKey("skills.id"), nullable=False, index=True)
+    skill_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("skills.id"), nullable=False, index=True
+    )
     run_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
     input_payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     output_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    receipt_id: Mapped[str | None] = mapped_column(String, ForeignKey("receipts.id"), nullable=True, index=True)
+    receipt_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("receipts.id"), nullable=True, index=True
+    )
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     agent_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)

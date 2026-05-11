@@ -17,8 +17,9 @@ def create_entity(
     data: dict[str, Any],
     *,
     source_id: str | None = None,
+    cluster_id: str | None = None,
 ) -> EntityDTO:
-    entity = Entity(type=type_, data=data, source_id=source_id)
+    entity = Entity(type=type_, data=data, source_id=source_id, cluster_id=cluster_id)
     session.add(entity)
     session.commit()
     session.refresh(entity)
@@ -154,4 +155,3 @@ def remove_edge(session: Session, edge_id: str) -> bool:
     session.delete(edge)
     session.commit()
     return True
-
