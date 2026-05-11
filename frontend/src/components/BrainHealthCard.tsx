@@ -15,6 +15,32 @@ function compositeImportanceValue(entity: Entity): number | null {
   return typeof direct === "number" ? direct : typeof nested === "number" ? nested : null;
 }
 
+type BrainHealthMetricPoint = {
+  date?: string;
+  value?: unknown;
+  brain_health_score?: unknown;
+};
+
+type BrainHealthMetricResponse = {
+  timeseries?: BrainHealthMetricPoint[];
+  snapshots?: BrainHealthMetricPoint[];
+};
+
+function normalizeHealthValue(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const normalized = value > 1 ? value / 100 : value;
+  return Math.max(0, Math.min(1, normalized));
+}
+
+function historyFromPayload(payload: BrainHealthMetricResponse): number[] {
+  const points = Array.isArray(payload.timeseries) ? payload.timeseries : payload.snapshots;
+  if (!points) return [];
+  return points
+    .map((point) => normalizeHealthValue(point.value ?? point.brain_health_score))
+    .filter((value): value is number => value !== null)
+    .slice(-36);
+}
+
 export function BrainHealthCard() {
   const entityCount = useBrainStore((s) => s.entities.size);
   const edgeCount = useBrainStore((s) => s.edges.size);
@@ -64,9 +90,8 @@ export function BrainHealthCard() {
   else if ((healthScore ?? 0) >= 0.6) pillKind = "degraded";
   else pillKind = "critical";
 
-  const [history, setHistory] = useState<number[]>(
-    [89, 91, 90, 92, 91, 90, 92, 91, 92, 91, 92, 91, 90, 92, 91, 92, 92, 93, 92, 93, 92, 93, 92, 94, 93, 94, 93, 94, 95, 96, 94, 98, 96, 94, 92, 91],
-  );
+  const [history, setHistory] = useState<number[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
 
   useEffect(() => {
     const onEvent = () => {
@@ -78,20 +103,40 @@ export function BrainHealthCard() {
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadHistory() {
+      try {
+        const response = await fetch(
+          "/api/internal/metrics-snapshots?days=2&metric=brain_health",
+          { signal: controller.signal },
+        );
+        if (!response.ok) throw new Error(`history fetch failed: ${response.status}`);
+        const payload = (await response.json()) as BrainHealthMetricResponse;
+        setHistory(historyFromPayload(payload));
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setHistory([]);
+      } finally {
+        if (!controller.signal.aborted) setHistoryLoaded(true);
+      }
+    }
+
+    void loadHistory();
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
     const timer = window.setInterval(() => {
-      setHistory((items) => {
-        const nextPoint = healthScore ?? items.at(-1) ?? 85;
-        return [...items.slice(-35), nextPoint];
-      });
       setEventTimes((times) => times.filter((time) => Date.now() - time < 60_000));
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [healthScore]);
+  }, []);
 
   const points = history
     .map((value, index) => {
       const x = (index / Math.max(1, history.length - 1)) * 186;
-      const y = 28 - ((value - 80) / 20) * 24;
+      const y = 32 - value * 30;
       return `${x.toFixed(1)},${Math.max(2, Math.min(29, y)).toFixed(1)}`;
     })
     .join(" ");
@@ -141,9 +186,13 @@ export function BrainHealthCard() {
         <Row label="Classified" value={classifiedDisplay} />
         <div className="border-t border-white/10 pt-4">
           <Row label="Health" value={healthDisplay} valueClassName={healthValueClass} />
-          <svg className="mt-3 h-8 w-full overflow-visible" viewBox="0 0 186 32" aria-hidden="true">
-            <polyline points={points} fill="none" stroke="#31f4a3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          {historyLoaded && history.length === 0 ? (
+            <div className="mt-3 text-xs text-[#E8F0FF]/50">Collecting health history...</div>
+          ) : (
+            <svg className="mt-3 h-8 w-full overflow-visible" viewBox="0 0 186 32" aria-hidden="true">
+              <polyline points={points} fill="none" stroke="#31f4a3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
         </div>
       </div>
     </section>

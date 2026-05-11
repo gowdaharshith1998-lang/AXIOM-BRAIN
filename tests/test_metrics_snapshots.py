@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from axiom.govern.snapshots import backfill_snapshots_from_receipts, get_snapshots, take_snapshot
+from axiom.govern.snapshots import (
+    backfill_snapshots_from_receipts,
+    ensure_snapshots_schema,
+    get_snapshots,
+    take_snapshot,
+)
 from axiom.schema.models import Base, Edge, Entity, MetricsSnapshot, Receipt
 from axiom.studio.server import create_app
 
@@ -204,3 +209,67 @@ def test_metrics_endpoint_pagination(tmp_path: Path, monkeypatch) -> None:
 
     assert payload["range_days"] == 2
     assert [row["date"] for row in payload["snapshots"]] == ["2026-05-08", "2026-05-09"]
+
+
+def test_metrics_endpoint_brain_health_metric_returns_last_36_scores(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AXIOM_SNAPSHOT_ENABLED", "0")
+    db_url, sf = _session_factory(tmp_path)
+    with sf() as session:
+        start = date(2026, 4, 1)
+        for index in range(40):
+            day = start + timedelta(days=index)
+            session.add(
+                MetricsSnapshot(
+                    id=day.isoformat(),
+                    snapshot_date=day,
+                    entity_count=index,
+                    edge_count=0,
+                    receipt_count=0,
+                    allow_count=0,
+                    correct_count=0,
+                    deny_count=0,
+                    agent_count=0,
+                    brain_health_score=index / 100,
+                    created_at=datetime.utcnow(),
+                )
+            )
+        session.commit()
+
+    app = create_app(db_url=db_url, enable_organizer=False)
+    with TestClient(app) as client:
+        payload = client.get("/api/internal/metrics-snapshots?days=365&metric=brain_health").json()
+
+    assert payload["metric"] == "brain_health"
+    assert len(payload["timeseries"]) == 36
+    assert payload["timeseries"][0] == {"date": "2026-04-05", "value": 0.04}
+    assert payload["timeseries"][-1] == {"date": "2026-05-10", "value": 0.39}
+    assert payload["snapshots"][-1]["brain_health_score"] == 0.39
+
+
+def test_ensure_snapshots_schema_adds_brain_health_score_column(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy_snapshots.db"
+    engine = create_engine(f"sqlite:///{db_path}", future=True)
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE metrics_snapshots (
+                id VARCHAR PRIMARY KEY,
+                snapshot_date DATE NOT NULL,
+                entity_count INTEGER NOT NULL,
+                edge_count INTEGER NOT NULL,
+                receipt_count INTEGER NOT NULL,
+                allow_count INTEGER NOT NULL,
+                correct_count INTEGER NOT NULL,
+                deny_count INTEGER NOT NULL,
+                agent_count INTEGER NOT NULL,
+                created_at DATETIME NOT NULL
+            )
+            """
+        )
+
+    ensure_snapshots_schema(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("metrics_snapshots")}
+    assert "brain_health_score" in columns

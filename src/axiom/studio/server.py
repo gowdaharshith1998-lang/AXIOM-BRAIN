@@ -749,7 +749,12 @@ def create_app(
         return payload
 
     @app.get("/api/internal/metrics-snapshots")
-    def get_metrics_snapshots(days: int = Query(30, ge=1, le=365)) -> dict[str, Any]:
+    def get_metrics_snapshots(
+        days: int = Query(30, ge=1, le=365),
+        metric: str | None = None,
+    ) -> dict[str, Any]:
+        if metric is not None and metric != "brain_health":
+            raise HTTPException(status_code=400, detail="unsupported metric")
         with session_local() as session:
             if _snapshots_enabled():
                 try:
@@ -757,8 +762,10 @@ def create_app(
                 except Exception:  # noqa: BLE001
                     pass
             rows = get_snapshots(session, days=days)
+        if metric == "brain_health":
+            rows = rows[-36:]
 
-        return {
+        payload = {
             "snapshots": [
                 {
                     "date": row.snapshot_date.isoformat(),
@@ -769,12 +776,23 @@ def create_app(
                     "correct_count": row.correct_count,
                     "deny_count": row.deny_count,
                     "agent_count": row.agent_count,
+                    "brain_health_score": row.brain_health_score,
                     "created_at": _iso(row.created_at),
                 }
                 for row in rows
             ],
             "range_days": days,
         }
+        if metric == "brain_health":
+            payload["metric"] = "brain_health"
+            payload["timeseries"] = [
+                {
+                    "date": row.snapshot_date.isoformat(),
+                    "value": row.brain_health_score,
+                }
+                for row in rows
+            ]
+        return payload
 
     @app.get("/api/internal/cluster-checks")
     def get_internal_cluster_checks(

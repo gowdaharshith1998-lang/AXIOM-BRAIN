@@ -138,6 +138,7 @@ class MetricsSnapshot(Base):
     correct_count: Mapped[int] = mapped_column(Integer, nullable=False)
     deny_count: Mapped[int] = mapped_column(Integer, nullable=False)
     agent_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    brain_health_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
