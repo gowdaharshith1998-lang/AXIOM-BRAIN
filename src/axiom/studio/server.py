@@ -1045,6 +1045,62 @@ def create_app(
             rows = session.execute(select(Edge)).scalars().all()
             return [EdgeDTO.model_validate(r).model_dump(mode="json") for r in rows]
 
+    @app.get("/api/entities/{entity_id}/edges")
+    def get_entity_edges(entity_id: str) -> dict[str, list[dict[str, Any]]]:
+        with session_local() as session:
+            if session.get(Entity, entity_id) is None:
+                raise HTTPException(status_code=404, detail="entity not found")
+            incoming = session.execute(
+                select(Edge).where(Edge.target_id == entity_id).order_by(desc(Edge.created_at), Edge.id)
+            ).scalars().all()
+            outgoing = session.execute(
+                select(Edge).where(Edge.source_id == entity_id).order_by(desc(Edge.created_at), Edge.id)
+            ).scalars().all()
+            return {
+                "incoming": [EdgeDTO.model_validate(row).model_dump(mode="json") for row in incoming],
+                "outgoing": [EdgeDTO.model_validate(row).model_dump(mode="json") for row in outgoing],
+            }
+
+    @app.get("/api/entities/{entity_id}/lineage")
+    def get_entity_lineage(
+        entity_id: str,
+        depth: int = Query(2, ge=0, le=5),
+    ) -> dict[str, list[dict[str, Any]]]:
+        with session_local() as session:
+            root = session.get(Entity, entity_id)
+            if root is None:
+                raise HTTPException(status_code=404, detail="entity not found")
+
+            visited_node_ids = {entity_id}
+            frontier = {entity_id}
+            lineage_edges: dict[str, Edge] = {}
+            for _level in range(depth):
+                if not frontier:
+                    break
+                rows = session.execute(
+                    select(Edge)
+                    .where(Edge.target_id.in_(frontier))
+                    .order_by(desc(Edge.created_at), Edge.id)
+                ).scalars().all()
+                next_frontier: set[str] = set()
+                for edge in rows:
+                    lineage_edges.setdefault(edge.id, edge)
+                    if edge.source_id not in visited_node_ids:
+                        visited_node_ids.add(edge.source_id)
+                        next_frontier.add(edge.source_id)
+                frontier = next_frontier
+
+            nodes = session.execute(
+                select(Entity).where(Entity.id.in_(visited_node_ids)).order_by(Entity.id)
+            ).scalars().all()
+            return {
+                "nodes": [EntityDTO.model_validate(row).model_dump(mode="json") for row in nodes],
+                "edges": [
+                    EdgeDTO.model_validate(row).model_dump(mode="json")
+                    for row in lineage_edges.values()
+                ],
+            }
+
     @app.get("/api/governance")
     def get_governance() -> dict[str, Any]:
         now_ms = datetime_now_ms()
@@ -1246,6 +1302,7 @@ def create_app(
         before: str | None = None,
         agent: str | None = None,
         decision: str | None = None,
+        target_entity_id: str | None = None,
     ) -> dict[str, Any]:
         before_dt: datetime | None = None
         if before:
@@ -1259,6 +1316,8 @@ def create_app(
             filters.append(Receipt.agent_name == agent)
         if decision:
             filters.append(Receipt.decision == decision)
+        if target_entity_id:
+            filters.append(Receipt.target_entity_id == target_entity_id)
 
         with session_local() as session:
             total_query = select(func.count(Receipt.id))

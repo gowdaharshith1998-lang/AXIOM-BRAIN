@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from axiom.ingest.broadcaster import EventBroadcaster
-from axiom.schema.models import Base, Entity, Source
+from axiom.schema.models import Base, Edge, Entity, Source
 from axiom.studio.server import create_app
 
 
@@ -130,6 +130,81 @@ def test_synthetic_default_source_row_present_after_migration(tmp_path: Path) ->
         assert row.source_type == "synthetic"
         assert row.display_name == "Synthetic"
         assert row.connected is True
+
+
+def test_entity_edges_endpoint_returns_both_directions(tmp_path: Path) -> None:
+    db_url = _make_db_url(tmp_path)
+    engine = create_engine(db_url, future=True)
+    Base.metadata.create_all(engine)
+    session_local = sessionmaker(bind=engine, future=True)
+    with session_local() as session:
+        session.add_all([
+            Entity(id="center", type="ticket", data={"title": "Center"}),
+            Entity(id="parent", type="doc", data={"title": "Parent"}),
+            Entity(id="child", type="task", data={"title": "Child"}),
+            Edge(id="edge_in", source_id="parent", target_id="center", relationship="blocks", data={}),
+            Edge(id="edge_out", source_id="center", target_id="child", relationship="creates", data={}),
+        ])
+        session.commit()
+    engine.dispose()
+
+    app = create_app(db_url=db_url)
+    with TestClient(app) as client:
+        response = client.get("/api/entities/center/edges")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert {row["id"] for row in payload["incoming"]} == {"edge_in"}
+    assert {row["id"] for row in payload["outgoing"]} == {"edge_out"}
+
+
+def test_entity_lineage_endpoint_respects_depth(tmp_path: Path) -> None:
+    db_url = _make_db_url(tmp_path)
+    engine = create_engine(db_url, future=True)
+    Base.metadata.create_all(engine)
+    session_local = sessionmaker(bind=engine, future=True)
+    with session_local() as session:
+        session.add_all([
+            Entity(id="leaf", type="ticket", data={"title": "Leaf"}),
+            Entity(id="parent", type="doc", data={"title": "Parent"}),
+            Entity(id="grandparent", type="doc", data={"title": "Grandparent"}),
+            Entity(id="great", type="doc", data={"title": "Great"}),
+            Edge(id="edge_parent", source_id="parent", target_id="leaf", relationship="informs", data={}),
+            Edge(id="edge_grandparent", source_id="grandparent", target_id="parent", relationship="owns", data={}),
+            Edge(id="edge_great", source_id="great", target_id="grandparent", relationship="owns", data={}),
+        ])
+        session.commit()
+    engine.dispose()
+
+    app = create_app(db_url=db_url)
+    with TestClient(app) as client:
+        payload = client.get("/api/entities/leaf/lineage?depth=2").json()
+
+    assert {node["id"] for node in payload["nodes"]} == {"leaf", "parent", "grandparent"}
+    assert {edge["id"] for edge in payload["edges"]} == {"edge_parent", "edge_grandparent"}
+
+
+def test_entity_lineage_handles_cycles(tmp_path: Path) -> None:
+    db_url = _make_db_url(tmp_path)
+    engine = create_engine(db_url, future=True)
+    Base.metadata.create_all(engine)
+    session_local = sessionmaker(bind=engine, future=True)
+    with session_local() as session:
+        session.add_all([
+            Entity(id="a", type="doc", data={"title": "A"}),
+            Entity(id="b", type="doc", data={"title": "B"}),
+            Edge(id="edge_ba", source_id="b", target_id="a", relationship="links", data={}),
+            Edge(id="edge_ab", source_id="a", target_id="b", relationship="links", data={}),
+        ])
+        session.commit()
+    engine.dispose()
+
+    app = create_app(db_url=db_url)
+    with TestClient(app) as client:
+        payload = client.get("/api/entities/a/lineage?depth=5").json()
+
+    assert {node["id"] for node in payload["nodes"]} == {"a", "b"}
+    assert {edge["id"] for edge in payload["edges"]} == {"edge_ba", "edge_ab"}
 
 
 def test_entities_p95_under_50ms_for_100_rows(tmp_path: Path) -> None:

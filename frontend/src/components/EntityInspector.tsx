@@ -1,10 +1,50 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { CLUSTER_LABELS, isClusterId, type ClusterId } from "@/lib/cluster-layout";
 import { superClusterIdForEntity } from "@/lib/cluster-reframe";
-import { useBrainStore, type Entity } from "@/state/brain.store";
+import { useBrainStore, type Edge, type Entity } from "@/state/brain.store";
 
 const tabs = ["Overview", "Connections", "Lineage", "Activity"];
+
+type InspectorReceipt = {
+  id?: string;
+  receipt_id?: string;
+  action_id: string;
+  agent_name: string;
+  intent?: string;
+  target_entity_id?: string | null;
+  decision: string;
+  policy_id?: string;
+  this_hash?: string;
+  merkle_root?: string;
+  signing_scheme?: string;
+  verification_status?: string;
+  created_at?: string;
+  timestamp?: string | null;
+};
+
+type SourceRow = {
+  id?: string;
+  source_id?: string;
+  name?: string;
+  display_name?: string;
+};
+
+type EntityEdges = {
+  incoming: Edge[];
+  outgoing: Edge[];
+};
+
+type EntityLineage = {
+  nodes: Entity[];
+  edges: Edge[];
+};
+
+async function requestJson<T>(path: string): Promise<T> {
+  const response = await fetch(path);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return (await response.json()) as T;
+}
 
 function titleForEntity(entity: Entity): string {
   for (const key of ["title", "name", "subject", "label", "file_path"]) {
@@ -33,6 +73,19 @@ function criticality(entity: Entity): "Low" | "Med" | "High" {
   if (raw.includes("high") || raw.includes("critical")) return "High";
   if (raw.includes("med") || confidence(entity) > 0.65) return "Med";
   return "Low";
+}
+
+function titleCase(value: string | null | undefined): string {
+  if (!value) return "";
+  return value.slice(0, 1).toUpperCase() + value.slice(1).toLowerCase();
+}
+
+function receiptId(receipt: InspectorReceipt): string | null {
+  return receipt.receipt_id ?? receipt.id ?? null;
+}
+
+function receiptHash(receipt: InspectorReceipt | null): string | null {
+  return receipt?.this_hash ?? receipt?.merkle_root ?? null;
 }
 
 export function EntityInspector() {
@@ -96,7 +149,77 @@ function EntityView({
   setActiveTab: (tab: string) => void;
 }) {
   const conf = confidence(entity);
-  const root = stringField(entity, ["merkle_root", "hash", "receipt_hash"], "0x" + entity.id.replace(/[^\da-f]/gi, "").padEnd(12, "0").slice(0, 12));
+  const [receipts, setReceipts] = useState<InspectorReceipt[]>([]);
+  const [receiptDetail, setReceiptDetail] = useState<InspectorReceipt | null>(null);
+  const [sourceName, setSourceName] = useState<string | null>(null);
+  const [entityEdges, setEntityEdges] = useState<EntityEdges>({ incoming: [], outgoing: [] });
+  const [lineage, setLineage] = useState<EntityLineage>({ nodes: [], edges: [] });
+  const latestReceipt = receipts[0] ?? null;
+  const root = receiptHash(receiptDetail) ?? receiptHash(latestReceipt);
+  const policyStatus = latestReceipt ? titleCase(latestReceipt.decision) : "No policy decisions yet.";
+  const signatureStatus = latestReceipt ? receiptDetail?.verification_status ?? "Checking..." : "No receipts yet.";
+  const dataSourceLabel = sourceName ?? entity.source_id ?? "No source recorded.";
+
+  useEffect(() => {
+    let cancelled = false;
+    setReceipts([]);
+    setReceiptDetail(null);
+    setSourceName(null);
+    setEntityEdges({ incoming: [], outgoing: [] });
+    setLineage({ nodes: [], edges: [] });
+
+    async function load() {
+      try {
+        const receiptPayload = await requestJson<{ receipts: InspectorReceipt[] }>(
+          `/api/internal/receipts?target_entity_id=${encodeURIComponent(entity.id)}&limit=20`,
+        );
+        if (cancelled) return;
+        const rows = receiptPayload.receipts ?? [];
+        setReceipts(rows);
+        const firstReceiptId = rows[0] ? receiptId(rows[0]) : null;
+        if (firstReceiptId) {
+          try {
+            const detail = await requestJson<InspectorReceipt>(`/api/internal/receipts/${firstReceiptId}`);
+            if (!cancelled) setReceiptDetail(detail);
+          } catch {
+            if (!cancelled) setReceiptDetail(rows[0]);
+          }
+        }
+      } catch {
+        if (!cancelled) setReceipts([]);
+      }
+
+      try {
+        const sources = await requestJson<SourceRow[]>("/api/sources");
+        if (!cancelled) {
+          const source = sources.find((row) => (row.source_id ?? row.id) === entity.source_id);
+          setSourceName(source?.display_name ?? source?.name ?? null);
+        }
+      } catch {
+        if (!cancelled) setSourceName(null);
+      }
+
+      try {
+        const edgePayload = await requestJson<EntityEdges>(`/api/entities/${encodeURIComponent(entity.id)}/edges`);
+        if (!cancelled) setEntityEdges(edgePayload);
+      } catch {
+        if (!cancelled) setEntityEdges({ incoming: [], outgoing: [] });
+      }
+
+      try {
+        const lineagePayload = await requestJson<EntityLineage>(`/api/entities/${encodeURIComponent(entity.id)}/lineage?depth=2`);
+        if (!cancelled) setLineage(lineagePayload);
+      } catch {
+        if (!cancelled) setLineage({ nodes: [], edges: [] });
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [entity.id, entity.source_id]);
+
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-white/10 p-5">
@@ -131,9 +254,7 @@ function EntityView({
         ))}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
-        {activeTab !== "Overview" ? (
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-[#E8F0FF]/55">This tab is reserved for the next interaction pass.</div>
-        ) : (
+        {activeTab === "Overview" ? (
           <div className="space-y-6">
             <Section title="Overview">
               <p className="text-sm leading-6 text-[#E8F0FF]/68">{stringField(entity, ["description", "summary", "body"], "No description provided by source data.")}</p>
@@ -154,18 +275,20 @@ function EntityView({
               </div>
             </Section>
             <Section title="Trust & Governance">
-              <Fact label="Policy Status" value={conf > 0.4 ? "Compliant" : "Flagged"} />
-              <Fact label="Signed Receipt" value="Verified" />
+              <Fact label="Policy Status" value={policyStatus} />
+              <Fact label="Signed Receipt" value={signatureStatus} />
               <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
                 <div className="text-[10px] uppercase tracking-[0.16em] text-[#E8F0FF]/38">Merkle Root</div>
                 <div className="mt-1 flex items-center gap-2 text-xs text-[#E8F0FF]/72">
-                  <span className="min-w-0 flex-1 truncate">{root}</span>
-                  <button type="button" className="text-[#00E5D8]" onClick={() => void navigator.clipboard?.writeText(root)}>
-                    copy
-                  </button>
+                  <span className="min-w-0 flex-1 truncate">{root ?? "No receipts yet."}</span>
+                  {root ? (
+                    <button type="button" className="text-[#00E5D8]" onClick={() => void navigator.clipboard?.writeText(root)}>
+                      copy
+                    </button>
+                  ) : null}
                 </div>
               </div>
-              <div className="mt-3 text-xs text-[#E8F0FF]/55">Data Sources: CRM · Docs · Receipts</div>
+              <div className="mt-3 text-xs text-[#E8F0FF]/55">Data Source: {dataSourceLabel}</div>
             </Section>
             <Section title="Connected Entities">
               <div className="space-y-2">
@@ -179,9 +302,86 @@ function EntityView({
               </div>
             </Section>
           </div>
+        ) : activeTab === "Connections" ? (
+          <ConnectionsTab edges={entityEdges} />
+        ) : activeTab === "Lineage" ? (
+          <LineageTab lineage={lineage} />
+        ) : (
+          <ActivityTab receipts={receipts} />
         )}
       </div>
     </div>
+  );
+}
+
+function ConnectionsTab({ edges }: { edges: EntityEdges }) {
+  const rows = [
+    ...edges.incoming.map((edge) => ({ ...edge, direction: "Incoming" })),
+    ...edges.outgoing.map((edge) => ({ ...edge, direction: "Outgoing" })),
+  ];
+  return (
+    <Section title="Connections">
+      <div className="space-y-2">
+        {rows.map((edge) => (
+          <div key={`${edge.direction}:${edge.id}`} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+            <div className="flex items-center justify-between gap-3 text-sm text-[#E8F0FF]/80">
+              <span>{edge.relationship}</span>
+              <span className="text-[10px] uppercase tracking-[0.14em] text-[#00E5D8]/70">{edge.direction}</span>
+            </div>
+            <div className="mt-2 break-all text-xs text-[#E8F0FF]/45">{edge.source_id} {"->"} {edge.target_id}</div>
+          </div>
+        ))}
+        {rows.length === 0 ? <div className="text-sm text-[#E8F0FF]/45">No recorded edges for this entity.</div> : null}
+      </div>
+    </Section>
+  );
+}
+
+function LineageTab({ lineage }: { lineage: EntityLineage }) {
+  return (
+    <div className="space-y-6">
+      <Section title="Lineage Nodes">
+        <div className="space-y-2">
+          {lineage.nodes.map((node) => (
+            <div key={node.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+              <div className="truncate text-sm text-[#E8F0FF]/82">{titleForEntity(node)}</div>
+              <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-[#E8F0FF]/38">{node.type}</div>
+            </div>
+          ))}
+          {lineage.nodes.length === 0 ? <div className="text-sm text-[#E8F0FF]/45">No lineage nodes found.</div> : null}
+        </div>
+      </Section>
+      <Section title="Lineage Edges">
+        <div className="space-y-2">
+          {lineage.edges.map((edge) => (
+            <div key={edge.id} className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <div className="text-sm text-[#E8F0FF]/78">{edge.id}</div>
+              <div className="mt-1 text-xs text-[#E8F0FF]/45">{edge.source_id} {"->"} {edge.target_id} · {edge.relationship}</div>
+            </div>
+          ))}
+          {lineage.edges.length === 0 ? <div className="text-sm text-[#E8F0FF]/45">No lineage edges found.</div> : null}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function ActivityTab({ receipts }: { receipts: InspectorReceipt[] }) {
+  return (
+    <Section title="Receipt Activity">
+      <div className="space-y-2">
+        {receipts.map((receipt) => (
+          <div key={receiptId(receipt) ?? receipt.action_id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+            <div className="flex items-center justify-between gap-3 text-sm text-[#E8F0FF]/80">
+              <span>{receipt.action_id}</span>
+              <span className="text-[10px] uppercase tracking-[0.14em] text-[#00E5D8]/70">{receipt.decision}</span>
+            </div>
+            <div className="mt-1 text-xs text-[#E8F0FF]/45">{receipt.agent_name}{receipt.intent ? ` · ${receipt.intent}` : ""}</div>
+          </div>
+        ))}
+        {receipts.length === 0 ? <div className="text-sm text-[#E8F0FF]/45">No receipts yet.</div> : null}
+      </div>
+    </Section>
   );
 }
 
