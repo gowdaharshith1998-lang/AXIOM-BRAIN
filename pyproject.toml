@@ -15,6 +15,8 @@ dependencies = [
     "python-multipart",
     "PyYAML",
     "httpx",
+    "requests",
+    "google-auth",
     "uuid-utils",
     "networkx>=3.0",
     "mcp==1.9.4",
@@ -25,8 +27,10 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio",
     "pytest-cov",
+    "responses",
     "ruff",
     "mypy",
+    "types-PyYAML",
 ]
 
 [build-system]
@@ -45,6 +49,7 @@ select = ["E", "F", "I", "N", "UP", "B", "C4"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+pythonpath = ["src"]
 testpaths = ["tests"]
 
 [tool.mypy]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -164,9 +164,13 @@ def compile_skills_from_processes(
     event_callback: SkillEventCallback | None = None,
 ) -> list[SkillManifest | Skill]:
     emitter = ProcessSkillEmitter(session)
-    manifests = [emitter.emit_one(process_id) for process_id in process_ids] if process_ids else emitter.emit_all()
+    manifests = (
+        [emitter.emit_one(process_id) for process_id in process_ids]
+        if process_ids
+        else emitter.emit_all()
+    )
     if dry_run:
-        return manifests
+        return cast(list[SkillManifest | Skill], manifests)
 
     compiled: list[Skill] = []
     for manifest in manifests:
@@ -205,6 +209,9 @@ def compile_skills_from_processes(
         if event_callback is not None:
             event_callback(
                 "skill_compiled",
-                {"skill": skill_to_dict(row), "process_id": manifest.metadata.get("process_entity_id")},
+                {
+                    "skill": skill_to_dict(row),
+                    "process_id": manifest.metadata.get("process_entity_id"),
+                },
             )
-    return compiled
+    return cast(list[SkillManifest | Skill], compiled)

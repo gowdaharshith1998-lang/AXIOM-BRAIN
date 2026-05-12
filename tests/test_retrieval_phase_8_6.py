@@ -59,14 +59,31 @@ def _seed(sf: sessionmaker[Session]) -> None:
     with sf() as session:
         session.add_all(
             [
-                Entity(id="e1", type="decision", data={"title": "Refund Policy"}, cluster_id="growth_product"),
-                Entity(id="e2", type="doc", data={"title": "Billing Playbook"}, cluster_id="billing_payments"),
-                Entity(id="e3", type="ticket", data={"title": "Support Escalation"}, cluster_id="growth_product"),
+                Entity(
+                    id="e1",
+                    type="decision",
+                    data={"title": "Refund Policy"},
+                    cluster_id="growth_product",
+                ),
+                Entity(
+                    id="e2",
+                    type="doc",
+                    data={"title": "Billing Playbook"},
+                    cluster_id="billing_payments",
+                ),
+                Entity(
+                    id="e3",
+                    type="ticket",
+                    data={"title": "Support Escalation"},
+                    cluster_id="growth_product",
+                ),
             ]
         )
         session.add_all(
             [
-                Edge(id="edge1", source_id="e1", target_id="e3", relationship="references", data={}),
+                Edge(
+                    id="edge1", source_id="e1", target_id="e3", relationship="references", data={}
+                ),
                 Edge(id="edge2", source_id="e2", target_id="e3", relationship="mentions", data={}),
             ]
         )
@@ -141,7 +158,9 @@ def test_semantic_search_uses_embeddings(session_factory: sessionmaker[Session])
     _seed(session_factory)
     provider = _Provider()
     with session_factory() as session:
-        embed_entities_batch(session, session.execute(select(Entity)).scalars().all(), provider=provider)
+        embed_entities_batch(
+            session, session.execute(select(Entity)).scalars().all(), provider=provider
+        )
         rows = semantic_search(session, "billing", top_k=1, provider=provider)
     assert rows[0]["id"] == "e2"
 
@@ -158,7 +177,9 @@ def test_hybrid_search_rrf_returns_breakdown(session_factory: sessionmaker[Sessi
     _seed(session_factory)
     provider = _Provider()
     with session_factory() as session:
-        embed_entities_batch(session, session.execute(select(Entity)).scalars().all(), provider=provider)
+        embed_entities_batch(
+            session, session.execute(select(Entity)).scalars().all(), provider=provider
+        )
         out = hybrid_search(session, "refund", top_k=3, provider=provider)
     assert out["mode"] == "hybrid"
     assert out["results"][0]["id"] == "e1"
@@ -170,7 +191,9 @@ def test_hybrid_search_accepts_weights(session_factory: sessionmaker[Session]) -
     _seed(session_factory)
     provider = _Provider()
     with session_factory() as session:
-        embed_entities_batch(session, session.execute(select(Entity)).scalars().all(), provider=provider)
+        embed_entities_batch(
+            session, session.execute(select(Entity)).scalars().all(), provider=provider
+        )
         out = hybrid_search(
             session,
             "refund",
@@ -186,7 +209,9 @@ def test_hybrid_search_semantic_mode_only(session_factory: sessionmaker[Session]
     _seed(session_factory)
     provider = _Provider()
     with session_factory() as session:
-        embed_entities_batch(session, session.execute(select(Entity)).scalars().all(), provider=provider)
+        embed_entities_batch(
+            session, session.execute(select(Entity)).scalars().all(), provider=provider
+        )
         out = hybrid_search(session, "billing", mode="semantic", top_k=2, provider=provider)
     assert out["results"][0]["id"] == "e2"
     assert out["results"][0]["methods"] == ["semantic"]
@@ -219,7 +244,9 @@ def test_internal_search_endpoint_modes(tmp_path: Path) -> None:
     engine.dispose()
 
     with TestClient(create_app(db_url=db_url)) as client:
-        response = client.post("/api/internal/search", json={"query": "refund", "mode": "lexical", "top_k": 2})
+        response = client.post(
+            "/api/internal/search", json={"query": "refund", "mode": "lexical", "top_k": 2}
+        )
     assert response.status_code == 200
     data = response.json()
     assert data["mode"] == "lexical"
@@ -244,7 +271,9 @@ async def test_organizer_embedding_skip_unchanged(session_factory: sessionmaker[
     assert await agent.embed_changed_entities() == 0
 
 
-def test_provider_prefers_vault_key(monkeypatch: pytest.MonkeyPatch, session_factory: sessionmaker[Session]) -> None:
+def test_provider_prefers_vault_key(
+    monkeypatch: pytest.MonkeyPatch, session_factory: sessionmaker[Session]
+) -> None:
     monkeypatch.setenv("AXIOM_TEST_REAL_EMBEDDINGS", "1")
     monkeypatch.setenv("AXIOM_VAULT_KEY", generate_master_key())
     monkeypatch.setenv("OPENAI_API_KEY", "sk-env")

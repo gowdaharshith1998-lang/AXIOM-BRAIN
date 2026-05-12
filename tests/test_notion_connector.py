@@ -214,9 +214,7 @@ def test_notion_writer_execute_calls_notion_api(tmp_path: Path) -> None:
         ),
     )
 
-    result = writer.execute(
-        writer.propose_action("archive_page", {"page_id": "page_1"})
-    )
+    result = writer.execute(writer.propose_action("archive_page", {"page_id": "page_1"}))
 
     assert result["id"] == "page_1"
     assert responses.calls[0].request.headers["Authorization"] == "Bearer secret_token"

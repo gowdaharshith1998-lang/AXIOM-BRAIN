@@ -18,9 +18,7 @@ from axiom.schema.models import Base, new_id
 
 SecretStatus = Literal["untested", "valid", "invalid", "expired"]
 
-VALID_STATUSES: Final[frozenset[str]] = frozenset(
-    {"untested", "valid", "invalid", "expired"}
-)
+VALID_STATUSES: Final[frozenset[str]] = frozenset({"untested", "valid", "invalid", "expired"})
 
 
 class Secret(Base):

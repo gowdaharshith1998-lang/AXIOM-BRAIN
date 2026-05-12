@@ -27,4 +27,3 @@ def test_ingest_event_allows_entity_or_edge() -> None:
         entity={"nick": "n", "type": "thread", "data": {}, "metadata": {}},
     )
     assert e.entity is not None
-

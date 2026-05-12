@@ -130,6 +130,16 @@ def test_gmail_webhook_verifies_pubsub_jwt() -> None:
     assert GmailWebhookHandler(verifier=lambda token: token == "jwt.token").verify(request)
 
 
+def test_gmail_default_webhook_verifier_fails_closed_without_audience(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from axiom.connectors.gmail.webhook import _default_verify_google_jwt
+
+    monkeypatch.delenv("AXIOM_GMAIL_PUBSUB_AUDIENCE", raising=False)
+
+    assert _default_verify_google_jwt("jwt.token") is False
+
+
 @responses.activate
 def test_gmail_webhook_fetches_history_since_historyid() -> None:
     from axiom.connectors.gmail.webhook import GmailWebhookHandler

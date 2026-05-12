@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, get_type_hints
+from typing import Any, Literal, ParamSpec, TypeVar, get_type_hints
 from uuid import uuid4
 
 import httpx
@@ -59,7 +61,21 @@ from axiom.storage.db import init_engine
 from axiom.studio.sources import ensure_sources_schema, real_sources_snapshot
 
 Direction = Literal["outgoing", "incoming", "both"]
+P = ParamSpec("P")
+R = TypeVar("R")
+ToolCallable = Callable[P, R]
 TITLE_KEYS = ("title", "name", "subject", "label")
+
+
+def _truthy_env(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _allow_system_passport_fallback() -> bool:
+    return (
+        _truthy_env("AXIOM_MCP_ALLOW_SYSTEM_PASSPORT")
+        and os.environ.get("AXIOM_ENV", "").strip().lower() != "production"
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +123,7 @@ def _safe_fts_query(text: str) -> str:
     words = [w for w in text.strip().split() if w]
     if not words:
         return ""
-    escaped = [f'"{w.replace("\"", "\"\"")}"*' for w in words[:6]]
+    escaped = [f'"{w.replace('"', '""')}"*' for w in words[:6]]
     return " AND ".join(escaped)
 
 
@@ -166,7 +182,8 @@ class AxiomMCPService:
         self._cache_ttl_sec = 10.0
         self._fts_conn = sqlite3.connect(":memory:", check_same_thread=False)
         self._fts_conn.execute(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS entities_fts USING fts5(entity_id UNINDEXED, searchable)"
+            "CREATE VIRTUAL TABLE IF NOT EXISTS entities_fts "
+            "USING fts5(entity_id UNINDEXED, searchable)"
         )
         self._sync_state = _SyncState()
         self._policy = policy if policy is not None else get_policy_evaluator(session_factory)
@@ -231,7 +248,9 @@ class AxiomMCPService:
         try:
             if passport_token:
                 return verify_passport(self._session_factory, passport_token)
-            return ensure_system_passport(self._session_factory)
+            if _allow_system_passport_fallback():
+                return ensure_system_passport(self._session_factory)
+            raise PassportError("passport token required")
         except PassportError as exc:
             raise ToolError(str(exc)) from exc
 
@@ -380,11 +399,15 @@ class AxiomMCPService:
                 "guidance": decision.guidance or None,
                 "suggested_alternative": decision.suggested_alternative,
             }
-        return resolved_action_id, cluster_id, {
-            **decision_payload,
-            "passport_id": passport.passport_id,
-            "demo": self._demo_flag_for_target(target_entity_id),
-        }
+        return (
+            resolved_action_id,
+            cluster_id,
+            {
+                **decision_payload,
+                "passport_id": passport.passport_id,
+                "demo": self._demo_flag_for_target(target_entity_id),
+            },
+        )
 
     def _emit_policy_result(
         self,
@@ -486,12 +509,15 @@ class AxiomMCPService:
 
     def _hydrate_action_history_from_receipts(self) -> None:
         with self._session_factory() as session:
-            rows = session.execute(
-                select(Receipt).order_by(desc(Receipt.created_at), desc(Receipt.id))
-            ).scalars().all()
+            rows = (
+                session.execute(
+                    select(Receipt).order_by(desc(Receipt.created_at), desc(Receipt.id))
+                )
+                .scalars()
+                .all()
+            )
         self._action_history = {
-            row.action_id: self._action_output_from_receipt(row)
-            for row in rows
+            row.action_id: self._action_output_from_receipt(row) for row in rows
         }
         self._receipt_index = len(rows)
 
@@ -711,7 +737,9 @@ class AxiomMCPService:
 
     def get_skill(self, skill_id: str) -> dict[str, Any]:
         with self._session_factory() as session:
-            return {"skill": self._skill_discovery_payload(get_skill_with_session(session, skill_id))}
+            return {
+                "skill": self._skill_discovery_payload(get_skill_with_session(session, skill_id))
+            }
 
     def register_skill(
         self,
@@ -911,7 +939,9 @@ class AxiomMCPService:
 
             entity_count = int(session.execute(select(func.count(Entity.id))).scalar_one())
             edge_count = int(session.execute(select(func.count(Edge.id))).scalar_one())
-            last_entity_updated_at = session.execute(select(func.max(Entity.updated_at))).scalar_one()
+            last_entity_updated_at = session.execute(
+                select(func.max(Entity.updated_at))
+            ).scalar_one()
             last_edge_created_at = session.execute(select(func.max(Edge.created_at))).scalar_one()
 
             requires_full_rebuild = (
@@ -961,9 +991,13 @@ class AxiomMCPService:
 
         for edge in edges:
             if edge.source_id in new_cache.outgoing:
-                new_cache.outgoing[edge.source_id].append((edge.target_id, edge.id, edge.relationship))
+                new_cache.outgoing[edge.source_id].append(
+                    (edge.target_id, edge.id, edge.relationship)
+                )
             if edge.target_id in new_cache.incoming:
-                new_cache.incoming[edge.target_id].append((edge.source_id, edge.id, edge.relationship))
+                new_cache.incoming[edge.target_id].append(
+                    (edge.source_id, edge.id, edge.relationship)
+                )
 
         cur = self._fts_conn.cursor()
         cur.execute("DELETE FROM entities_fts")
@@ -981,10 +1015,19 @@ class AxiomMCPService:
         last_entity_updated_at: datetime | None,
         last_edge_created_at: datetime | None,
     ) -> None:
-        if self._sync_state.last_entity_updated_at is not None and last_entity_updated_at is not None:
-            changed_entities = session.execute(
-                select(Entity).where(Entity.updated_at > self._sync_state.last_entity_updated_at)
-            ).scalars().all()
+        if (
+            self._sync_state.last_entity_updated_at is not None
+            and last_entity_updated_at is not None
+        ):
+            changed_entities = (
+                session.execute(
+                    select(Entity).where(
+                        Entity.updated_at > self._sync_state.last_entity_updated_at
+                    )
+                )
+                .scalars()
+                .all()
+            )
             if changed_entities:
                 cur = self._fts_conn.cursor()
                 for row in changed_entities:
@@ -1009,9 +1052,13 @@ class AxiomMCPService:
                 self._fts_conn.commit()
 
         if self._sync_state.last_edge_created_at is not None and last_edge_created_at is not None:
-            new_edges = session.execute(
-                select(Edge).where(Edge.created_at > self._sync_state.last_edge_created_at)
-            ).scalars().all()
+            new_edges = (
+                session.execute(
+                    select(Edge).where(Edge.created_at > self._sync_state.last_edge_created_at)
+                )
+                .scalars()
+                .all()
+            )
             for edge in new_edges:
                 self._cache.outgoing.setdefault(edge.source_id, []).append(
                     (edge.target_id, edge.id, edge.relationship)
@@ -1055,9 +1102,7 @@ class AxiomMCPService:
         for row in out["results"]:
             methods = row.get("methods", [])
             row["matched_on"] = row.get("matched_on") or (
-                "query_match"
-                if "lexical" in methods or "semantic" in methods
-                else "graph_match"
+                "query_match" if "lexical" in methods or "semantic" in methods else "graph_match"
             )
         return out
 
@@ -1099,7 +1144,9 @@ class AxiomMCPService:
         for entity, match_score in seeds:
             candidate_map[entity.id] = self._entity_result(entity, "query_match", match_score)
 
-            neighbors = self._cache.outgoing.get(entity.id, []) + self._cache.incoming.get(entity.id, [])
+            neighbors = self._cache.outgoing.get(entity.id, []) + self._cache.incoming.get(
+                entity.id, []
+            )
             for neighbor_id, edge_id, _rel in neighbors:
                 neighbor = self._cache.entities.get(neighbor_id)
                 if neighbor is None:
@@ -1157,9 +1204,14 @@ class AxiomMCPService:
             }
             if include_neighbors:
                 safe_hops = min(max(hops, 1), 2)
-                neighbors = crud.list_neighbors(session, entity_id, depth=safe_hops, direction="both")
+                neighbors = crud.list_neighbors(
+                    session, entity_id, depth=safe_hops, direction="both"
+                )
                 result["neighbors"] = [
-                    {**neighbor.model_dump(mode="json"), "title": _title_from_data(neighbor.id, neighbor.data)}
+                    {
+                        **neighbor.model_dump(mode="json"),
+                        "title": _title_from_data(neighbor.id, neighbor.data),
+                    }
                     for neighbor in neighbors
                 ]
                 if self._events is not None:
@@ -1271,8 +1323,8 @@ def build_mcp_server(
         name: str,
         description: str,
         annotations: Any | None = None,
-    ) -> Any:
-        def decorator(fn: Any) -> Any:
+    ) -> Callable[[ToolCallable[P, R]], ToolCallable[P, R]]:
+        def decorator(fn: ToolCallable[P, R]) -> ToolCallable[P, R]:
             # MCP 1.9.4 expects runtime annotation classes when checking for Context.
             fn.__annotations__ = get_type_hints(fn)
             mcp.add_tool(fn, name=name, description=description, annotations=annotations)
@@ -1304,7 +1356,7 @@ def build_mcp_server(
         passport_token: str | None = None,
     ) -> dict[str, Any]:
         try:
-            cluster_id, _importance, _alternative = service._entity_context(entity_id)
+            cluster_id, _importance, _alternative, _entity = service._entity_context(entity_id)
             service._require_passport_scope(
                 passport_token=passport_token,
                 intent="read",
@@ -1323,7 +1375,7 @@ def build_mcp_server(
         passport_token: str | None = None,
     ) -> dict[str, Any]:
         try:
-            cluster_id, _importance, _alternative = service._entity_context(from_id)
+            cluster_id, _importance, _alternative, _entity = service._entity_context(from_id)
             service._require_passport_scope(
                 passport_token=passport_token,
                 intent="read",
@@ -1342,7 +1394,10 @@ def build_mcp_server(
         )
         return service.list_sources()
 
-    @tool(name="axiom_record_action", description="Record an external agent action with demo policy evaluation")
+    @tool(
+        name="axiom_record_action",
+        description="Record an external agent action with demo policy evaluation",
+    )
     def axiom_record_action(
         agent_name: str,
         intent: str,
@@ -1396,7 +1451,10 @@ def build_mcp_server(
         except LookupError as exc:
             raise ToolError(str(exc)) from exc
 
-    @tool(name="axiom_list_skills", description="List registered runnable skills with SKILL.md content")
+    @tool(
+        name="axiom_list_skills",
+        description="List registered runnable skills with SKILL.md content",
+    )
     def axiom_list_skills(
         status: str | None = None,
         intent: str | None = None,
@@ -1412,7 +1470,9 @@ def build_mcp_server(
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
 
-    @tool(name="axiom_get_skill", description="Fetch a registered skill by id with SKILL.md content")
+    @tool(
+        name="axiom_get_skill", description="Fetch a registered skill by id with SKILL.md content"
+    )
     def axiom_get_skill(skill_id: str, passport_token: str | None = None) -> dict[str, Any]:
         try:
             service._require_passport_scope(
@@ -1479,6 +1539,8 @@ def build_mcp_server(
     return mcp
 
 
-def serve_stdio(*, db_url: str = "sqlite:///./axiom.db", api_base_url: str = "http://127.0.0.1:8000") -> None:
+def serve_stdio(
+    *, db_url: str = "sqlite:///./axiom.db", api_base_url: str = "http://127.0.0.1:8000"
+) -> None:
     mcp = build_mcp_server(db_url=db_url, api_base_url=api_base_url)
     mcp.run(transport="stdio")

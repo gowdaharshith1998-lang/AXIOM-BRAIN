@@ -173,4 +173,3 @@ def test_fixture_contains_at_least_five_long_chains() -> None:
             break
 
     assert found >= 5
-

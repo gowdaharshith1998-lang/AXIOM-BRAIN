@@ -67,15 +67,18 @@ def watchdog_has_open_alert_on(
     rule_id: str | None = None,
     severity: str | None = None,
 ) -> bool:
-    return watchdog_alert_count(
-        _action,
-        _passport,
-        entity,
-        session,
-        target,
-        rule_id=rule_id,
-        severity=severity,
-    ) > 0
+    return (
+        watchdog_alert_count(
+            _action,
+            _passport,
+            entity,
+            session,
+            target,
+            rule_id=rule_id,
+            severity=severity,
+        )
+        > 0
+    )
 
 
 def watchdog_alert_count(

@@ -26,4 +26,3 @@ class MCPServer(ABC):
     @abstractmethod
     async def handle(self, call: ToolCall) -> ToolResult:
         raise NotImplementedError("MCPServer.handle is stubbed; lands in Phase 6")
-

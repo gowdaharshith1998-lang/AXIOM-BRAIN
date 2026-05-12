@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from axiom.govern.agent_registry import upsert_agent_observation
 from axiom.schema.models import Receipt
 from axiom.sign.ed25519_signer import sign
+from axiom.storage.db import create_schema_table
 
 RECEIPT_COLUMNS = {
     "id",
@@ -31,7 +32,7 @@ RECEIPT_COLUMNS = {
     "signature",
     "prev_hash",
     "this_hash",
-    "cali" "bra_state",
+    "cali" + "bra_state",
     "demo_flag",
     "created_at",
 }
@@ -60,13 +61,15 @@ class ReceiptInsert:
 def ensure_receipts_schema(engine: Engine) -> None:
     inspector = inspect(engine)
     if not inspector.has_table("receipts"):
-        Receipt.__table__.create(bind=engine, checkfirst=True)
+        create_schema_table(Receipt.__table__, engine)
         return
 
     columns = {column["name"] for column in inspector.get_columns("receipts")}
     if RECEIPT_COLUMNS.issubset(columns):
         return
-    legacy_with_only_missing_passport = RECEIPT_COLUMNS.difference({"passport_id"}).issubset(columns)
+    legacy_with_only_missing_passport = RECEIPT_COLUMNS.difference({"passport_id"}).issubset(
+        columns
+    )
     if legacy_with_only_missing_passport and "passport_id" not in columns:
         with engine.begin() as conn:
             conn.exec_driver_sql("ALTER TABLE receipts ADD COLUMN passport_id VARCHAR")
@@ -84,7 +87,7 @@ def ensure_receipts_schema(engine: Engine) -> None:
             "ix_receipts_receipt_type",
         ):
             conn.exec_driver_sql(f"DROP INDEX IF EXISTS {index_name}")
-    Receipt.__table__.create(bind=engine, checkfirst=True)
+    create_schema_table(Receipt.__table__, engine)
 
 
 def receipt_to_dict(receipt: Receipt) -> dict[str, Any]:

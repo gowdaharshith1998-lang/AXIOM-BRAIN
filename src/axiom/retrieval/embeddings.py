@@ -18,6 +18,7 @@ from axiom.govern.llm_keys import (
     get_provider_key_plaintext_with_session,
 )
 from axiom.schema.models import Entity, EntityEmbedding
+from axiom.storage.db import create_schema_table, schema_table_indexes
 from axiom.vault.errors import VaultCorrupt, VaultLocked
 
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
@@ -26,7 +27,8 @@ EMBEDDING_DIMENSIONS = 64
 
 
 class EmbeddingProvider(Protocol):
-    model: str
+    @property
+    def model(self) -> str: ...
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]: ...
 
@@ -67,11 +69,11 @@ class OpenAIEmbeddingProvider:
 def ensure_entity_embeddings_schema(engine: Engine) -> None:
     inspector = inspect(engine)
     if not inspector.has_table("entity_embeddings"):
-        EntityEmbedding.__table__.create(bind=engine, checkfirst=True)
+        create_schema_table(EntityEmbedding.__table__, engine)
         return
     indexes = {idx["name"] for idx in inspector.get_indexes("entity_embeddings")}
     if "ix_entity_embeddings_content_hash" not in indexes:
-        for index in EntityEmbedding.__table__.indexes:
+        for index in schema_table_indexes(EntityEmbedding.__table__):
             if index.name == "ix_entity_embeddings_content_hash":
                 index.create(bind=engine, checkfirst=True)
 
@@ -104,7 +106,9 @@ def canonical_content_hash(entity: Entity) -> str:
 
 
 def get_embedding_provider(session: Session | None = None) -> EmbeddingProvider:
-    if os.environ.get("AXIOM_TEST_REAL_EMBEDDINGS") != "1" and os.environ.get("PYTEST_CURRENT_TEST"):
+    if os.environ.get("AXIOM_TEST_REAL_EMBEDDINGS") != "1" and os.environ.get(
+        "PYTEST_CURRENT_TEST"
+    ):
         return DeterministicEmbeddingProvider()
 
     api_key: str | None = None
@@ -145,7 +149,11 @@ def embed_entities_batch(
     for entity in entities:
         content_hash = canonical_content_hash(entity)
         existing = session.get(EntityEmbedding, entity.id)
-        if existing is not None and existing.content_hash == content_hash and existing.model == resolved_provider.model:
+        if (
+            existing is not None
+            and existing.content_hash == content_hash
+            and existing.model == resolved_provider.model
+        ):
             unchanged.append(existing)
             continue
         pending.append((entity, content_hash, canonical_entity_text(entity)))
@@ -183,7 +191,7 @@ def bootstrap_embeddings(session: Session, provider: EmbeddingProvider | None = 
     embedding_count = int(session.query(EntityEmbedding).count())
     if embedding_count:
         return 0
-    entities = session.execute(select(Entity)).scalars().all()
+    entities = list(session.execute(select(Entity)).scalars().all())
     if not entities:
         return 0
     return len(embed_entities_batch(session, entities, provider=provider))

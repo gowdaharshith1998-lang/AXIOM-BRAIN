@@ -4,9 +4,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
 
-from axiom.schema.models import Base
+from axiom.schema.models import Base, ConnectorEventRow
 
 
 def _make_app(tmp_path: Path, monkeypatch: Any):
@@ -68,3 +69,58 @@ def test_connector_config_put_enables_real_oauth_install(
     assert authorize_url.startswith("https://github.com/login/oauth/authorize?")
     assert "client_id=github-client" in authorize_url
     assert "state=" in authorize_url
+
+
+def test_connector_oauth_callback_rejects_invalid_state(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    app = _make_app(tmp_path, monkeypatch)
+
+    with TestClient(app) as client:
+        client.put(
+            "/api/internal/connectors/github/config",
+            json={
+                "oauth_client_id": "github-client",
+                "oauth_client_secret": "github-secret",
+                "redirect_uri": "http://localhost:5173/api/internal/connectors/github/callback",
+                "webhook_secret": "webhook-secret",
+            },
+        )
+        install = client.post("/api/internal/connectors/github/install")
+        response = client.get("/api/internal/connectors/github/callback?code=abc&state=wrong-state")
+
+    assert install.status_code == 200
+    assert response.status_code == 400
+
+
+def test_connector_webhook_rejects_invalid_signature_without_storing(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    app = _make_app(tmp_path, monkeypatch)
+    db_url = f"sqlite:///{tmp_path / 'connectors_config.db'}"
+
+    with TestClient(app) as client:
+        client.put(
+            "/api/internal/connectors/github/config",
+            json={
+                "oauth_client_id": "github-client",
+                "oauth_client_secret": "github-secret",
+                "redirect_uri": "http://localhost:5173/api/internal/connectors/github/callback",
+                "webhook_secret": "webhook-secret",
+            },
+        )
+        response = client.post(
+            "/api/internal/connectors/github/webhook",
+            content=b'{"action":"opened"}',
+            headers={
+                "X-GitHub-Event": "issues",
+                "X-GitHub-Delivery": "delivery_bad",
+                "X-Hub-Signature-256": "sha256=bad",
+            },
+        )
+
+    assert response.status_code == 401
+    with Session(create_engine(db_url, future=True)) as session:
+        assert session.execute(select(ConnectorEventRow)).scalars().all() == []

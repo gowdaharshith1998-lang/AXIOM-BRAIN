@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.policy import PolicyDecision
 from axiom.schema.models import Base, ConnectorStateRow, Receipt
+from axiom.vault.store import get_secret_with_session
 
 
 def _sf(tmp_path: Path) -> sessionmaker[Session]:
@@ -199,9 +200,7 @@ def test_linear_writer_execute_uses_graphql_mutation(tmp_path: Path) -> None:
         ),
     )
 
-    result = writer.execute(
-        writer.propose_action("comment", {"issue_id": "issue_1", "body": "x"})
-    )
+    result = writer.execute(writer.propose_action("comment", {"issue_id": "issue_1", "body": "x"}))
 
     assert result["data"]["commentCreate"]["success"] is True
     assert responses.calls[0].request.headers["Authorization"] == "Bearer lin_token"
@@ -253,12 +252,22 @@ def test_linear_callback_endpoint_persists_connector_state(
     Base.metadata.create_all(engine)
     app = create_app(db_url=db_url, enable_organizer=False)
     with TestClient(app) as client:
-        response = client.get("/api/internal/connectors/linear/callback?code=abc&state=csrf")
+        install = client.post("/api/internal/connectors/linear/install")
+        state = install.json()["state"]
+        response = client.get(f"/api/internal/connectors/linear/callback?code=abc&state={state}")
 
     assert response.status_code == 200
     with Session(engine) as session:
         state = session.execute(
             select(ConnectorStateRow).where(ConnectorStateRow.vendor == "linear")
         ).scalar_one()
-        assert state.access_token == "lin_token"
+        assert state.access_token.startswith("vault:connector:linear:")
+        assert (
+            get_secret_with_session(
+                session,
+                "connector:linear",
+                state.access_token.removeprefix("vault:connector:linear:"),
+            )
+            == "lin_token"
+        )
         assert state.account_label == "Linear Workspace"

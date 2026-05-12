@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from axiom.providers import connectors, llm, oauth
 from axiom.providers.errors import UnknownProvider
 from axiom.providers.models import CredentialField, ProviderMetadata, VerifyResult
 
-VerifyFn = Callable[[str | dict], VerifyResult]
+VerifyFn = Callable[[str | dict[str, Any]], VerifyResult]
 
 
 @dataclass(frozen=True, slots=True)

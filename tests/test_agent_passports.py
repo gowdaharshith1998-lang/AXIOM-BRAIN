@@ -108,7 +108,7 @@ def test_issue_passport_returns_bearer_once(tmp_path: Path) -> None:
                 "owner_email": "test@example.com",
                 "scope_clusters": ["engineering_code"],
                 "scope_intents": ["read"],
-                "scope_skills": ["*"],
+                "scope_skills": ["skill_1"],
                 "ttl_hours": 1,
             },
         )
@@ -189,17 +189,34 @@ def test_run_skill_with_passport_outside_skill_scope_denied(
         skills=["different_skill"],
     )
     with pytest.raises(ToolError, match="passport scope denied"):
-        passport_service.run_skill(skill_id=skill_id, input_payload={"note": "x"}, passport_token=token)
+        passport_service.run_skill(
+            skill_id=skill_id, input_payload={"note": "x"}, passport_token=token
+        )
 
     with passport_db() as session:
         assert session.query(SkillRun).count() == 0
         assert session.query(Receipt).count() == 0
 
 
-def test_record_action_uses_default_passport_when_none_provided(
+def test_record_action_rejects_missing_passport_by_default(
+    passport_service: AxiomMCPService,
+) -> None:
+    with pytest.raises(ToolError, match="passport token required"):
+        passport_service.record_action(
+            agent_name="agent_a",
+            intent="read",
+            target_entity_id="eng_1",
+            proposed_action="read engineering note",
+            idempotency_key=None,
+        )
+
+
+def test_record_action_uses_default_passport_when_demo_fallback_enabled(
     passport_service: AxiomMCPService,
     passport_db: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("AXIOM_MCP_ALLOW_SYSTEM_PASSPORT", "1")
     out = passport_service.record_action(
         agent_name="agent_a",
         intent="read",
@@ -229,9 +246,9 @@ def test_passport_endpoint_revocation_invalidates_immediately(tmp_path: Path) ->
                 "agent_name": "test_agent_1",
                 "agent_class": "external_mcp",
                 "owner_email": "test@example.com",
-                "scope_clusters": ["*"],
-                "scope_intents": ["*"],
-                "scope_skills": ["*"],
+                "scope_clusters": ["engineering_code"],
+                "scope_intents": ["read"],
+                "scope_skills": ["skill_1"],
                 "ttl_hours": 1,
             },
         ).json()

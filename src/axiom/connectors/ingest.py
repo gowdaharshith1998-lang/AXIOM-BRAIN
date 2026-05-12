@@ -70,6 +70,7 @@ class _ConnectorSource:
                     "data": entity.get("data", {}),
                     "metadata": {
                         "source_id": source_id,
+                        "upsert_by_source_id": True,
                     },
                 },
             )

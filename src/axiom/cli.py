@@ -71,9 +71,9 @@ def cmd_vault_init(args: argparse.Namespace) -> None:
         raise SystemExit(2)
 
     key = generate_master_key()
-    print(f"# AXIOM vault master key (Fernet, 32-byte url-safe base64)")
-    print(f"# Add the line below to your .env file. Keep it secret. Back it up.")
-    print(f"# Losing it makes every stored secret permanently unreadable.")
+    print("# AXIOM vault master key (Fernet, 32-byte url-safe base64)")
+    print("# Add the line below to your .env file. Keep it secret. Back it up.")
+    print("# Losing it makes every stored secret permanently unreadable.")
     print(f"{ENV_VAR}={key}")
 
 
@@ -88,10 +88,9 @@ def cmd_vault_status(args: argparse.Namespace) -> None:
 
     Never prints plaintext, ciphertext, or key material.
     """
+    from axiom.storage.db import init_engine
     from axiom.vault import list_secrets
     from axiom.vault.crypto import ENV_VAR
-
-    from axiom.storage.db import init_engine
 
     init_engine(args.db_url)
 
@@ -153,4 +152,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

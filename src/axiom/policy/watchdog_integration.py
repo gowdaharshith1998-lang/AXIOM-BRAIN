@@ -13,7 +13,9 @@ def watchdog_rules_as_policies() -> list[PolicyRule]:
                 rule_id=f"watchdog.{rule_id}.{rule.__name__}",
                 description=f"Pause agent actions while watchdog rule {rule_id} is open.",
                 severity="critical" if rule_id == "R2" else "warning",
-                when=parse_predicate(f'watchdog.has_open_alert_on(entity, rule_id="{rule_id}") == true'),
+                when=parse_predicate(
+                    f'watchdog.has_open_alert_on(entity, rule_id="{rule_id}") == true'
+                ),
                 then=PolicyAction(
                     type="pause",
                     reason=f"Watchdog rule {rule_id} fired on target entity",

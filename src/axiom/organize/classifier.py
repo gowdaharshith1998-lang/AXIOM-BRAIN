@@ -54,7 +54,7 @@ class HybridClassifier:
         # vault-first router (phase 5.13.4). Explicit ``api_key=""`` disables the LLM tier.
         self._anthropic_client: object | None = anthropic_client
         if anthropic_client is not None:
-            self._api_key: str | None = (api_key.strip() if api_key and api_key.strip() else None)
+            self._api_key: str | None = api_key.strip() if api_key and api_key.strip() else None
         elif api_key is not None:
             trimmed = api_key.strip() if api_key and api_key.strip() else None
             self._api_key = trimmed

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import importlib
 import json
+import os
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, cast
@@ -11,6 +13,9 @@ import requests  # type: ignore[import-untyped]
 from axiom.connectors.base import ConnectorEvent, WebhookHandler
 
 API = "https://gmail.googleapis.com/gmail/v1"
+GOOGLE_TOKEN_ISSUERS = {"accounts.google.com", "https://accounts.google.com"}
+PUBSUB_AUDIENCE_ENV = "AXIOM_GMAIL_PUBSUB_AUDIENCE"
+PUBSUB_SERVICE_ACCOUNT_ENV = "AXIOM_GMAIL_PUBSUB_SERVICE_ACCOUNT"
 
 
 class GmailWebhookHandler(WebhookHandler):
@@ -57,8 +62,30 @@ class GmailWebhookHandler(WebhookHandler):
         return list(payload.get("history", []))
 
 
-def _default_verify_google_jwt(_token: str) -> bool:
-    return False
+def _default_verify_google_jwt(token: str) -> bool:
+    audience = os.environ.get(PUBSUB_AUDIENCE_ENV, "").strip()
+    if not audience:
+        return False
+    try:
+        google_auth_requests = importlib.import_module("google.auth.transport.requests")
+        id_token = importlib.import_module("google.oauth2.id_token")
+        claims = cast(
+            dict[str, Any],
+            id_token.verify_oauth2_token(
+                token,
+                google_auth_requests.Request(),
+                audience=audience,
+            ),
+        )
+    except Exception:
+        return False
+
+    if claims.get("iss") not in GOOGLE_TOKEN_ISSUERS:
+        return False
+    expected_service_account = os.environ.get(PUBSUB_SERVICE_ACCOUNT_ENV, "").strip()
+    if expected_service_account and claims.get("email") != expected_service_account:
+        return False
+    return True
 
 
 def _payload(request: Any) -> dict[str, Any]:

@@ -78,4 +78,3 @@ class SyntheticSource(Source):
 
     async def disconnect(self) -> None:
         self._data = None
-

@@ -63,4 +63,3 @@ class Source(ABC):
 
     @abstractmethod
     def metadata(self) -> dict[str, Any]: ...
-

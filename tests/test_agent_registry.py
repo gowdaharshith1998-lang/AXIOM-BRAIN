@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -15,6 +16,11 @@ from axiom.govern.receipts import ReceiptInsert, chain_insert_receipt
 from axiom.mcp.server import AxiomMCPService
 from axiom.schema.models import AgentRegistry, Base, Entity
 from axiom.studio.server import create_app
+
+
+@pytest.fixture(autouse=True)
+def _allow_demo_passport_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AXIOM_MCP_ALLOW_SYSTEM_PASSPORT", "1")
 
 
 def _session_factory(tmp_path: Path, name: str = "agent_registry.db") -> sessionmaker[Session]:

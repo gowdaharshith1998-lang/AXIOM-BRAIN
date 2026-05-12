@@ -64,7 +64,9 @@ def _line_for_key(frontmatter: str, key: str) -> int:
 def _coerce_string_list(value: Any, *, key: str, frontmatter: str) -> list[str]:
     if isinstance(value, list) and all(isinstance(item, str) and item for item in value):
         return value
-    raise SkillManifestError(f"line {_line_for_key(frontmatter, key)}: {key} must be a list of strings")
+    raise SkillManifestError(
+        f"line {_line_for_key(frontmatter, key)}: {key} must be a list of strings"
+    )
 
 
 def _coerce_mapping(value: Any, *, key: str, frontmatter: str) -> dict[str, Any]:
@@ -90,8 +92,12 @@ def parse_skill_md(content: str) -> SkillManifest:
     for key in REQUIRED_KEYS:
         if key not in raw:
             raise SkillManifestError(f"line 2: missing required field {key}")
-    trigger_config = _coerce_mapping(raw.get("trigger_config"), key="trigger_config", frontmatter=frontmatter)
-    output_schema = _coerce_mapping(raw.get("output_schema"), key="output_schema", frontmatter=frontmatter)
+    trigger_config = _coerce_mapping(
+        raw.get("trigger_config"), key="trigger_config", frontmatter=frontmatter
+    )
+    output_schema = _coerce_mapping(
+        raw.get("output_schema"), key="output_schema", frontmatter=frontmatter
+    )
     return SkillManifest(
         name=str(raw["name"]),
         description=str(raw["description"]),
@@ -108,7 +114,7 @@ def parse_skill_md(content: str) -> SkillManifest:
         output_schema=output_schema,
         prompt_template=body,
         requires_approval=raw.get("requires_approval"),
-        confidence_threshold=raw.get("cali" "bra_threshold"),
+        confidence_threshold=raw.get("cali" + "bra_threshold"),
         metadata={key: value for key, value in raw.items() if key not in REQUIRED_KEYS},
     )
 

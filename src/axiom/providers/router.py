@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 from sqlalchemy.exc import OperationalError
 
@@ -32,7 +32,7 @@ def _vault_status_for(provider_id: str, key_name: str) -> SecretStatus | None:
     try:
         for meta in list_secrets(provider_id):
             if meta.key_name == key_name:
-                return meta.status if meta.status in VALID_STATUSES else None
+                return cast(SecretStatus, meta.status) if meta.status in VALID_STATUSES else None
         return None
     except Exception:  # noqa: BLE001 — status is best-effort
         logger.debug("could not resolve vault status for %s/%s", provider_id, key_name)

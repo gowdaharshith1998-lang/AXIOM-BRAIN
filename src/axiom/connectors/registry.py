@@ -41,9 +41,13 @@ def get_connector(vendor: str) -> Any:
 def list_installed(session_factory: Callable[[], Session] | None = None) -> list[dict[str, Any]]:
     factory = session_factory or get_session
     with factory() as session:
-        rows = session.execute(
-            select(ConnectorStateRow).order_by(ConnectorStateRow.vendor, ConnectorStateRow.id)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(ConnectorStateRow).order_by(ConnectorStateRow.vendor, ConnectorStateRow.id)
+            )
+            .scalars()
+            .all()
+        )
         return [
             {
                 "id": row.id,

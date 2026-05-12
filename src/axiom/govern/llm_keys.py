@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Final, Literal
 
 import httpx
@@ -13,20 +11,15 @@ from sqlalchemy import Engine, inspect, select
 from sqlalchemy.orm import Session
 
 from axiom.schema.models import LLMProviderKey
-from axiom.storage.db import get_session
-from axiom.vault.crypto import ENV_VAR, generate_master_key
+from axiom.storage.db import create_schema_table, get_session
+from axiom.vault.crypto import ENV_VAR
 from axiom.vault.errors import VaultCorrupt, VaultLocked
 
 Provider = Literal["anthropic", "groq", "mistral", "openai"]
 TestStatus = Literal["valid", "invalid", "untested"]
 
-VALID_PROVIDERS: Final[frozenset[str]] = frozenset(
-    {"anthropic", "groq", "mistral", "openai"}
-)
+VALID_PROVIDERS: Final[frozenset[str]] = frozenset({"anthropic", "groq", "mistral", "openai"})
 VALID_TEST_STATUSES: Final[frozenset[str]] = frozenset({"valid", "invalid", "untested"})
-KEY_FILE: Final[Path] = Path(".axiom_vault_key")
-
-_LOG = logging.getLogger(__name__)
 _HTTP_TIMEOUT = 5.0
 
 
@@ -70,22 +63,7 @@ def _validate_provider(provider: str) -> str:
 def _fernet() -> Fernet:
     raw = os.environ.get(ENV_VAR)
     if not raw:
-        if KEY_FILE.exists():
-            raw = KEY_FILE.read_text(encoding="utf-8").strip()
-        else:
-            raw = generate_master_key()
-            KEY_FILE.write_text(raw + "\n", encoding="utf-8")
-            try:
-                KEY_FILE.chmod(0o600)
-            except OSError:
-                pass
-            _LOG.warning(
-                "%s is unset; generated a local Fernet key at %s. "
-                "Set %s in production.",
-                ENV_VAR,
-                KEY_FILE,
-                ENV_VAR,
-            )
+        raise VaultLocked(f"{ENV_VAR} is not set")
     try:
         return Fernet(raw.encode("utf-8"))
     except (ValueError, TypeError) as exc:
@@ -117,7 +95,7 @@ def _metadata(row: LLMProviderKey) -> LLMProviderKeyMetadata:
 def ensure_llm_provider_keys_schema(engine: Engine) -> None:
     inspector = inspect(engine)
     if not inspector.has_table("llm_provider_keys"):
-        LLMProviderKey.__table__.create(bind=engine, checkfirst=True)
+        create_schema_table(LLMProviderKey.__table__, engine)
 
 
 def set_provider_key_with_session(

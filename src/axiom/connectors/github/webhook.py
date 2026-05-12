@@ -13,8 +13,7 @@ class GitHubWebhookHandler(HmacSha256WebhookHandler):
 
     def parse(self, request: Any) -> list[ConnectorEvent]:
         headers = {
-            str(key).lower(): str(value)
-            for key, value in getattr(request, "headers", {}).items()
+            str(key).lower(): str(value) for key, value in getattr(request, "headers", {}).items()
         }
         event_name = headers.get("x-github-event", "unknown")
         delivery = headers.get("x-github-delivery", "")

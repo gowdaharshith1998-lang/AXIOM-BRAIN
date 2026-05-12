@@ -1,4 +1,5 @@
 """Tests for confidence_changed events from the OrganizerAgent centrality loop."""
+
 from __future__ import annotations
 
 import asyncio

@@ -4,10 +4,16 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy.orm import Session
 
 from axiom.schema.models import Base
 from axiom.storage.db import init_engine, reset_engine
+
+
+@pytest.fixture(autouse=True)
+def default_vault_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AXIOM_VAULT_KEY", Fernet.generate_key().decode("utf-8"))
 
 
 @pytest.fixture()
@@ -25,4 +31,3 @@ def db_session(tmp_path: Path) -> Iterator[Session]:
         session.close()
         engine.dispose()
         reset_engine()
-

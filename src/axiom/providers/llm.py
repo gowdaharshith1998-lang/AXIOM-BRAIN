@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import httpx
 
@@ -16,9 +17,10 @@ _ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 _OPENAI_MODELS = "https://api.openai.com/v1/models"
 _MISTRAL_MODELS = "https://api.mistral.ai/v1/models"
 _GROQ_MODELS = "https://api.groq.com/openai/v1/models"
+PlaintextCredential = str | dict[str, Any]
 
 
-def _ensure_api_key_string(plaintext: str | dict) -> VerifyResult | str:
+def _ensure_api_key_string(plaintext: PlaintextCredential) -> VerifyResult | str:
     if isinstance(plaintext, dict):
         return VerifyResult(status="auth_error", detail="expected string API key")
     key = plaintext.strip()
@@ -35,7 +37,7 @@ def _map_http_code(status_code: int) -> VerifyResult | None:
     return None
 
 
-def verify_anthropic_key(plaintext: str | dict) -> VerifyResult:
+def verify_anthropic_key(plaintext: PlaintextCredential) -> VerifyResult:
     got = _ensure_api_key_string(plaintext)
     if isinstance(got, VerifyResult):
         return got
@@ -72,7 +74,9 @@ def verify_anthropic_key(plaintext: str | dict) -> VerifyResult:
     )
 
 
-def _verify_bearer_models(url: str, plaintext: str | dict, provider_id: str) -> VerifyResult:
+def _verify_bearer_models(
+    url: str, plaintext: PlaintextCredential, provider_id: str
+) -> VerifyResult:
     got = _ensure_api_key_string(plaintext)
     if isinstance(got, VerifyResult):
         return got
@@ -100,13 +104,13 @@ def _verify_bearer_models(url: str, plaintext: str | dict, provider_id: str) -> 
     )
 
 
-def verify_openai_key(plaintext: str | dict) -> VerifyResult:
+def verify_openai_key(plaintext: PlaintextCredential) -> VerifyResult:
     return _verify_bearer_models(_OPENAI_MODELS, plaintext, "openai")
 
 
-def verify_mistral_key(plaintext: str | dict) -> VerifyResult:
+def verify_mistral_key(plaintext: PlaintextCredential) -> VerifyResult:
     return _verify_bearer_models(_MISTRAL_MODELS, plaintext, "mistral")
 
 
-def verify_groq_key(plaintext: str | dict) -> VerifyResult:
+def verify_groq_key(plaintext: PlaintextCredential) -> VerifyResult:
     return _verify_bearer_models(_GROQ_MODELS, plaintext, "groq")

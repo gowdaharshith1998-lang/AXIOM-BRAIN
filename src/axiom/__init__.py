@@ -19,4 +19,3 @@ __all__ = [
     "remove_edge",
     "update_entity",
 ]
-

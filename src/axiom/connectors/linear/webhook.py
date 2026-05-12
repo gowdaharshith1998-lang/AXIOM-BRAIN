@@ -13,8 +13,7 @@ class LinearWebhookHandler(HmacSha256WebhookHandler):
 
     def parse(self, request: Any) -> list[ConnectorEvent]:
         headers = {
-            str(key).lower(): str(value)
-            for key, value in getattr(request, "headers", {}).items()
+            str(key).lower(): str(value) for key, value in getattr(request, "headers", {}).items()
         }
         body = getattr(request, "body", b"")
         if callable(body):

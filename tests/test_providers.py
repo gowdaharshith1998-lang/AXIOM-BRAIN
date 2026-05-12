@@ -112,9 +112,7 @@ def test_llm_and_connector_verify_200_ok(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_llm_and_connector_verify_http_auth_error(
     monkeypatch: pytest.MonkeyPatch, status_code: int
 ) -> None:
-    transport = httpx.MockTransport(
-        lambda r: httpx.Response(status_code, json={"error": "no"})
-    )
+    transport = httpx.MockTransport(lambda r: httpx.Response(status_code, json={"error": "no"}))
     factory = _client_factory(transport)
     for _pid, mod, fn_name in _VERIFY_TARGETS:
         monkeypatch.setattr(mod.httpx, "Client", factory)

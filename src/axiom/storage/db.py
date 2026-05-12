@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
-from typing import Final
+from collections.abc import Iterable
+from typing import Any, Final, cast
 
-from sqlalchemy import create_engine
+from sqlalchemy import Index, Table, create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -39,6 +40,14 @@ def get_session() -> Session:
     return SessionLocal()
 
 
+def create_schema_table(table: Any, engine: Engine) -> None:
+    cast(Table, table).create(bind=engine, checkfirst=True)
+
+
+def schema_table_indexes(table: Any) -> Iterable[Index]:
+    return cast(Table, table).indexes
+
+
 def reset_engine() -> None:
     """Test helper to drop global engine/sessionmaker."""
     global _engine, SessionLocal
@@ -46,4 +55,3 @@ def reset_engine() -> None:
         _engine.dispose()
     _engine = None
     SessionLocal = None
-

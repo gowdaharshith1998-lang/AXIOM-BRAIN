@@ -24,4 +24,3 @@ class SkillsEmitter(ABC):
     @abstractmethod
     def emit_one(self, process_entity_id: str) -> SkillDescriptor:
         raise NotImplementedError("SkillsEmitter.emit_one is stubbed; lands in Phase 8")
-

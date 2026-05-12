@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.govern.cluster_checks import (
     cleanup_cluster_check_runs,
-    get_cluster_check_runs,
     record_cluster_check_runs,
     summarize_cluster_check_runs,
 )

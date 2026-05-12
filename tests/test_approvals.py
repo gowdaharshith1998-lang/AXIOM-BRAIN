@@ -44,6 +44,11 @@ rules:
     )
 
 
+@pytest.fixture(autouse=True)
+def _allow_demo_passport_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AXIOM_MCP_ALLOW_SYSTEM_PASSPORT", "1")
+
+
 @pytest.fixture()
 def approval_sf(tmp_path: Path) -> sessionmaker[Session]:
     engine = create_engine(f"sqlite:///{tmp_path / 'approvals.db'}", future=True)
@@ -213,7 +218,9 @@ def test_approval_endpoints_require_explicit_user(
     engine.dispose()
     app = create_app(db_url=db_url, enable_organizer=False)
     with TestClient(app) as client:
-        response = client.post(f"/api/internal/approvals/{approval.id}/approve", json={"note": "ok"})
+        response = client.post(
+            f"/api/internal/approvals/{approval.id}/approve", json={"note": "ok"}
+        )
     assert response.status_code == 422
 
 

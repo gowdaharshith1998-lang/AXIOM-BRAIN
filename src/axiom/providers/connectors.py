@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import httpx
 
@@ -16,9 +17,10 @@ _GITHUB_USER = "https://api.github.com/user"
 _LINEAR_GQL = "https://api.linear.app/graphql"
 _NOTION_ME = "https://api.notion.com/v1/users/me"
 _SLACK_AUTH_TEST = "https://slack.com/api/auth.test"
+PlaintextCredential = str | dict[str, Any]
 
 
-def _ensure_api_key_string(plaintext: str | dict) -> VerifyResult | str:
+def _ensure_api_key_string(plaintext: PlaintextCredential) -> VerifyResult | str:
     if isinstance(plaintext, dict):
         return VerifyResult(status="auth_error", detail="expected string API token")
     key = plaintext.strip()
@@ -35,7 +37,7 @@ def _map_http_code(status_code: int) -> VerifyResult | None:
     return None
 
 
-def verify_github_key(plaintext: str | dict) -> VerifyResult:
+def verify_github_key(plaintext: PlaintextCredential) -> VerifyResult:
     got = _ensure_api_key_string(plaintext)
     if isinstance(got, VerifyResult):
         return got
@@ -63,7 +65,7 @@ def verify_github_key(plaintext: str | dict) -> VerifyResult:
     )
 
 
-def verify_linear_key(plaintext: str | dict) -> VerifyResult:
+def verify_linear_key(plaintext: PlaintextCredential) -> VerifyResult:
     got = _ensure_api_key_string(plaintext)
     if isinstance(got, VerifyResult):
         return got
@@ -95,7 +97,7 @@ def verify_linear_key(plaintext: str | dict) -> VerifyResult:
     )
 
 
-def verify_notion_key(plaintext: str | dict) -> VerifyResult:
+def verify_notion_key(plaintext: PlaintextCredential) -> VerifyResult:
     got = _ensure_api_key_string(plaintext)
     if isinstance(got, VerifyResult):
         return got
@@ -126,7 +128,7 @@ def verify_notion_key(plaintext: str | dict) -> VerifyResult:
     )
 
 
-def verify_slack_key(plaintext: str | dict) -> VerifyResult:
+def verify_slack_key(plaintext: PlaintextCredential) -> VerifyResult:
     got = _ensure_api_key_string(plaintext)
     if isinstance(got, VerifyResult):
         return got

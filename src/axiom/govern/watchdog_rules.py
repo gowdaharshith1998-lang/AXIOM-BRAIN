@@ -81,10 +81,10 @@ def _is_runbook(entity: Entity) -> bool:
 
 def _is_incident_ops(entity: Entity) -> bool:
     haystack = _data_text(entity)
-    return (
-        (entity.cluster_id or "").lower() in {"incident_ops", "incidents_ops"}
-        or "incident" in haystack
-    )
+    return (entity.cluster_id or "").lower() in {
+        "incident_ops",
+        "incidents_ops",
+    } or "incident" in haystack
 
 
 def _edge_other_id(edge: Edge, entity_id: str) -> str:
@@ -92,7 +92,7 @@ def _edge_other_id(edge: Edge, entity_id: str) -> str:
 
 
 def _edges_for_entity(session: Session, entity_id: str) -> list[Edge]:
-    return (
+    return list(
         session.execute(
             select(Edge).where(or_(Edge.source_id == entity_id, Edge.target_id == entity_id))
         )
@@ -137,8 +137,7 @@ def billing_change_without_decision(
         rule_id="R1",
         severity="warning",
         reason=(
-            f"{_entity_title(entity)} touches billing_payments without a linked decision "
-            "in 7 days."
+            f"{_entity_title(entity)} touches billing_payments without a linked decision in 7 days."
         ),
         evidence={
             "entity_id": entity.id,
@@ -217,11 +216,13 @@ def _historic_importance(entity: Entity) -> tuple[float | None, str | None]:
             return float(value), key
     history = data.get("importance_history")
     if isinstance(history, list):
-        numeric = [
-            float(item.get("value"))
-            for item in history
-            if isinstance(item, dict) and isinstance(item.get("value"), (int, float))
-        ]
+        numeric: list[float] = []
+        for item in history:
+            if not isinstance(item, dict):
+                continue
+            value = item.get("value")
+            if isinstance(value, (int, float)):
+                numeric.append(float(value))
         if numeric:
             return numeric[0], "importance_history"
     return None, None
@@ -348,7 +349,9 @@ def process_without_compiled_skill(
         return None
     expected_name = slugify_skill_name(_entity_title(entity))
     existing = int(
-        session.execute(select(func.count(Skill.id)).where(Skill.name == expected_name)).scalar_one()
+        session.execute(
+            select(func.count(Skill.id)).where(Skill.name == expected_name)
+        ).scalar_one()
     )
     if existing:
         return None

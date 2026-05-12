@@ -20,4 +20,3 @@ class PolicyEngine(ABC):
     @abstractmethod
     def evaluate(self, *, agent_id: str, tool: str, params: dict[str, Any]) -> PolicyResult:
         raise NotImplementedError("PolicyEngine.evaluate is stubbed; lands in Phase 9")
-

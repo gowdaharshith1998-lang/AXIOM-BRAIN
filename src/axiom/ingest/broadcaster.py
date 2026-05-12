@@ -54,4 +54,3 @@ class EventBroadcaster:
     @property
     def current_seq(self) -> int:
         return self._seq
-

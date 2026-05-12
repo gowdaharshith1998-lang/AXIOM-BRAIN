@@ -9,8 +9,8 @@ from mcp.server.fastmcp.exceptions import ToolError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from axiom.mcp.server import AxiomMCPService, build_mcp_server
 from axiom.govern.policy_evaluator import DemoPolicyEvaluator, PolicyDecision
+from axiom.mcp.server import AxiomMCPService, build_mcp_server
 from axiom.schema.models import Base, Edge, Entity, Receipt, Skill, SkillRun, Source
 from axiom.skills.registry import get_skill_with_session, register_skill_with_session
 from axiom.studio.server import create_app
@@ -26,6 +26,11 @@ class _EventsStub:
 
     def emit_action_events(self, *, events: list[dict[str, object]]) -> None:
         self.action_batches.append(events)
+
+
+@pytest.fixture(autouse=True)
+def _allow_demo_passport_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AXIOM_MCP_ALLOW_SYSTEM_PASSPORT", "1")
 
 
 @pytest.fixture()
@@ -141,12 +146,18 @@ def test_record_action_allow_branch(write_service: AxiomMCPService) -> None:
     assert out["receipt_id"]
     batches = _events_stub(write_service).action_batches
     assert len(batches) == 1
-    assert [e["type"] for e in batches[0]] == ["agent_action", "agent_action_evaluated", "receipt_added"]
+    assert [e["type"] for e in batches[0]] == [
+        "agent_action",
+        "agent_action_evaluated",
+        "receipt_added",
+    ]
 
 
 def test_record_action_against_real_entity_marked_real(write_service: AxiomMCPService) -> None:
     with write_service._session_factory() as session:  # type: ignore[attr-defined]
-        session.add(Source(id="linear-main", source_type="linear", display_name="Linear", connected=True))
+        session.add(
+            Source(id="linear-main", source_type="linear", display_name="Linear", connected=True)
+        )
         session.add(
             Entity(
                 id="linear_ticket_1",
@@ -231,7 +242,9 @@ def test_blocked_real_entity_event_marked_real(write_service: AxiomMCPService) -
     assert batch[1]["payload"]["demo_flag"] is False  # type: ignore[index]
 
 
-def test_record_action_correct_branch(write_service: AxiomMCPService, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_record_action_correct_branch(
+    write_service: AxiomMCPService, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("AXIOM_VAULT_KEY", "present")
     out = write_service.record_action(
         agent_name="agent_b",
@@ -276,7 +289,9 @@ def test_record_action_idempotency_reuses_result(write_service: AxiomMCPService)
     assert len(batches) == 1
 
 
-def test_check_policy_branches_and_no_persistence(write_service: AxiomMCPService, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_check_policy_branches_and_no_persistence(
+    write_service: AxiomMCPService, monkeypatch: pytest.MonkeyPatch
+) -> None:
     allow = write_service.check_policy(
         agent_name="agent_e",
         intent="read",
@@ -481,7 +496,9 @@ def test_skill_run_receipt_demo_flag_follows_input(
 ) -> None:
     skill_id = _register_test_skill(write_service)
     with write_service._session_factory() as session:  # type: ignore[attr-defined]
-        session.add(Source(id="linear-main", source_type="linear", display_name="Linear", connected=True))
+        session.add(
+            Source(id="linear-main", source_type="linear", display_name="Linear", connected=True)
+        )
         session.add(
             Entity(
                 id="linear_ticket_2",
@@ -494,7 +511,9 @@ def test_skill_run_receipt_demo_flag_follows_input(
         )
         session.commit()
 
-    monkeypatch.setattr("axiom.skills.runner.get_provider_key_plaintext_with_session", lambda *_args: "key")
+    monkeypatch.setattr(
+        "axiom.skills.runner.get_provider_key_plaintext_with_session", lambda *_args: "key"
+    )
     monkeypatch.setattr("axiom.skills.runner._call_provider", lambda *_args: "summary")
 
     out = write_service.run_skill(

@@ -21,4 +21,3 @@ def test_fixture_generator_is_deterministic(tmp_path: Path) -> None:
     subprocess.run(["python", "scripts/generate_fixture.py"], cwd=repo_root, check=True)
     h2 = _sha256(fixture_path)
     assert h1 == h2
-

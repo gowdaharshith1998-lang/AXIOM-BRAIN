@@ -7,7 +7,7 @@ class VaultError(Exception):
     """Base class for all vault errors."""
 
 
-class VaultLocked(VaultError):
+class VaultLocked(VaultError):  # noqa: N818
     """Raised when a plaintext op is attempted but the master key is unavailable.
 
     The master key lives in the ``AXIOM_VAULT_KEY`` environment variable. When
@@ -17,7 +17,7 @@ class VaultLocked(VaultError):
     """
 
 
-class VaultCorrupt(VaultError):
+class VaultCorrupt(VaultError):  # noqa: N818
     """Raised when stored ciphertext cannot be decrypted with the current key.
 
     Causes: master key was rotated, the row was tampered with, or the row was
@@ -26,7 +26,7 @@ class VaultCorrupt(VaultError):
     """
 
 
-class DuplicateSecret(VaultError):
+class DuplicateSecret(VaultError):  # noqa: N818
     """Raised when ``store_secret`` is called for an already-existing
     ``(provider_id, key_name)`` pair.
 
@@ -36,12 +36,10 @@ class DuplicateSecret(VaultError):
     """
 
 
-class SecretNotFound(VaultError):
+class SecretNotFound(VaultError):  # noqa: N818
     """Raised when ``get_secret`` or ``mark_tested`` targets a missing row."""
 
     def __init__(self, provider_id: str, key_name: str) -> None:
         self.provider_id = provider_id
         self.key_name = key_name
-        super().__init__(
-            f"no secret for provider_id={provider_id!r} key_name={key_name!r}"
-        )
+        super().__init__(f"no secret for provider_id={provider_id!r} key_name={key_name!r}")

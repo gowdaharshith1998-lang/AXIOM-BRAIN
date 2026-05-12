@@ -108,4 +108,3 @@ async def test_subscribe_live_events_after_replay() -> None:
     await b.publish({"kind": "live"})
     second = await pending_next
     assert second["seq"] == 2
-

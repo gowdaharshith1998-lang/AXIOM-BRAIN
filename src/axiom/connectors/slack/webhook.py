@@ -29,11 +29,14 @@ class SlackWebhookHandler(WebhookHandler):
         if abs(_now() - timestamp) > REPLAY_WINDOW_SECONDS:
             return False
         basestring = b"v0:" + str(timestamp).encode() + b":" + _body(request)
-        expected = "v0=" + hmac.new(
-            self.secret.encode("utf-8"),
-            basestring,
-            hashlib.sha256,
-        ).hexdigest()
+        expected = (
+            "v0="
+            + hmac.new(
+                self.secret.encode("utf-8"),
+                basestring,
+                hashlib.sha256,
+            ).hexdigest()
+        )
         return hmac.compare_digest(signature, expected)
 
     def challenge_response(self, request: Any) -> str | None:

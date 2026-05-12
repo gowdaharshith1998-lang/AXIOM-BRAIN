@@ -71,7 +71,10 @@ def _pick_high_importance_entity(
         try:
             entities = session.execute(sa_select(Entity)).scalars().all()
             from axiom.govern.policy_evaluator import CORRECT_IMPORTANCE_THRESHOLD
-            high = [e for e in entities if (e.composite_importance or 0) >= CORRECT_IMPORTANCE_THRESHOLD]
+
+            high = [
+                e for e in entities if (e.composite_importance or 0) >= CORRECT_IMPORTANCE_THRESHOLD
+            ]
             if not high:
                 return None, None, None
             chosen = random.choice(high)

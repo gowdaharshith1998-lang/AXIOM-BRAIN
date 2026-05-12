@@ -1,4 +1,3 @@
-
 from . import ed25519_signer
 from .interfaces import SignedPayload, Signer, SigningScheme
 

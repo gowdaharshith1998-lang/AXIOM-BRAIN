@@ -7,6 +7,7 @@ from sqlalchemy import Engine, desc, func, inspect, select
 from sqlalchemy.orm import Session
 
 from axiom.schema.models import AgentRegistry, Receipt
+from axiom.storage.db import create_schema_table
 
 AgentType = Literal["internal", "external_mcp"]
 DECISIONS = {"allow", "correct", "deny"}
@@ -19,7 +20,7 @@ def classify_agent_type(agent_name: str) -> AgentType:
 def ensure_agent_registry_schema(engine: Engine) -> None:
     inspector = inspect(engine)
     if not inspector.has_table("agent_registry"):
-        AgentRegistry.__table__.create(bind=engine, checkfirst=True)
+        create_schema_table(AgentRegistry.__table__, engine)
 
 
 def agent_registry_row(row: AgentRegistry) -> dict[str, Any]:
@@ -109,10 +110,8 @@ def get_agents(
     query = select(AgentRegistry).where(AgentRegistry.last_seen >= since)
     if agent_type is not None:
         query = query.where(AgentRegistry.agent_type == agent_type)
-    return (
-        session.execute(
-            query.order_by(desc(AgentRegistry.last_seen), AgentRegistry.agent_name)
-        )
+    return list(
+        session.execute(query.order_by(desc(AgentRegistry.last_seen), AgentRegistry.agent_name))
         .scalars()
         .all()
     )

@@ -10,12 +10,13 @@ from sqlalchemy.orm import Session
 from axiom.organize.cluster_health import compute_brain_health_score
 from axiom.organize.clusters import CLUSTER_IDS
 from axiom.schema.models import Edge, Entity, MetricsSnapshot, Receipt
+from axiom.storage.db import create_schema_table
 
 
 def ensure_snapshots_schema(engine: Engine) -> None:
     inspector = inspect(engine)
     if not inspector.has_table("metrics_snapshots"):
-        MetricsSnapshot.__table__.create(bind=engine, checkfirst=True)
+        create_schema_table(MetricsSnapshot.__table__, engine)
         return
     columns = {column["name"] for column in inspector.get_columns("metrics_snapshots")}
     if "brain_health_score" not in columns:

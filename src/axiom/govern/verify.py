@@ -13,7 +13,10 @@ from axiom.sign.ed25519_signer import load_or_create_keypair, verify
 
 def verify_receipt_signature(receipt: Receipt, pubkey: bytes | str) -> dict[str, Any]:
     if receipt.signing_scheme != "ed25519":
-        return {"verified": False, "reason": f"unsupported signing scheme: {receipt.signing_scheme}"}
+        return {
+            "verified": False,
+            "reason": f"unsupported signing scheme: {receipt.signing_scheme}",
+        }
     try:
         signature = b64decode(receipt.signature, validate=True)
     except Exception:  # noqa: BLE001

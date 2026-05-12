@@ -17,4 +17,3 @@ def test_alembic_upgrade_downgrade_upgrade(tmp_path: Path) -> None:
     command.upgrade(cfg, "head")
     command.downgrade(cfg, "base")
     command.upgrade(cfg, "head")
-

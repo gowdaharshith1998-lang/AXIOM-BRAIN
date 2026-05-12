@@ -34,6 +34,7 @@ class SearchResult(TypedDict, total=False):
     cluster_id: str | None
     composite_importance: float
     score: float
+    matched_on: str
     methods: list[str]
     breakdown: dict[str, MethodBreakdown]
 
@@ -68,8 +69,17 @@ def lexical_search(
             continue
         score += min(connection_counts[entity.id], 10) * 0.005
         ranked.append(RankedEntity(entity=entity, score=score, matched_on="lexical"))
-    ranked.sort(key=lambda item: (-item.score, -float(item.entity.composite_importance or 0.0), title_for_entity(item.entity).casefold()))
-    return [_result(item.entity, score=item.score, method="lexical") for item in ranked[:_safe_limit(top_k)]]
+    ranked.sort(
+        key=lambda item: (
+            -item.score,
+            -float(item.entity.composite_importance or 0.0),
+            title_for_entity(item.entity).casefold(),
+        )
+    )
+    return [
+        _result(item.entity, score=item.score, method="lexical")
+        for item in ranked[: _safe_limit(top_k)]
+    ]
 
 
 def semantic_search(
@@ -86,7 +96,9 @@ def semantic_search(
         return []
     resolved_provider = provider or get_embedding_provider(session)
     query_vector = resolved_provider.embed_texts([q])[0]
-    stmt = select(Entity, EntityEmbedding).join(EntityEmbedding, Entity.id == EntityEmbedding.entity_id)
+    stmt = select(Entity, EntityEmbedding).join(
+        EntityEmbedding, Entity.id == EntityEmbedding.entity_id
+    )
     if entity_types:
         stmt = stmt.where(Entity.type.in_(entity_types))
     if cluster_id is not None:
@@ -97,8 +109,17 @@ def semantic_search(
         if score <= 0:
             continue
         ranked.append((entity, score))
-    ranked.sort(key=lambda item: (-item[1], -float(item[0].composite_importance or 0.0), title_for_entity(item[0]).casefold()))
-    return [_result(entity, score=score, method="semantic") for entity, score in ranked[:_safe_limit(top_k)]]
+    ranked.sort(
+        key=lambda item: (
+            -item[1],
+            -float(item[0].composite_importance or 0.0),
+            title_for_entity(item[0]).casefold(),
+        )
+    )
+    return [
+        _result(entity, score=score, method="semantic")
+        for entity, score in ranked[: _safe_limit(top_k)]
+    ]
 
 
 def graph_search(
@@ -124,7 +145,10 @@ def graph_search(
     seed_scores = {item["id"]: float(item["score"]) for item in seeds}
     seed_ids = set(seed_scores)
     edges = session.execute(select(Edge)).scalars().all()
-    entity_map = {entity.id: entity for entity in _filtered_entities(session, entity_types=entity_types, cluster_id=cluster_id)}
+    entity_map = {
+        entity.id: entity
+        for entity in _filtered_entities(session, entity_types=entity_types, cluster_id=cluster_id)
+    }
     scores: dict[str, float] = defaultdict(float)
     matched_on: dict[str, str] = {}
     for edge in edges:
@@ -140,9 +164,16 @@ def graph_search(
             matched_on.setdefault(seed_id, "query_match")
     ranked = sorted(
         ((entity_map[entity_id], score) for entity_id, score in scores.items()),
-        key=lambda item: (-item[1], -float(item[0].composite_importance or 0.0), title_for_entity(item[0]).casefold()),
+        key=lambda item: (
+            -item[1],
+            -float(item[0].composite_importance or 0.0),
+            title_for_entity(item[0]).casefold(),
+        ),
     )
-    results = [_result(entity, score=score, method="graph") for entity, score in ranked[:_safe_limit(top_k)]]
+    results = [
+        _result(entity, score=score, method="graph")
+        for entity, score in ranked[: _safe_limit(top_k)]
+    ]
     for row in results:
         row["matched_on"] = matched_on.get(row["id"], "graph_match")
     return results
@@ -222,7 +253,11 @@ def _rrf(
         weight = float(weights.get(method, 1.0))
         for rank, row in enumerate(rows, start=1):
             entity_id = row["id"]
-            by_id.setdefault(entity_id, {key: value for key, value in row.items() if key not in {"score", "methods", "breakdown"}})  # type: ignore[misc]
+            base: SearchResult = row.copy()
+            base.pop("score", None)
+            base.pop("methods", None)
+            base.pop("breakdown", None)
+            by_id.setdefault(entity_id, base)
             breakdown[entity_id][method] = {
                 "rank": rank,
                 "score": round(float(row["score"]), 6),
@@ -240,7 +275,13 @@ def _rrf(
                 "breakdown": breakdown[entity_id],
             }
         )
-    fused.sort(key=lambda item: (-float(item["score"]), -len(item["methods"]), str(item["title"]).casefold()))
+    fused.sort(
+        key=lambda item: (
+            -float(item["score"]),
+            -len(item["methods"]),
+            str(item["title"]).casefold(),
+        )
+    )
     return fused
 
 
@@ -270,7 +311,7 @@ def _filtered_entities(
         stmt = stmt.where(Entity.type.in_(entity_types))
     if cluster_id is not None:
         stmt = stmt.where(Entity.cluster_id == cluster_id)
-    return session.execute(stmt).scalars().all()
+    return list(session.execute(stmt).scalars().all())
 
 
 def _connection_counts(session: Session) -> Counter[str]:

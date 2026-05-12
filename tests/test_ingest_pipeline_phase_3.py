@@ -127,4 +127,3 @@ async def test_pipeline_skips_edges_when_nick_missing(db_session) -> None:  # ty
 
     edge_count = db_session.execute(select(func.count(Edge.id))).scalar_one()
     assert edge_count == 0
-

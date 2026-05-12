@@ -192,6 +192,49 @@ async def test_ingest_apply_to_brain_uses_existing_broadcaster(db_session) -> No
     assert persisted.cluster_id == "engineering_code"
 
 
+@pytest.mark.asyncio
+async def test_ingest_apply_to_brain_upserts_existing_connector_entity(db_session) -> None:  # type: ignore[no-untyped-def]
+    from axiom.connectors.ingest import apply_to_brain
+
+    broadcaster = EventBroadcaster()
+    first = [
+        {
+            "nick": "issue",
+            "type": "ticket",
+            "source_id": "github:issue:1",
+            "cluster_id": "engineering_code",
+            "data": {"title": "Old title"},
+        }
+    ]
+    second = [
+        {
+            "nick": "issue",
+            "type": "ticket",
+            "source_id": "github:issue:1",
+            "cluster_id": "engineering_code",
+            "data": {"title": "New title"},
+        }
+    ]
+
+    await apply_to_brain(db_session, first, [], broadcaster=broadcaster)
+    await apply_to_brain(db_session, second, [], broadcaster=broadcaster)
+
+    persisted = (
+        db_session.execute(select(Entity).where(Entity.source_id == "github:issue:1"))
+        .scalars()
+        .all()
+    )
+    assert len(persisted) == 1
+    assert persisted[0].data["title"] == "New title"
+    assert broadcaster.current_seq == 2
+    replayed = []
+    async for envelope in broadcaster.subscribe(since=0):
+        replayed.append(envelope)
+        if len(replayed) == broadcaster.current_seq:
+            break
+    assert replayed[-1]["type"] == "entity_modified"
+
+
 def test_writer_propose_action_returns_action_request() -> None:
     from axiom.connectors.writer import ConnectorWriter
 

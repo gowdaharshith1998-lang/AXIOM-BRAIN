@@ -2,20 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hmac
 import json
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Annotated, Any, NoReturn, cast
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import create_engine, desc, func, select
+from sqlalchemy import Table, create_engine, desc, func, select
 from sqlalchemy.orm import sessionmaker
 
 from axiom.api.search import EntitySearchResult, search_entities
@@ -55,7 +57,7 @@ from axiom.connectors.gmail.ingest import normalize_thread as gmail_normalize_th
 from axiom.connectors.gmail.ingest import thread_to_message_edge as gmail_thread_to_message_edge
 from axiom.connectors.gmail.oauth import GMAIL_SCOPES, GmailOAuth
 from axiom.connectors.gmail.webhook import GmailWebhookHandler
-from axiom.connectors.ingest import apply_to_brain
+from axiom.connectors.ingest import apply_to_brain, normalize_to_edges, normalize_to_entity
 from axiom.connectors.linear.ingest import fetch_issues_for_team as linear_fetch_issues_for_team
 from axiom.connectors.linear.ingest import fetch_projects as linear_fetch_projects
 from axiom.connectors.linear.ingest import fetch_teams as linear_fetch_teams
@@ -161,6 +163,7 @@ from axiom.retrieval.search import SearchMode, hybrid_search
 from axiom.schema.dto import EdgeDTO, EntityDTO
 from axiom.schema.models import (
     Action,
+    AgentPassport,
     AgentRegistry,
     ClusterCheckRun,
     ConnectorConfigRow,
@@ -170,6 +173,7 @@ from axiom.schema.models import (
     Entity,
     MetricsSnapshot,
     Receipt,
+    Skill,
     Source,
     new_id,
 )
@@ -188,12 +192,32 @@ from axiom.skills.registry import (
     skill_to_dict,
 )
 from axiom.skills.runner import run_skill
-from axiom.skills.skill_md import SkillManifestError, parse_skill_md, serialize_skill_md
+from axiom.skills.skill_md import (
+    SkillManifest,
+    SkillManifestError,
+    parse_skill_md,
+    serialize_skill_md,
+)
 from axiom.sources.base import IngestEvent
 from axiom.sources.live_synthetic import LiveSyntheticSource
+from axiom.studio.auth import (
+    auth_is_misconfigured,
+    auth_required,
+    is_http_auth_exempt,
+    request_is_authenticated,
+    websocket_auth_subprotocol,
+    websocket_is_authenticated,
+)
 from axiom.studio.llm_keys_api import router as llm_keys_router
 from axiom.studio.sources import ensure_sources_schema, real_sources_snapshot
 from axiom.studio.vault_api import router as vault_router
+from axiom.vault.errors import SecretNotFound, VaultCorrupt, VaultLocked
+from axiom.vault.models import Secret
+from axiom.vault.store import (
+    delete_secret_with_session,
+    get_secret_with_session,
+    store_secret_with_session,
+)
 
 
 class NavigationStepIn(BaseModel):
@@ -247,14 +271,17 @@ class ConnectorConfigIn(BaseModel):
     workspace_id: str | None = None
 
 
+MAX_PUBLIC_PASSPORT_TTL_HOURS = 24
+
+
 class PassportIn(BaseModel):
     agent_name: str
     agent_class: str
     owner_email: str
-    scope_clusters: list[str] = Field(default_factory=lambda: ["*"])
-    scope_intents: list[str] = Field(default_factory=lambda: ["*"])
-    scope_skills: list[str] = Field(default_factory=lambda: ["*"])
-    ttl_hours: int = Field(default=1, gt=0)
+    scope_clusters: list[str] = Field(default_factory=list)
+    scope_intents: list[str] = Field(default_factory=lambda: ["read"])
+    scope_skills: list[str] = Field(default_factory=list)
+    ttl_hours: int = Field(default=1, gt=0, le=MAX_PUBLIC_PASSPORT_TTL_HOURS)
 
 
 class AgentRegisterIn(BaseModel):
@@ -263,7 +290,7 @@ class AgentRegisterIn(BaseModel):
     owner_email: str
     passport_id: str | None = None
     issue_new_passport: bool = False
-    ttl_hours: int = Field(default=24, gt=0)
+    ttl_hours: int = Field(default=24, gt=0, le=MAX_PUBLIC_PASSPORT_TTL_HOURS)
 
 
 class KillSwitchIn(BaseModel):
@@ -300,13 +327,29 @@ def _text(value: Any) -> str | None:
     return None
 
 
+def _truthy_env(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _reject_wildcard_passport_scopes(
+    scope_clusters: list[str],
+    scope_intents: list[str],
+    scope_skills: list[str],
+) -> None:
+    if "*" not in {*scope_clusters, *scope_intents, *scope_skills}:
+        return
+    if _truthy_env("AXIOM_ALLOW_WILDCARD_PASSPORTS"):
+        return
+    raise HTTPException(
+        status_code=422,
+        detail="wildcard passport scopes require AXIOM_ALLOW_WILDCARD_PASSPORTS=1",
+    )
+
+
 def _entity_name(entity: Entity) -> str:
     data = entity.data or {}
     return (
-        _text(data.get("title"))
-        or _text(data.get("name"))
-        or _text(data.get("label"))
-        or entity.id
+        _text(data.get("title")) or _text(data.get("name")) or _text(data.get("label")) or entity.id
     )
 
 
@@ -323,7 +366,11 @@ def _is_policy_entity(entity: Entity) -> bool:
         )
         if value is not None
     )
-    return entity.type.lower() in {"policy", "governance"} or (entity.cluster_id or "").lower() == "governance" or "policy" in haystack
+    return (
+        entity.type.lower() in {"policy", "governance"}
+        or (entity.cluster_id or "").lower() == "governance"
+        or "policy" in haystack
+    )
 
 
 def _receipt_signed(receipt: Receipt) -> bool:
@@ -375,6 +422,7 @@ def _policy_rule_row(rule: PolicyRule) -> dict[str, Any]:
         "source": rule.source,
     }
 
+
 SETTINGS_FILE = Path("axiom_studio_settings.json")
 MCP_TOOL_NAMES = [
     "axiom_query_brain",
@@ -396,14 +444,19 @@ def _snapshots_enabled() -> bool:
     return os.environ.get("AXIOM_SNAPSHOT_ENABLED", "1").lower() not in {"0", "false", "no", "off"}
 
 
+def _production_mode() -> bool:
+    return os.environ.get("AXIOM_ENV", "").strip().lower() == "production"
+
+
 def create_app(
     *,
-    db_url: str = "sqlite:///./axiom.db",
+    db_url: str | None = None,
     live: bool = False,
     live_rate: float = 0.125,
     live_pause_after: int | None = None,
     enable_organizer: bool = True,
 ) -> FastAPI:
+    db_url = db_url or os.environ.get("DATABASE_URL") or "sqlite:///./axiom.db"
     engine = create_engine(db_url, future=True)
     ensure_passports_schema(engine)
     ensure_receipts_schema(engine)
@@ -417,6 +470,7 @@ def create_app(
     ensure_watchdog_alerts_schema(engine)
     ensure_approvals_schema(engine)
     ensure_connectors_schema(engine)
+    cast(Table, Secret.__table__).create(bind=engine, checkfirst=True)
     session_local = sessionmaker(bind=engine, future=True)
     broadcaster = EventBroadcaster()
     policy_evaluator = get_policy_evaluator(session_local)
@@ -426,7 +480,8 @@ def create_app(
         if live
         else None
     )
-    demo_simulator_enabled = os.environ.get("AXIOM_DEMO_SIMULATOR") == "1"
+    production_mode = _production_mode()
+    demo_simulator_enabled = os.environ.get("AXIOM_DEMO_SIMULATOR") == "1" and not production_mode
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -444,8 +499,8 @@ def create_app(
         app.state.events_per_min = 0.0
         app.state.studio_settings = {}
         app.state.mcp_action_events = []
-        app.state.mcp_tool_counts = {name: 0 for name in MCP_TOOL_NAMES}
-        app.state.mcp_last_called = {name: None for name in MCP_TOOL_NAMES}
+        app.state.mcp_tool_counts = dict.fromkeys(MCP_TOOL_NAMES, 0)
+        app.state.mcp_last_called = dict.fromkeys(MCP_TOOL_NAMES)
         app.state.policy_evaluator = policy_evaluator
         if SETTINGS_FILE.exists():
             try:
@@ -505,15 +560,13 @@ def create_app(
         health_task = asyncio.create_task(cluster_health_loop())
         cluster_check_retention_task = asyncio.create_task(cluster_check_retention_loop())
         agent_action_task = (
-            asyncio.create_task(
-                emit_demo_agent_actions(broadcaster, session_factory=session_local)
-            )
+            asyncio.create_task(emit_demo_agent_actions(broadcaster, session_factory=session_local))
             if demo_simulator_enabled
             else None
         )
         warden_task = (
             asyncio.create_task(emit_demo_warden_insights(broadcaster, session_local))
-            if os.environ.get("AXIOM_DEMO_WARDEN") == "1"
+            if os.environ.get("AXIOM_DEMO_WARDEN") == "1" and not production_mode
             else None
         )
         app.state.cluster_health_task = health_task
@@ -657,6 +710,27 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def enforce_api_auth(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        if not auth_required() or is_http_auth_exempt(request.method, request.url.path):
+            return await call_next(request)
+        if auth_is_misconfigured():
+            return JSONResponse(
+                {"detail": "API auth is required but AXIOM_API_TOKEN is not configured."},
+                status_code=503,
+            )
+        if not request_is_authenticated(request):
+            return JSONResponse(
+                {"detail": "Missing or invalid API bearer token."},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return await call_next(request)
+
     app.include_router(vault_router)
     app.include_router(llm_keys_router)
 
@@ -674,7 +748,7 @@ def create_app(
         return {"settings": dict(getattr(app.state, "studio_settings", {}))}
 
     @app.put("/api/internal/settings")
-    def put_studio_settings(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    def put_studio_settings(payload: Annotated[dict[str, Any], Body()]) -> dict[str, Any]:
         existing = dict(getattr(app.state, "studio_settings", {}))
         existing.update(payload)
         app.state.studio_settings = existing
@@ -684,30 +758,94 @@ def create_app(
             pass
         return {"settings": existing}
 
-    CONNECTOR_VENDORS = {"github", "linear", "slack", "notion", "gmail"}
+    connector_vendors = {"github", "linear", "slack", "notion", "gmail"}
 
-    def _connector_config_row_to_config(row: ConnectorConfigRow) -> ConnectorConfig:
+    def _vault_ref(vendor: str, key_name: str) -> str:
+        return f"vault:connector:{vendor}:{key_name}"
+
+    def _is_vault_ref(value: str | None) -> bool:
+        return bool(value and value.startswith("vault:connector:"))
+
+    def _secret_key_from_ref(vendor: str, ref: str) -> str | None:
+        prefix = f"vault:connector:{vendor}:"
+        return ref.removeprefix(prefix) if ref.startswith(prefix) else None
+
+    def _put_connector_secret(session: Any, vendor: str, key_name: str, plaintext: str) -> str:
+        delete_secret_with_session(session, f"connector:{vendor}", key_name)
+        store_secret_with_session(session, f"connector:{vendor}", key_name, plaintext)
+        return _vault_ref(vendor, key_name)
+
+    def _get_connector_secret(
+        session: Any,
+        vendor: str,
+        ref_or_plaintext: str | None,
+        env_fallback: str | None = None,
+    ) -> str | None:
+        if not ref_or_plaintext:
+            return env_fallback
+        key_name = _secret_key_from_ref(vendor, ref_or_plaintext)
+        if key_name is None:
+            return ref_or_plaintext
+        try:
+            return get_secret_with_session(session, f"connector:{vendor}", key_name)
+        except SecretNotFound:
+            return env_fallback
+
+    def _map_vault_error(exc: Exception) -> HTTPException:
+        if isinstance(exc, VaultLocked):
+            return HTTPException(
+                status_code=503,
+                detail="Vault locked. Set AXIOM_VAULT_KEY before storing connector secrets.",
+            )
+        if isinstance(exc, VaultCorrupt):
+            return HTTPException(status_code=500, detail="Vault decryption failed.")
+        return HTTPException(status_code=500, detail=str(exc))
+
+    def _connector_config_row_to_config(
+        session: Any,
+        row: ConnectorConfigRow,
+        fallback: ConnectorConfig,
+    ) -> ConnectorConfig:
         return ConnectorConfig(
             id=row.id,
             vendor=row.vendor,
             oauth_client_id=row.oauth_client_id,
-            oauth_client_secret=row.oauth_client_secret,
+            oauth_client_secret=_get_connector_secret(
+                session,
+                row.vendor,
+                row.oauth_client_secret,
+                fallback.oauth_client_secret,
+            ),
             redirect_uri=row.redirect_uri,
             scopes=list(row.scopes or []),
-            webhook_secret=row.webhook_secret,
+            webhook_secret=_get_connector_secret(
+                session,
+                row.vendor,
+                row.webhook_secret,
+                fallback.webhook_secret,
+            ),
             workspace_id=row.workspace_id,
             install_state=row.install_state,
         )
 
-    def _saved_connector_config(vendor: str) -> ConnectorConfig | None:
+    def _saved_connector_config(fallback: ConnectorConfig) -> ConnectorConfig | None:
         with session_local() as session:
-            row = session.execute(
-                select(ConnectorConfigRow).where(ConnectorConfigRow.vendor == vendor)
-            ).scalars().first()
-            return _connector_config_row_to_config(row) if row is not None else None
+            row = (
+                session.execute(
+                    select(ConnectorConfigRow).where(ConnectorConfigRow.vendor == fallback.vendor)
+                )
+                .scalars()
+                .first()
+            )
+            if row is None:
+                return None
+            try:
+                return _connector_config_row_to_config(session, row, fallback)
+            except (VaultLocked, VaultCorrupt) as exc:
+                raise _map_vault_error(exc) from exc
 
     def _with_saved_connector_config(fallback: ConnectorConfig) -> ConnectorConfig:
-        return _saved_connector_config(fallback.vendor) or fallback
+        return _saved_connector_config(fallback) or fallback
 
     def _connector_configured(config: ConnectorConfig) -> bool:
         return bool(
@@ -723,31 +861,199 @@ def create_app(
                 detail=f"{label} connector setup required",
             )
 
+    def _require_webhook_configured(config: ConnectorConfig, label: str) -> None:
+        if not (config.webhook_secret or "").strip():
+            raise HTTPException(
+                status_code=409,
+                detail=f"{label} webhook setup required",
+            )
+
     def _persist_connector_install_config(config: ConnectorConfig, state: str) -> None:
         with session_local() as session:
+            try:
+                oauth_client_secret = (
+                    _put_connector_secret(
+                        session,
+                        config.vendor,
+                        "oauth_client_secret",
+                        config.oauth_client_secret,
+                    )
+                    if config.oauth_client_secret
+                    else None
+                )
+                webhook_secret = (
+                    _put_connector_secret(
+                        session,
+                        config.vendor,
+                        "webhook_secret",
+                        config.webhook_secret,
+                    )
+                    if config.webhook_secret
+                    else None
+                )
+            except (VaultLocked, VaultCorrupt) as exc:
+                raise _map_vault_error(exc) from exc
             row = session.get(ConnectorConfigRow, config.id)
             if row is None:
                 row = ConnectorConfigRow(
                     id=config.id,
                     vendor=config.vendor,
                     oauth_client_id=config.oauth_client_id,
-                    oauth_client_secret=config.oauth_client_secret,
+                    oauth_client_secret=oauth_client_secret,
                     redirect_uri=config.redirect_uri,
                     scopes=config.scopes,
-                    webhook_secret=config.webhook_secret,
+                    webhook_secret=webhook_secret,
                     workspace_id=config.workspace_id,
                     install_state=state,
                 )
             else:
                 row.install_state = state
                 row.oauth_client_id = config.oauth_client_id
-                row.oauth_client_secret = config.oauth_client_secret
+                row.oauth_client_secret = oauth_client_secret or row.oauth_client_secret
                 row.redirect_uri = config.redirect_uri
                 row.scopes = config.scopes
-                row.webhook_secret = config.webhook_secret
+                row.webhook_secret = webhook_secret or row.webhook_secret
                 row.workspace_id = config.workspace_id
             session.add(row)
             session.commit()
+
+    def _new_connector_oauth_state() -> str:
+        try:
+            ttl_seconds = int(os.environ.get("AXIOM_OAUTH_STATE_TTL_SECONDS", "600"))
+        except ValueError:
+            ttl_seconds = 600
+        expires_at_ms = datetime_now_ms() + max(ttl_seconds, 60) * 1000
+        return f"{new_id()}.{expires_at_ms}"
+
+    def _connector_oauth_state_expired(state: str) -> bool:
+        try:
+            expires_at_ms = int(state.rsplit(".", 1)[1])
+        except (IndexError, ValueError):
+            return True
+        return expires_at_ms < datetime_now_ms()
+
+    def _consume_connector_oauth_state(config: ConnectorConfig, state: str) -> None:
+        with session_local() as session:
+            row = session.get(ConnectorConfigRow, config.id)
+            if (
+                row is None
+                or row.vendor != config.vendor
+                or not row.install_state
+                or not hmac.compare_digest(row.install_state, state)
+                or _connector_oauth_state_expired(row.install_state)
+            ):
+                raise HTTPException(status_code=400, detail="invalid OAuth state")
+            row.install_state = "callback_pending"
+            session.add(row)
+            session.commit()
+
+    def _put_connector_token(
+        session: Any,
+        vendor: str,
+        state_id: str,
+        token_name: str,
+        plaintext: str | None,
+    ) -> str | None:
+        if not plaintext:
+            return None
+        key_name = f"state:{state_id}:{token_name}"
+        return _put_connector_secret(session, vendor, key_name, plaintext)
+
+    def _get_connector_token(
+        session: Any,
+        row: ConnectorStateRow,
+        token_name: str,
+    ) -> str | None:
+        value = row.access_token if token_name == "access_token" else row.refresh_token
+        return _get_connector_secret(session, row.vendor, value)
+
+    def _connector_token_state(session: Any, row: ConnectorStateRow) -> SimpleNamespace:
+        return SimpleNamespace(
+            access_token=_get_connector_token(session, row, "access_token") or "",
+            refresh_token=_get_connector_token(session, row, "refresh_token"),
+            token_expires_at=row.token_expires_at,
+        )
+
+    def _webhook_graph_payload(
+        vendor: str, event: Any
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        payload = event.payload or {}
+        entities: list[dict[str, Any]] = []
+        edges: list[dict[str, Any]] = []
+
+        if vendor == "github":
+            repo = payload.get("repository")
+            repo_entity = (
+                github_normalize_repo(repo) if isinstance(repo, dict) and repo.get("id") else None
+            )
+            if repo_entity is not None:
+                entities.append(repo_entity)
+            repo_name = str((repo or {}).get("full_name") or "")
+            issue = payload.get("issue")
+            if isinstance(issue, dict) and issue.get("id"):
+                issue_entity = github_normalize_issue(repo_name, issue)
+                entities.append(issue_entity)
+                if repo_entity is not None:
+                    edges.append(
+                        github_repo_to_issue_edge(repo_entity["nick"], issue_entity["nick"])
+                    )
+            pull_request = payload.get("pull_request")
+            if isinstance(pull_request, dict) and pull_request.get("id"):
+                pr_entity = github_normalize_pull_request(repo_name, pull_request)
+                entities.append(pr_entity)
+                if repo_entity is not None:
+                    edges.append(github_repo_to_pr_edge(repo_entity["nick"], pr_entity["nick"]))
+
+        elif vendor == "linear":
+            data = payload.get("data")
+            if isinstance(data, dict) and data.get("id"):
+                if str(payload.get("type", "")).lower() == "issue":
+                    entities.append(linear_normalize_issue(data))
+                elif str(payload.get("type", "")).lower() == "project":
+                    entities.append(linear_normalize_project(data))
+                elif str(payload.get("type", "")).lower() == "team":
+                    entities.append(linear_normalize_team(data))
+
+        elif vendor == "slack":
+            slack_event = payload.get("event")
+            if isinstance(slack_event, dict):
+                event_type = str(slack_event.get("type") or "")
+                if event_type == "message" and slack_event.get("channel") and slack_event.get("ts"):
+                    entities.append(
+                        slack_normalize_message(str(slack_event["channel"]), slack_event)
+                    )
+                    edges.extend(
+                        slack_message_mention_edges(
+                            f"message:{slack_event['channel']}:{slack_event['ts']}",
+                            str(slack_event.get("text") or ""),
+                        )
+                    )
+                elif event_type in {"channel_created", "channel_rename"}:
+                    channel = slack_event.get("channel")
+                    if isinstance(channel, dict) and channel.get("id"):
+                        entities.append(slack_normalize_channel(channel))
+
+        if not entities:
+            entities.append(normalize_to_entity(vendor, event))
+            edges.extend(normalize_to_edges(vendor, event))
+
+        return entities, edges
+
+    async def _apply_signed_webhook_events_to_brain(
+        session: Any,
+        vendor: str,
+        events: list[Any],
+        signature_ok: bool,
+    ) -> int:
+        if not signature_ok:
+            return 0
+        entities: list[dict[str, Any]] = []
+        edges: list[dict[str, Any]] = []
+        for event in events:
+            event_entities, event_edges = _webhook_graph_payload(vendor, event)
+            entities.extend(event_entities)
+            edges.extend(event_edges)
+        return await apply_to_brain(session, entities, edges, broadcaster=broadcaster)
 
     def _connector_config_for(vendor: str) -> ConnectorConfig:
         if vendor == "github":
@@ -763,8 +1069,11 @@ def create_app(
         raise HTTPException(status_code=404, detail="connector not found")
 
     @app.put("/api/internal/connectors/{vendor}/config")
-    def put_connector_config(vendor: str, body: ConnectorConfigIn = Body(...)) -> dict[str, Any]:
-        if vendor not in CONNECTOR_VENDORS:
+    def put_connector_config(
+        vendor: str,
+        body: Annotated[ConnectorConfigIn, Body()],
+    ) -> dict[str, Any]:
+        if vendor not in connector_vendors:
             raise HTTPException(status_code=404, detail="connector not found")
         default = _connector_config_for(vendor)
         redirect_uri = (body.redirect_uri or default.redirect_uri or "").strip()
@@ -791,19 +1100,21 @@ def create_app(
         return _connector_configured(github_config())
 
     def github_config() -> ConnectorConfig:
-        return _with_saved_connector_config(ConnectorConfig(
-            id="github",
-            vendor="github",
-            oauth_client_id=os.environ.get("AXIOM_GITHUB_CLIENT_ID"),
-            oauth_client_secret=os.environ.get("AXIOM_GITHUB_CLIENT_SECRET"),
-            redirect_uri=os.environ.get(
-                "AXIOM_GITHUB_REDIRECT_URI",
-                "/api/internal/connectors/github/callback",
-            ),
-            scopes=GITHUB_SCOPES,
-            webhook_secret=os.environ.get("AXIOM_GITHUB_WEBHOOK_SECRET"),
-            workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
-        ))
+        return _with_saved_connector_config(
+            ConnectorConfig(
+                id="github",
+                vendor="github",
+                oauth_client_id=os.environ.get("AXIOM_GITHUB_CLIENT_ID"),
+                oauth_client_secret=os.environ.get("AXIOM_GITHUB_CLIENT_SECRET"),
+                redirect_uri=os.environ.get(
+                    "AXIOM_GITHUB_REDIRECT_URI",
+                    "/api/internal/connectors/github/callback",
+                ),
+                scopes=GITHUB_SCOPES,
+                webhook_secret=os.environ.get("AXIOM_GITHUB_WEBHOOK_SECRET"),
+                workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
+            )
+        )
 
     def require_github_enabled() -> None:
         _require_connector_configured(github_config(), "GitHub")
@@ -812,7 +1123,7 @@ def create_app(
     def post_github_install() -> dict[str, Any]:
         require_github_enabled()
         config = github_config()
-        state = new_id()
+        state = _new_connector_oauth_state()
         _persist_connector_install_config(config, state)
         return {"authorize_url": GitHubOAuth(config).authorize_url(state), "state": state}
 
@@ -820,6 +1131,7 @@ def create_app(
     def get_github_callback(code: str, state: str) -> dict[str, Any]:
         require_github_enabled()
         config = github_config()
+        _consume_connector_oauth_state(config, state)
         oauth_state = GitHubOAuth(config).exchange_code(code)
         with session_local() as session:
             config_row = session.get(ConnectorConfigRow, config.id)
@@ -828,20 +1140,50 @@ def create_app(
                     id=config.id,
                     vendor="github",
                     oauth_client_id=config.oauth_client_id,
-                    oauth_client_secret=config.oauth_client_secret,
+                    oauth_client_secret=_put_connector_secret(
+                        session,
+                        "github",
+                        "oauth_client_secret",
+                        config.oauth_client_secret or "",
+                    )
+                    if config.oauth_client_secret
+                    else None,
                     redirect_uri=config.redirect_uri,
                     scopes=config.scopes,
-                    webhook_secret=config.webhook_secret,
+                    webhook_secret=_put_connector_secret(
+                        session,
+                        "github",
+                        "webhook_secret",
+                        config.webhook_secret or "",
+                    )
+                    if config.webhook_secret
+                    else None,
                     workspace_id=config.workspace_id,
-                    install_state=state,
+                    install_state="connected",
                 )
+                session.add(config_row)
+            else:
+                config_row.install_state = "connected"
                 session.add(config_row)
             row = ConnectorStateRow(
                 id=oauth_state.id,
                 connector_id=config.id,
                 vendor="github",
-                access_token=oauth_state.access_token,
-                refresh_token=None,
+                access_token=_put_connector_token(
+                    session,
+                    "github",
+                    oauth_state.id,
+                    "access_token",
+                    oauth_state.access_token,
+                )
+                or "",
+                refresh_token=_put_connector_token(
+                    session,
+                    "github",
+                    oauth_state.id,
+                    "refresh_token",
+                    oauth_state.refresh_token,
+                ),
                 token_expires_at=None,
                 account_id=oauth_state.account_id,
                 account_label=oauth_state.account_label or "GitHub",
@@ -856,12 +1198,16 @@ def create_app(
     async def post_github_sync() -> dict[str, Any]:
         require_github_enabled()
         with session_local() as session:
-            state = session.execute(
-                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "github")
-            ).scalars().first()
+            state = (
+                session.execute(
+                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "github")
+                )
+                .scalars()
+                .first()
+            )
             if state is None:
                 raise HTTPException(status_code=404, detail="GitHub connector not installed")
-            token_state = SimpleNamespace(access_token=state.access_token)
+            token_state = _connector_token_state(session, state)
             repos = github_fetch_initial_repos(token_state)
             entities: list[dict[str, Any]] = []
             edges: list[dict[str, Any]] = []
@@ -887,12 +1233,15 @@ def create_app(
 
     @app.post("/api/internal/connectors/github/webhook")
     async def post_github_webhook(request: Request) -> dict[str, Any]:
-        require_github_enabled()
+        config = github_config()
+        _require_webhook_configured(config, "GitHub")
         body = await request.body()
         headers = dict(request.headers)
-        handler = GitHubWebhookHandler(os.environ.get("AXIOM_GITHUB_WEBHOOK_SECRET", ""))
+        handler = GitHubWebhookHandler(config.webhook_secret or "")
         parsed_request = SimpleNamespace(body=body, headers=headers)
         signature_ok = handler.verify(parsed_request)
+        if not signature_ok:
+            raise HTTPException(status_code=401, detail="invalid webhook signature")
         events = handler.parse(parsed_request)
         with session_local() as session:
             for event in events:
@@ -909,6 +1258,12 @@ def create_app(
                     )
                 )
             session.commit()
+            ingested = await _apply_signed_webhook_events_to_brain(
+                session,
+                "github",
+                events,
+                signature_ok,
+            )
         for event in events:
             await broadcaster.publish(
                 {
@@ -919,15 +1274,19 @@ def create_app(
                     "payload": {"vendor": "github", "event_type": event.event_type},
                 }
             )
-        return {"ok": signature_ok, "events": len(events)}
+        return {"ok": signature_ok, "events": len(events), "ingested": ingested}
 
     @app.get("/api/internal/connectors/github/status")
     def get_github_status() -> dict[str, Any]:
         require_github_enabled()
         with session_local() as session:
-            row = session.execute(
-                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "github")
-            ).scalars().first()
+            row = (
+                session.execute(
+                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "github")
+                )
+                .scalars()
+                .first()
+            )
         if row is None:
             return {"vendor": "github", "status": "disconnected"}
         return {
@@ -941,19 +1300,21 @@ def create_app(
         return _connector_configured(linear_config())
 
     def linear_config() -> ConnectorConfig:
-        return _with_saved_connector_config(ConnectorConfig(
-            id="linear",
-            vendor="linear",
-            oauth_client_id=os.environ.get("AXIOM_LINEAR_CLIENT_ID"),
-            oauth_client_secret=os.environ.get("AXIOM_LINEAR_CLIENT_SECRET"),
-            redirect_uri=os.environ.get(
-                "AXIOM_LINEAR_REDIRECT_URI",
-                "/api/internal/connectors/linear/callback",
-            ),
-            scopes=LINEAR_SCOPES,
-            webhook_secret=os.environ.get("AXIOM_LINEAR_WEBHOOK_SECRET"),
-            workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
-        ))
+        return _with_saved_connector_config(
+            ConnectorConfig(
+                id="linear",
+                vendor="linear",
+                oauth_client_id=os.environ.get("AXIOM_LINEAR_CLIENT_ID"),
+                oauth_client_secret=os.environ.get("AXIOM_LINEAR_CLIENT_SECRET"),
+                redirect_uri=os.environ.get(
+                    "AXIOM_LINEAR_REDIRECT_URI",
+                    "/api/internal/connectors/linear/callback",
+                ),
+                scopes=LINEAR_SCOPES,
+                webhook_secret=os.environ.get("AXIOM_LINEAR_WEBHOOK_SECRET"),
+                workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
+            )
+        )
 
     def require_linear_enabled() -> None:
         _require_connector_configured(linear_config(), "Linear")
@@ -962,7 +1323,7 @@ def create_app(
     def post_linear_install() -> dict[str, Any]:
         require_linear_enabled()
         config = linear_config()
-        state = new_id()
+        state = _new_connector_oauth_state()
         _persist_connector_install_config(config, state)
         return {"authorize_url": LinearOAuth(config).authorize_url(state), "state": state}
 
@@ -970,6 +1331,7 @@ def create_app(
     def get_linear_callback(code: str, state: str) -> dict[str, Any]:
         require_linear_enabled()
         config = linear_config()
+        _consume_connector_oauth_state(config, state)
         oauth_state = LinearOAuth(config).exchange_code(code)
         with session_local() as session:
             config_row = session.get(ConnectorConfigRow, config.id)
@@ -978,20 +1340,50 @@ def create_app(
                     id=config.id,
                     vendor="linear",
                     oauth_client_id=config.oauth_client_id,
-                    oauth_client_secret=config.oauth_client_secret,
+                    oauth_client_secret=_put_connector_secret(
+                        session,
+                        "linear",
+                        "oauth_client_secret",
+                        config.oauth_client_secret or "",
+                    )
+                    if config.oauth_client_secret
+                    else None,
                     redirect_uri=config.redirect_uri,
                     scopes=config.scopes,
-                    webhook_secret=config.webhook_secret,
+                    webhook_secret=_put_connector_secret(
+                        session,
+                        "linear",
+                        "webhook_secret",
+                        config.webhook_secret or "",
+                    )
+                    if config.webhook_secret
+                    else None,
                     workspace_id=config.workspace_id,
-                    install_state=state,
+                    install_state="connected",
                 )
+                session.add(config_row)
+            else:
+                config_row.install_state = "connected"
                 session.add(config_row)
             row = ConnectorStateRow(
                 id=oauth_state.id,
                 connector_id=config.id,
                 vendor="linear",
-                access_token=oauth_state.access_token,
-                refresh_token=oauth_state.refresh_token,
+                access_token=_put_connector_token(
+                    session,
+                    "linear",
+                    oauth_state.id,
+                    "access_token",
+                    oauth_state.access_token,
+                )
+                or "",
+                refresh_token=_put_connector_token(
+                    session,
+                    "linear",
+                    oauth_state.id,
+                    "refresh_token",
+                    oauth_state.refresh_token,
+                ),
                 token_expires_at=oauth_state.token_expires_at,
                 account_id=oauth_state.account_id,
                 account_label=oauth_state.account_label or "Linear Workspace",
@@ -1009,12 +1401,16 @@ def create_app(
     async def post_linear_sync() -> dict[str, Any]:
         require_linear_enabled()
         with session_local() as session:
-            state = session.execute(
-                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "linear")
-            ).scalars().first()
+            state = (
+                session.execute(
+                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "linear")
+                )
+                .scalars()
+                .first()
+            )
             if state is None:
                 raise HTTPException(status_code=404, detail="Linear connector not installed")
-            token_state = SimpleNamespace(access_token=state.access_token)
+            token_state = _connector_token_state(session, state)
             teams = linear_fetch_teams(token_state)
             projects = linear_fetch_projects(token_state)
             entities: list[dict[str, Any]] = []
@@ -1033,12 +1429,17 @@ def create_app(
                     edges.append(
                         linear_team_to_issue_edge(team_entity["nick"], issue_entity["nick"])
                     )
-                    project = issue.get("project") or {}
-                    project_entity = projects_by_id.get(str(project.get("id")))
-                    if project_entity is not None:
+                    project_payload = issue.get("project")
+                    project_id = (
+                        str(project_payload.get("id"))
+                        if isinstance(project_payload, dict)
+                        else ""
+                    )
+                    linked_project_entity = projects_by_id.get(project_id)
+                    if linked_project_entity is not None:
                         edges.append(
                             linear_project_to_issue_edge(
-                                project_entity["nick"],
+                                linked_project_entity["nick"],
                                 issue_entity["nick"],
                             )
                         )
@@ -1050,12 +1451,15 @@ def create_app(
 
     @app.post("/api/internal/connectors/linear/webhook")
     async def post_linear_webhook(request: Request) -> dict[str, Any]:
-        require_linear_enabled()
+        config = linear_config()
+        _require_webhook_configured(config, "Linear")
         body = await request.body()
         headers = dict(request.headers)
-        handler = LinearWebhookHandler(os.environ.get("AXIOM_LINEAR_WEBHOOK_SECRET", ""))
+        handler = LinearWebhookHandler(config.webhook_secret or "")
         parsed_request = SimpleNamespace(body=body, headers=headers)
         signature_ok = handler.verify(parsed_request)
+        if not signature_ok:
+            raise HTTPException(status_code=401, detail="invalid webhook signature")
         events = handler.parse(parsed_request)
         with session_local() as session:
             for event in events:
@@ -1072,6 +1476,12 @@ def create_app(
                     )
                 )
             session.commit()
+            ingested = await _apply_signed_webhook_events_to_brain(
+                session,
+                "linear",
+                events,
+                signature_ok,
+            )
         for event in events:
             await broadcaster.publish(
                 {
@@ -1082,15 +1492,19 @@ def create_app(
                     "payload": {"vendor": "linear", "event_type": event.event_type},
                 }
             )
-        return {"ok": signature_ok, "events": len(events)}
+        return {"ok": signature_ok, "events": len(events), "ingested": ingested}
 
     @app.get("/api/internal/connectors/linear/status")
     def get_linear_status() -> dict[str, Any]:
         require_linear_enabled()
         with session_local() as session:
-            row = session.execute(
-                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "linear")
-            ).scalars().first()
+            row = (
+                session.execute(
+                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "linear")
+                )
+                .scalars()
+                .first()
+            )
         if row is None:
             return {"vendor": "linear", "status": "disconnected"}
         return {
@@ -1104,19 +1518,21 @@ def create_app(
         return _connector_configured(slack_config())
 
     def slack_config() -> ConnectorConfig:
-        return _with_saved_connector_config(ConnectorConfig(
-            id="slack",
-            vendor="slack",
-            oauth_client_id=os.environ.get("AXIOM_SLACK_CLIENT_ID"),
-            oauth_client_secret=os.environ.get("AXIOM_SLACK_CLIENT_SECRET"),
-            redirect_uri=os.environ.get(
-                "AXIOM_SLACK_REDIRECT_URI",
-                "/api/internal/connectors/slack/callback",
-            ),
-            scopes=SLACK_BOT_SCOPES,
-            webhook_secret=os.environ.get("AXIOM_SLACK_SIGNING_SECRET"),
-            workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
-        ))
+        return _with_saved_connector_config(
+            ConnectorConfig(
+                id="slack",
+                vendor="slack",
+                oauth_client_id=os.environ.get("AXIOM_SLACK_CLIENT_ID"),
+                oauth_client_secret=os.environ.get("AXIOM_SLACK_CLIENT_SECRET"),
+                redirect_uri=os.environ.get(
+                    "AXIOM_SLACK_REDIRECT_URI",
+                    "/api/internal/connectors/slack/callback",
+                ),
+                scopes=SLACK_BOT_SCOPES,
+                webhook_secret=os.environ.get("AXIOM_SLACK_SIGNING_SECRET"),
+                workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
+            )
+        )
 
     def require_slack_enabled() -> None:
         _require_connector_configured(slack_config(), "Slack")
@@ -1125,7 +1541,7 @@ def create_app(
     def post_slack_install() -> dict[str, Any]:
         require_slack_enabled()
         config = slack_config()
-        state = new_id()
+        state = _new_connector_oauth_state()
         _persist_connector_install_config(config, state)
         return {"authorize_url": SlackOAuth(config).authorize_url(state), "state": state}
 
@@ -1133,6 +1549,7 @@ def create_app(
     def get_slack_callback(code: str, state: str) -> dict[str, Any]:
         require_slack_enabled()
         config = slack_config()
+        _consume_connector_oauth_state(config, state)
         oauth_state = SlackOAuth(config).exchange_code(code)
         with session_local() as session:
             config_row = session.get(ConnectorConfigRow, config.id)
@@ -1141,20 +1558,50 @@ def create_app(
                     id=config.id,
                     vendor="slack",
                     oauth_client_id=config.oauth_client_id,
-                    oauth_client_secret=config.oauth_client_secret,
+                    oauth_client_secret=_put_connector_secret(
+                        session,
+                        "slack",
+                        "oauth_client_secret",
+                        config.oauth_client_secret or "",
+                    )
+                    if config.oauth_client_secret
+                    else None,
                     redirect_uri=config.redirect_uri,
                     scopes=config.scopes,
-                    webhook_secret=config.webhook_secret,
+                    webhook_secret=_put_connector_secret(
+                        session,
+                        "slack",
+                        "webhook_secret",
+                        config.webhook_secret or "",
+                    )
+                    if config.webhook_secret
+                    else None,
                     workspace_id=config.workspace_id,
-                    install_state=state,
+                    install_state="connected",
                 )
+                session.add(config_row)
+            else:
+                config_row.install_state = "connected"
                 session.add(config_row)
             row = ConnectorStateRow(
                 id=oauth_state.id,
                 connector_id=config.id,
                 vendor="slack",
-                access_token=oauth_state.access_token,
-                refresh_token=oauth_state.refresh_token,
+                access_token=_put_connector_token(
+                    session,
+                    "slack",
+                    oauth_state.id,
+                    "access_token",
+                    oauth_state.access_token,
+                )
+                or "",
+                refresh_token=_put_connector_token(
+                    session,
+                    "slack",
+                    oauth_state.id,
+                    "refresh_token",
+                    oauth_state.refresh_token,
+                ),
                 token_expires_at=oauth_state.token_expires_at,
                 account_id=oauth_state.account_id,
                 account_label=oauth_state.account_label or "Slack Workspace",
@@ -1172,12 +1619,16 @@ def create_app(
     async def post_slack_sync() -> dict[str, Any]:
         require_slack_enabled()
         with session_local() as session:
-            state = session.execute(
-                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "slack")
-            ).scalars().first()
+            state = (
+                session.execute(
+                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "slack")
+                )
+                .scalars()
+                .first()
+            )
             if state is None:
                 raise HTTPException(status_code=404, detail="Slack connector not installed")
-            token_state = SimpleNamespace(access_token=state.access_token)
+            token_state = _connector_token_state(session, state)
             entities: list[dict[str, Any]] = []
             edges: list[dict[str, Any]] = []
             for user in slack_fetch_users(token_state):
@@ -1217,15 +1668,20 @@ def create_app(
 
     @app.post("/api/internal/connectors/slack/webhook", response_model=None)
     async def post_slack_webhook(request: Request) -> dict[str, Any] | PlainTextResponse:
-        require_slack_enabled()
+        config = slack_config()
+        _require_webhook_configured(config, "Slack")
         body = await request.body()
         headers = dict(request.headers)
-        handler = SlackWebhookHandler(os.environ.get("AXIOM_SLACK_SIGNING_SECRET", ""))
+        handler = SlackWebhookHandler(config.webhook_secret or "")
         parsed_request = SimpleNamespace(body=body, headers=headers)
+        signature_ok = handler.verify(parsed_request)
         challenge = handler.challenge_response(parsed_request)
         if challenge is not None:
+            if not signature_ok:
+                raise HTTPException(status_code=401, detail="invalid webhook signature")
             return PlainTextResponse(challenge)
-        signature_ok = handler.verify(parsed_request)
+        if not signature_ok:
+            raise HTTPException(status_code=401, detail="invalid webhook signature")
         events = handler.parse(parsed_request)
         with session_local() as session:
             for event in events:
@@ -1242,6 +1698,12 @@ def create_app(
                     )
                 )
             session.commit()
+            ingested = await _apply_signed_webhook_events_to_brain(
+                session,
+                "slack",
+                events,
+                signature_ok,
+            )
         for event in events:
             await broadcaster.publish(
                 {
@@ -1252,15 +1714,19 @@ def create_app(
                     "payload": {"vendor": "slack", "event_type": event.event_type},
                 }
             )
-        return {"ok": signature_ok, "events": len(events)}
+        return {"ok": signature_ok, "events": len(events), "ingested": ingested}
 
     @app.get("/api/internal/connectors/slack/status")
     def get_slack_status() -> dict[str, Any]:
         require_slack_enabled()
         with session_local() as session:
-            row = session.execute(
-                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "slack")
-            ).scalars().first()
+            row = (
+                session.execute(
+                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "slack")
+                )
+                .scalars()
+                .first()
+            )
         if row is None:
             return {"vendor": "slack", "status": "disconnected"}
         return {
@@ -1274,17 +1740,19 @@ def create_app(
         return _connector_configured(notion_config())
 
     def notion_config() -> ConnectorConfig:
-        return _with_saved_connector_config(ConnectorConfig(
-            id="notion",
-            vendor="notion",
-            oauth_client_id=os.environ.get("AXIOM_NOTION_CLIENT_ID"),
-            oauth_client_secret=os.environ.get("AXIOM_NOTION_CLIENT_SECRET"),
-            redirect_uri=os.environ.get(
-                "AXIOM_NOTION_REDIRECT_URI",
-                "/api/internal/connectors/notion/callback",
-            ),
-            workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
-        ))
+        return _with_saved_connector_config(
+            ConnectorConfig(
+                id="notion",
+                vendor="notion",
+                oauth_client_id=os.environ.get("AXIOM_NOTION_CLIENT_ID"),
+                oauth_client_secret=os.environ.get("AXIOM_NOTION_CLIENT_SECRET"),
+                redirect_uri=os.environ.get(
+                    "AXIOM_NOTION_REDIRECT_URI",
+                    "/api/internal/connectors/notion/callback",
+                ),
+                workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
+            )
+        )
 
     def require_notion_enabled() -> None:
         _require_connector_configured(notion_config(), "Notion")
@@ -1293,7 +1761,7 @@ def create_app(
     def post_notion_install() -> dict[str, Any]:
         require_notion_enabled()
         config = notion_config()
-        state = new_id()
+        state = _new_connector_oauth_state()
         _persist_connector_install_config(config, state)
         return {"authorize_url": NotionOAuth(config).authorize_url(state), "state": state}
 
@@ -1301,6 +1769,7 @@ def create_app(
     def get_notion_callback(code: str, state: str) -> dict[str, Any]:
         require_notion_enabled()
         config = notion_config()
+        _consume_connector_oauth_state(config, state)
         oauth_state = NotionOAuth(config).exchange_code(code)
         with session_local() as session:
             config_row = session.get(ConnectorConfigRow, config.id)
@@ -1309,19 +1778,42 @@ def create_app(
                     id=config.id,
                     vendor="notion",
                     oauth_client_id=config.oauth_client_id,
-                    oauth_client_secret=config.oauth_client_secret,
+                    oauth_client_secret=_put_connector_secret(
+                        session,
+                        "notion",
+                        "oauth_client_secret",
+                        config.oauth_client_secret or "",
+                    )
+                    if config.oauth_client_secret
+                    else None,
                     redirect_uri=config.redirect_uri,
                     scopes=[],
                     workspace_id=config.workspace_id,
-                    install_state=state,
+                    install_state="connected",
                 )
+                session.add(config_row)
+            else:
+                config_row.install_state = "connected"
                 session.add(config_row)
             row = ConnectorStateRow(
                 id=oauth_state.id,
                 connector_id=config.id,
                 vendor="notion",
-                access_token=oauth_state.access_token,
-                refresh_token=oauth_state.refresh_token,
+                access_token=_put_connector_token(
+                    session,
+                    "notion",
+                    oauth_state.id,
+                    "access_token",
+                    oauth_state.access_token,
+                )
+                or "",
+                refresh_token=_put_connector_token(
+                    session,
+                    "notion",
+                    oauth_state.id,
+                    "refresh_token",
+                    oauth_state.refresh_token,
+                ),
                 token_expires_at=oauth_state.token_expires_at,
                 account_id=oauth_state.account_id,
                 account_label=oauth_state.account_label or "Notion Workspace",
@@ -1340,12 +1832,16 @@ def create_app(
     async def post_notion_sync() -> dict[str, Any]:
         require_notion_enabled()
         with session_local() as session:
-            state = session.execute(
-                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "notion")
-            ).scalars().first()
+            state = (
+                session.execute(
+                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "notion")
+                )
+                .scalars()
+                .first()
+            )
             if state is None:
                 raise HTTPException(status_code=404, detail="Notion connector not installed")
-            token_state = SimpleNamespace(access_token=state.access_token)
+            token_state = _connector_token_state(session, state)
             entities: list[dict[str, Any]] = []
             edges: list[dict[str, Any]] = []
             for database in notion_fetch_databases(token_state):
@@ -1370,12 +1866,16 @@ def create_app(
     async def post_notion_poll() -> dict[str, Any]:
         require_notion_enabled()
         with session_local() as session:
-            state = session.execute(
-                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "notion")
-            ).scalars().first()
+            state = (
+                session.execute(
+                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "notion")
+                )
+                .scalars()
+                .first()
+            )
             if state is None:
                 raise HTTPException(status_code=404, detail="Notion connector not installed")
-            events = NotionPoller(state=SimpleNamespace(access_token=state.access_token)).poll_once()
+            events = NotionPoller(state=_connector_token_state(session, state)).poll_once()
             for event in events:
                 session.add(
                     ConnectorEventRow(
@@ -1408,9 +1908,13 @@ def create_app(
     def get_notion_status() -> dict[str, Any]:
         require_notion_enabled()
         with session_local() as session:
-            row = session.execute(
-                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "notion")
-            ).scalars().first()
+            row = (
+                session.execute(
+                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "notion")
+                )
+                .scalars()
+                .first()
+            )
         if row is None:
             return {"vendor": "notion", "status": "disconnected", "watch_mode": "polling"}
         return {
@@ -1425,18 +1929,20 @@ def create_app(
         return _connector_configured(gmail_config())
 
     def gmail_config() -> ConnectorConfig:
-        return _with_saved_connector_config(ConnectorConfig(
-            id="gmail",
-            vendor="gmail",
-            oauth_client_id=os.environ.get("AXIOM_GMAIL_CLIENT_ID"),
-            oauth_client_secret=os.environ.get("AXIOM_GMAIL_CLIENT_SECRET"),
-            redirect_uri=os.environ.get(
-                "AXIOM_GMAIL_REDIRECT_URI",
-                "/api/internal/connectors/gmail/callback",
-            ),
-            scopes=GMAIL_SCOPES,
-            workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
-        ))
+        return _with_saved_connector_config(
+            ConnectorConfig(
+                id="gmail",
+                vendor="gmail",
+                oauth_client_id=os.environ.get("AXIOM_GMAIL_CLIENT_ID"),
+                oauth_client_secret=os.environ.get("AXIOM_GMAIL_CLIENT_SECRET"),
+                redirect_uri=os.environ.get(
+                    "AXIOM_GMAIL_REDIRECT_URI",
+                    "/api/internal/connectors/gmail/callback",
+                ),
+                scopes=GMAIL_SCOPES,
+                workspace_id=os.environ.get("AXIOM_WORKSPACE_ID"),
+            )
+        )
 
     def require_gmail_enabled() -> None:
         _require_connector_configured(gmail_config(), "Gmail")
@@ -1445,7 +1951,7 @@ def create_app(
     def post_gmail_install() -> dict[str, Any]:
         require_gmail_enabled()
         config = gmail_config()
-        state = new_id()
+        state = _new_connector_oauth_state()
         _persist_connector_install_config(config, state)
         return {"authorize_url": GmailOAuth(config).authorize_url(state), "state": state}
 
@@ -1453,6 +1959,7 @@ def create_app(
     def get_gmail_callback(code: str, state: str) -> dict[str, Any]:
         require_gmail_enabled()
         config = gmail_config()
+        _consume_connector_oauth_state(config, state)
         oauth_state = GmailOAuth(config).exchange_code(code)
         with session_local() as session:
             config_row = session.get(ConnectorConfigRow, config.id)
@@ -1461,19 +1968,42 @@ def create_app(
                     id=config.id,
                     vendor="gmail",
                     oauth_client_id=config.oauth_client_id,
-                    oauth_client_secret=config.oauth_client_secret,
+                    oauth_client_secret=_put_connector_secret(
+                        session,
+                        "gmail",
+                        "oauth_client_secret",
+                        config.oauth_client_secret or "",
+                    )
+                    if config.oauth_client_secret
+                    else None,
                     redirect_uri=config.redirect_uri,
                     scopes=config.scopes,
                     workspace_id=config.workspace_id,
-                    install_state=state,
+                    install_state="connected",
                 )
+                session.add(config_row)
+            else:
+                config_row.install_state = "connected"
                 session.add(config_row)
             row = ConnectorStateRow(
                 id=oauth_state.id,
                 connector_id=config.id,
                 vendor="gmail",
-                access_token=oauth_state.access_token,
-                refresh_token=oauth_state.refresh_token,
+                access_token=_put_connector_token(
+                    session,
+                    "gmail",
+                    oauth_state.id,
+                    "access_token",
+                    oauth_state.access_token,
+                )
+                or "",
+                refresh_token=_put_connector_token(
+                    session,
+                    "gmail",
+                    oauth_state.id,
+                    "refresh_token",
+                    oauth_state.refresh_token,
+                ),
                 token_expires_at=oauth_state.token_expires_at,
                 account_id=oauth_state.account_id,
                 account_label=oauth_state.account_label or "Gmail",
@@ -1488,12 +2018,16 @@ def create_app(
     async def post_gmail_sync() -> dict[str, Any]:
         require_gmail_enabled()
         with session_local() as session:
-            state = session.execute(
-                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "gmail")
-            ).scalars().first()
+            state = (
+                session.execute(
+                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "gmail")
+                )
+                .scalars()
+                .first()
+            )
             if state is None:
                 raise HTTPException(status_code=404, detail="Gmail connector not installed")
-            token_state = SimpleNamespace(access_token=state.access_token)
+            token_state = _connector_token_state(session, state)
             entities: list[dict[str, Any]] = []
             edges: list[dict[str, Any]] = []
             for label in gmail_fetch_labels(token_state):
@@ -1521,6 +2055,8 @@ def create_app(
         handler = GmailWebhookHandler()
         parsed_request = SimpleNamespace(body=body, headers=headers)
         signature_ok = handler.verify(parsed_request)
+        if not signature_ok:
+            raise HTTPException(status_code=401, detail="invalid webhook signature")
         events = handler.parse(parsed_request)
         with session_local() as session:
             for event in events:
@@ -1537,6 +2073,12 @@ def create_app(
                     )
                 )
             session.commit()
+            ingested = await _apply_signed_webhook_events_to_brain(
+                session,
+                "gmail",
+                events,
+                signature_ok,
+            )
         for event in events:
             await broadcaster.publish(
                 {
@@ -1547,15 +2089,19 @@ def create_app(
                     "payload": {"vendor": "gmail", "event_type": event.event_type},
                 }
             )
-        return {"ok": signature_ok, "events": len(events)}
+        return {"ok": signature_ok, "events": len(events), "ingested": ingested}
 
     @app.get("/api/internal/connectors/gmail/status")
     def get_gmail_status() -> dict[str, Any]:
         require_gmail_enabled()
         with session_local() as session:
-            row = session.execute(
-                select(ConnectorStateRow).where(ConnectorStateRow.vendor == "gmail")
-            ).scalars().first()
+            row = (
+                session.execute(
+                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "gmail")
+                )
+                .scalars()
+                .first()
+            )
         if row is None:
             return {"vendor": "gmail", "status": "disconnected"}
         return {
@@ -1570,9 +2116,11 @@ def create_app(
         if vendor not in {"github", "linear", "slack", "notion", "gmail"}:
             raise HTTPException(status_code=404, detail="connector not found")
         with session_local() as session:
-            rows = session.execute(
-                select(ConnectorStateRow).where(ConnectorStateRow.vendor == vendor)
-            ).scalars().all()
+            rows = (
+                session.execute(select(ConnectorStateRow).where(ConnectorStateRow.vendor == vendor))
+                .scalars()
+                .all()
+            )
             for row in rows:
                 session.delete(row)
             session.commit()
@@ -1596,9 +2144,11 @@ def create_app(
     def post_connector_test(vendor: str) -> dict[str, Any]:
         require_connector_enabled(vendor)
         with session_local() as session:
-            row = session.execute(
-                select(ConnectorStateRow).where(ConnectorStateRow.vendor == vendor)
-            ).scalars().first()
+            row = (
+                session.execute(select(ConnectorStateRow).where(ConnectorStateRow.vendor == vendor))
+                .scalars()
+                .first()
+            )
         return {
             "vendor": vendor,
             "ok": row is not None and row.status == "connected",
@@ -1607,14 +2157,19 @@ def create_app(
 
     @app.get("/api/internal/connectors/{vendor}/events")
     def get_connector_events(vendor: str) -> dict[str, Any]:
-        require_connector_enabled(vendor)
+        if vendor not in {"github", "linear", "slack", "notion", "gmail"}:
+            raise HTTPException(status_code=404, detail="connector not found")
         with session_local() as session:
-            rows = session.execute(
-                select(ConnectorEventRow)
-                .where(ConnectorEventRow.vendor == vendor)
-                .order_by(desc(ConnectorEventRow.received_at))
-                .limit(50)
-            ).scalars().all()
+            rows = (
+                session.execute(
+                    select(ConnectorEventRow)
+                    .where(ConnectorEventRow.vendor == vendor)
+                    .order_by(desc(ConnectorEventRow.received_at))
+                    .limit(50)
+                )
+                .scalars()
+                .all()
+            )
         return {
             "events": [
                 {
@@ -1640,7 +2195,11 @@ def create_app(
         configured: dict[str, bool] = {}
         with session_local() as session:
             config_rows = {
-                row.vendor: _connector_config_row_to_config(row)
+                row.vendor: _connector_config_row_to_config(
+                    session,
+                    row,
+                    ConnectorConfig(id=row.id, vendor=row.vendor),
+                )
                 for row in session.execute(select(ConnectorConfigRow)).scalars().all()
             }
             for vendor in vendors:
@@ -1686,12 +2245,12 @@ def create_app(
     @app.get("/api/internal/agent-registry")
     def get_agent_registry(
         days: int = Query(30, ge=1, le=365),
-        type: AgentType | None = Query(None),  # noqa: A002
+        type: Annotated[AgentType | None, Query()] = None,  # noqa: A002
     ) -> dict[str, Any]:
         with session_local() as session:
             rows = get_agents(session, days=days, agent_type=type)
         passports = list_passports(session_local, active_only=False)
-        passports_by_agent = {}
+        passports_by_agent: dict[str, AgentPassport] = {}
         for passport in passports:
             existing = passports_by_agent.get(passport.agent_name)
             if existing is None or passport.issued_at > existing.issued_at:
@@ -1699,15 +2258,15 @@ def create_app(
         enriched = []
         for row in rows:
             payload = agent_registry_row(row)
-            passport = passports_by_agent.get(row.agent_name)
-            if passport is not None:
-                passport_payload = passport_to_dict(passport)
+            matched_passport = passports_by_agent.get(row.agent_name)
+            if matched_passport is not None:
+                passport_payload = passport_to_dict(matched_passport)
                 payload.update(
                     {
                         "name": row.agent_name,
-                        "agent_class": passport.agent_class,
-                        "owner_email": passport.owner_email,
-                        "passport_id": passport.passport_id,
+                        "agent_class": matched_passport.agent_class,
+                        "owner_email": matched_passport.owner_email,
+                        "passport_id": matched_passport.passport_id,
                         "passport_status": _passport_status(passport_payload),
                     }
                 )
@@ -1729,7 +2288,7 @@ def create_app(
         }
 
     @app.post("/api/internal/agent-registry")
-    async def post_agent_registry(body: AgentRegisterIn = Body(...)) -> dict[str, Any]:
+    async def post_agent_registry(body: Annotated[AgentRegisterIn, Body()]) -> dict[str, Any]:
         name = body.name.strip()
         agent_class = body.agent_class.strip()
         owner_email = body.owner_email.strip()
@@ -1745,9 +2304,9 @@ def create_app(
                     agent_name=name,
                     agent_class=agent_class,
                     owner_email=owner_email,
-                    scope_clusters=["*"],
-                    scope_intents=["*"],
-                    scope_skills=["*"],
+                    scope_clusters=["external_mcp"],
+                    scope_intents=["read"],
+                    scope_skills=[],
                     ttl_hours=body.ttl_hours,
                 )
             except ValueError as exc:
@@ -1795,7 +2354,13 @@ def create_app(
         one_hour_ago = now_ms - 3600_000
         raw_events = list(getattr(app.state, "mcp_action_events", []))
         events = [event for event in raw_events if int(event.get("timestamp", 0)) >= one_hour_ago]
-        active_agents = sorted({str(event.get("agent_name", "")).strip() for event in events if event.get("agent_name")})
+        active_agents = sorted(
+            {
+                str(event.get("agent_name", "")).strip()
+                for event in events
+                if event.get("agent_name")
+            }
+        )
         one_hour_ago_dt = datetime.utcnow() - timedelta(hours=1)
         with session_local() as session:
             observed_agents = [
@@ -1819,10 +2384,14 @@ def create_app(
             "active_agents": active_agents,
             "observed_agents": observed_agents,
             "last_tool_call": max((event.get("timestamp") for event in raw_events), default=None),
-            "recent_actions": sorted(events, key=lambda item: int(item.get("timestamp", 0)), reverse=True)[:20],
+            "recent_actions": sorted(
+                events, key=lambda item: int(item.get("timestamp", 0)), reverse=True
+            )[:20],
         }
 
-    async def publish_passport_event(event_type: str, payload: dict[str, Any], persisted_id: str) -> None:
+    async def publish_passport_event(
+        event_type: str, payload: dict[str, Any], persisted_id: str
+    ) -> None:
         await broadcaster.publish(
             {
                 "type": event_type,
@@ -1834,7 +2403,12 @@ def create_app(
         )
 
     @app.post("/api/internal/passports")
-    async def post_internal_passport(body: PassportIn = Body(...)) -> dict[str, Any]:
+    async def post_internal_passport(body: Annotated[PassportIn, Body()]) -> dict[str, Any]:
+        _reject_wildcard_passport_scopes(
+            body.scope_clusters,
+            body.scope_intents,
+            body.scope_skills,
+        )
         try:
             row, token = issue_passport(
                 session_local,
@@ -1865,7 +2439,9 @@ def create_app(
             raise HTTPException(status_code=404, detail="passport not found") from exc
 
     @app.delete("/api/internal/passports/{passport_id}")
-    async def delete_internal_passport(passport_id: str, reason: str | None = None) -> dict[str, Any]:
+    async def delete_internal_passport(
+        passport_id: str, reason: str | None = None
+    ) -> dict[str, Any]:
         try:
             row = revoke_passport(session_local, passport_id, reason=reason)
         except LookupError as exc:
@@ -1877,7 +2453,7 @@ def create_app(
     @app.post("/api/internal/passports/{passport_id}/kill-switch")
     async def post_internal_passport_kill_switch(
         passport_id: str,
-        body: KillSwitchIn = Body(...),
+        body: Annotated[KillSwitchIn, Body()],
     ) -> dict[str, Any]:
         try:
             row = toggle_kill_switch(session_local, passport_id, body.enabled)
@@ -2014,7 +2590,7 @@ def create_app(
     @app.post("/api/internal/watchdog/alerts/{alert_id}/resolve")
     async def post_internal_watchdog_resolve(
         alert_id: str,
-        body: WatchdogResolveIn = Body(...),
+        body: Annotated[WatchdogResolveIn, Body()],
     ) -> dict[str, Any]:
         try:
             with session_local() as session:
@@ -2120,7 +2696,7 @@ def create_app(
     @app.post("/api/internal/approvals/{approval_id}/approve")
     async def post_internal_approval_approve(
         approval_id: str,
-        body: ApprovalResolveIn = Body(...),
+        body: Annotated[ApprovalResolveIn, Body()],
     ) -> dict[str, Any]:
         if not body.by_user:
             raise HTTPException(status_code=422, detail="by_user is required")
@@ -2138,7 +2714,7 @@ def create_app(
     @app.post("/api/internal/approvals/{approval_id}/deny")
     async def post_internal_approval_deny(
         approval_id: str,
-        body: ApprovalResolveIn = Body(...),
+        body: Annotated[ApprovalResolveIn, Body()],
     ) -> dict[str, Any]:
         if not body.by_user or not body.note:
             raise HTTPException(status_code=422, detail="by_user and note are required")
@@ -2175,7 +2751,7 @@ def create_app(
             }
         )
 
-    def _raise_skill_error(exc: Exception) -> None:
+    def _raise_skill_error(exc: Exception) -> NoReturn:
         if isinstance(exc, SkillNotFound):
             raise HTTPException(status_code=404, detail="skill not found") from exc
         if isinstance(exc, SkillManifestError):
@@ -2233,7 +2809,7 @@ def create_app(
         return {"runs": [skill_run_to_dict(row) for row in rows]}
 
     @app.post("/api/internal/skills")
-    async def post_internal_skill(body: SkillIn = Body(...)) -> dict[str, Any]:
+    async def post_internal_skill(body: Annotated[SkillIn, Body()]) -> dict[str, Any]:
         try:
             with session_local() as session:
                 row = register_skill_with_session(
@@ -2295,8 +2871,9 @@ def create_app(
 
     @app.post("/api/internal/skills/compile-from-processes")
     async def post_internal_skills_compile_from_processes(
-        body: CompileSkillsIn = Body(default_factory=CompileSkillsIn),
+        body: Annotated[CompileSkillsIn | None, Body()] = None,
     ) -> dict[str, Any]:
+        body = body or CompileSkillsIn()
         try:
             with session_local() as session:
                 rows = compile_skills_from_processes(
@@ -2305,9 +2882,11 @@ def create_app(
                     process_ids=body.process_ids,
                 )
                 if body.dry_run:
-                    compiled = [manifest_to_dict(row) for row in rows]
+                    manifests = cast(list[SkillManifest], rows)
+                    compiled = [manifest_to_dict(row) for row in manifests]
                 else:
-                    compiled = [skill_to_dict(row) for row in rows]
+                    skills = cast(list[Skill], rows)
+                    compiled = [skill_to_dict(row) for row in skills]
         except Exception as exc:  # noqa: BLE001
             _raise_skill_error(exc)
         if not body.dry_run:
@@ -2324,7 +2903,10 @@ def create_app(
             _raise_skill_error(exc)
 
     @app.post("/api/internal/skills/{skill_id}/run")
-    def post_internal_skill_run(skill_id: str, body: SkillRunIn = Body(...)) -> dict[str, Any]:
+    def post_internal_skill_run(
+        skill_id: str,
+        body: Annotated[SkillRunIn, Body()],
+    ) -> dict[str, Any]:
         def publish_sync(event_type: str, payload: dict[str, Any]) -> None:
             import anyio
 
@@ -2367,7 +2949,9 @@ def create_app(
     def get_cluster_health() -> dict[str, object]:
         with session_local() as session:
             snapshot = cluster_health_monitor.snapshot(session)
-            payload = {cluster_id: item.to_json() for cluster_id, item in snapshot.items()}
+            payload: dict[str, object] = {
+                cluster_id: item.to_json() for cluster_id, item in snapshot.items()
+            }
             rows = session.execute(select(Entity)).scalars().all()
             classified = sum(1 for row in rows if (row.composite_importance or 0.0) > 0.0)
             classified_pct = 0.0 if not rows else (classified / len(rows)) * 100.0
@@ -2406,7 +2990,7 @@ def create_app(
             return search_entities(session, q, limit=limit)
 
     @app.post("/api/internal/search")
-    def post_internal_search(body: InternalSearchIn = Body(...)) -> dict[str, Any]:
+    def post_internal_search(body: Annotated[InternalSearchIn, Body()]) -> dict[str, Any]:
         try:
             with session_local() as session:
                 return hybrid_search(
@@ -2430,15 +3014,31 @@ def create_app(
         with session_local() as session:
             if session.get(Entity, entity_id) is None:
                 raise HTTPException(status_code=404, detail="entity not found")
-            incoming = session.execute(
-                select(Edge).where(Edge.target_id == entity_id).order_by(desc(Edge.created_at), Edge.id)
-            ).scalars().all()
-            outgoing = session.execute(
-                select(Edge).where(Edge.source_id == entity_id).order_by(desc(Edge.created_at), Edge.id)
-            ).scalars().all()
+            incoming = (
+                session.execute(
+                    select(Edge)
+                    .where(Edge.target_id == entity_id)
+                    .order_by(desc(Edge.created_at), Edge.id)
+                )
+                .scalars()
+                .all()
+            )
+            outgoing = (
+                session.execute(
+                    select(Edge)
+                    .where(Edge.source_id == entity_id)
+                    .order_by(desc(Edge.created_at), Edge.id)
+                )
+                .scalars()
+                .all()
+            )
             return {
-                "incoming": [EdgeDTO.model_validate(row).model_dump(mode="json") for row in incoming],
-                "outgoing": [EdgeDTO.model_validate(row).model_dump(mode="json") for row in outgoing],
+                "incoming": [
+                    EdgeDTO.model_validate(row).model_dump(mode="json") for row in incoming
+                ],
+                "outgoing": [
+                    EdgeDTO.model_validate(row).model_dump(mode="json") for row in outgoing
+                ],
             }
 
     @app.get("/api/entities/{entity_id}/lineage")
@@ -2457,11 +3057,15 @@ def create_app(
             for _level in range(depth):
                 if not frontier:
                     break
-                rows = session.execute(
-                    select(Edge)
-                    .where(Edge.target_id.in_(frontier))
-                    .order_by(desc(Edge.created_at), Edge.id)
-                ).scalars().all()
+                rows = (
+                    session.execute(
+                        select(Edge)
+                        .where(Edge.target_id.in_(frontier))
+                        .order_by(desc(Edge.created_at), Edge.id)
+                    )
+                    .scalars()
+                    .all()
+                )
                 next_frontier: set[str] = set()
                 for edge in rows:
                     lineage_edges.setdefault(edge.id, edge)
@@ -2470,9 +3074,13 @@ def create_app(
                         next_frontier.add(edge.source_id)
                 frontier = next_frontier
 
-            nodes = session.execute(
-                select(Entity).where(Entity.id.in_(visited_node_ids)).order_by(Entity.id)
-            ).scalars().all()
+            nodes = (
+                session.execute(
+                    select(Entity).where(Entity.id.in_(visited_node_ids)).order_by(Entity.id)
+                )
+                .scalars()
+                .all()
+            )
             return {
                 "nodes": [EntityDTO.model_validate(row).model_dump(mode="json") for row in nodes],
                 "edges": [
@@ -2488,12 +3096,22 @@ def create_app(
             entities = session.execute(select(Entity)).scalars().all()
             all_edges = session.execute(select(Edge)).scalars().all()
             edges = sorted(all_edges, key=lambda item: item.created_at, reverse=True)[:50]
-            sources = session.execute(select(Source).order_by(desc(Source.updated_at))).scalars().all()
-            receipts = session.execute(
-                select(Receipt).order_by(desc(Receipt.created_at), desc(Receipt.id)).limit(50)
-            ).scalars().all()
+            sources = (
+                session.execute(select(Source).order_by(desc(Source.updated_at))).scalars().all()
+            )
+            receipts = (
+                session.execute(
+                    select(Receipt).order_by(desc(Receipt.created_at), desc(Receipt.id)).limit(50)
+                )
+                .scalars()
+                .all()
+            )
             all_receipts = session.execute(select(Receipt)).scalars().all()
-            actions = session.execute(select(Action).order_by(desc(Action.created_at)).limit(50)).scalars().all()
+            actions = (
+                session.execute(select(Action).order_by(desc(Action.created_at)).limit(50))
+                .scalars()
+                .all()
+            )
             all_actions = session.execute(select(Action)).scalars().all()
             cluster_snapshot = cluster_health_monitor.snapshot(session)
 
@@ -2514,7 +3132,9 @@ def create_app(
                 "id": entity.id,
                 "name": _entity_name(entity),
                 "type": entity.type,
-                "scope": _text((entity.data or {}).get("scope")) or entity.cluster_id or entity.type,
+                "scope": _text((entity.data or {}).get("scope"))
+                or entity.cluster_id
+                or entity.type,
                 "owner": _text((entity.data or {}).get("owner")),
                 "team": _text((entity.data or {}).get("team")),
                 "mode": _text((entity.data or {}).get("mode")),
@@ -2557,17 +3177,18 @@ def create_app(
         ]
         audit_events.extend(
             [
-            {
-                "id": action.id,
-                "timestamp": _iso(action.created_at),
-                "actor": action.agent_id,
-                "action": action.tool,
-                "entity": _text((action.params or {}).get("target_entity_id")) or action.task_id,
-                "category": "persisted_action",
-                "result": action.decision,
-                "source": "actions",
-            }
-            for action in actions
+                {
+                    "id": action.id,
+                    "timestamp": _iso(action.created_at),
+                    "actor": action.agent_id,
+                    "action": action.tool,
+                    "entity": _text((action.params or {}).get("target_entity_id"))
+                    or action.task_id,
+                    "category": "persisted_action",
+                    "result": action.decision,
+                    "source": "actions",
+                }
+                for action in actions
             ]
         )
         audit_events.extend(
@@ -2595,9 +3216,15 @@ def create_app(
         )
 
         signed_receipts = sum(1 for receipt in all_receipts if _receipt_signed(receipt))
-        healthy_checks = sum(1 for item in cluster_snapshot.values() if item.status.value == "healthy")
-        degraded_checks = sum(1 for item in cluster_snapshot.values() if item.status.value == "degraded")
-        critical_checks = sum(1 for item in cluster_snapshot.values() if item.status.value == "critical")
+        healthy_checks = sum(
+            1 for item in cluster_snapshot.values() if item.status.value == "healthy"
+        )
+        degraded_checks = sum(
+            1 for item in cluster_snapshot.values() if item.status.value == "degraded"
+        )
+        critical_checks = sum(
+            1 for item in cluster_snapshot.values() if item.status.value == "critical"
+        )
         denied_actions = (
             sum(1 for receipt in all_receipts if receipt.decision == "deny")
             + sum(1 for action in all_actions if action.decision == "deny")
@@ -2633,7 +3260,9 @@ def create_app(
                 "graph_entity_count": len(entities),
                 "graph_edge_count": len(all_edges),
                 "source_count": len(sources),
-                "latest_event_at": max((event.get("timestamp") for event in raw_mcp_events), default=None),
+                "latest_event_at": max(
+                    (event.get("timestamp") for event in raw_mcp_events), default=None
+                ),
                 "current_seq": broadcaster.current_seq,
                 "generated_at_ms": now_ms,
             },
@@ -2661,7 +3290,9 @@ def create_app(
                         "cluster_id": entity.cluster_id,
                         "updated_at": _iso(entity.updated_at),
                     }
-                    for entity in sorted(entities, key=lambda item: item.updated_at, reverse=True)[:25]
+                    for entity in sorted(entities, key=lambda item: item.updated_at, reverse=True)[
+                        :25
+                    ]
                 ],
                 "edges": [
                     {
@@ -2777,12 +3408,21 @@ def create_app(
 
     @app.websocket("/ws/brain")
     async def ws_brain(ws: WebSocket, since: int = Query(0)) -> None:
-        await ws.accept()
+        if auth_required():
+            if auth_is_misconfigured():
+                await ws.close(code=1011, reason="AXIOM_API_TOKEN is not configured")
+                return
+            if not websocket_is_authenticated(ws):
+                await ws.close(code=1008, reason="Missing or invalid API bearer token")
+                return
+        await ws.accept(subprotocol=websocket_auth_subprotocol(ws))
         async for envelope in broadcaster.subscribe(since=since):
             await ws.send_text(json.dumps(envelope))
 
     @app.post("/api/internal/agent-navigation")
-    async def publish_agent_navigation(batch: NavigationBatchIn = Body(...)) -> dict[str, int]:
+    async def publish_agent_navigation(
+        batch: Annotated[NavigationBatchIn, Body()],
+    ) -> dict[str, int]:
         now_ms = datetime_now_ms()
         emitted = 0
         for step in batch.steps[:50]:
@@ -2806,7 +3446,9 @@ def create_app(
         return {"emitted": emitted}
 
     @app.post("/api/internal/agent-action-events")
-    async def publish_agent_action_events(batch: AgentActionEventsIn = Body(...)) -> dict[str, int]:
+    async def publish_agent_action_events(
+        batch: Annotated[AgentActionEventsIn, Body()],
+    ) -> dict[str, int]:
         emitted = 0
         for event in batch.events[:50]:
             payload = event.get("payload", {}) if isinstance(event.get("payload", {}), dict) else {}
@@ -2814,9 +3456,13 @@ def create_app(
             proposed = str(payload.get("proposed_action", ""))
             agent_name = str(payload.get("agent_name", ""))
             timestamp = int(event.get("timestamp", datetime_now_ms()))
-            matched_tool = next((name for name in MCP_TOOL_NAMES if name in {intent, proposed}), None)
+            matched_tool = next(
+                (name for name in MCP_TOOL_NAMES if name in {intent, proposed}), None
+            )
             if matched_tool:
-                app.state.mcp_tool_counts[matched_tool] = int(app.state.mcp_tool_counts.get(matched_tool, 0)) + 1
+                app.state.mcp_tool_counts[matched_tool] = (
+                    int(app.state.mcp_tool_counts.get(matched_tool, 0)) + 1
+                )
                 app.state.mcp_last_called[matched_tool] = timestamp
             app.state.mcp_action_events.append(
                 {
@@ -2842,5 +3488,9 @@ def create_app(
             )
             emitted += 1
         return {"emitted": emitted}
+
+    frontend_dist = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+    if frontend_dist.exists():
+        app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
 
     return app

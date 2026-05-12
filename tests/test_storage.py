@@ -61,4 +61,3 @@ def test_query_entities_limit_offset_and_where(db_session: Session) -> None:
 
     with pytest.raises(ValueError):
         crud.query_entities(db_session, where={"unsupported": "x"})
-

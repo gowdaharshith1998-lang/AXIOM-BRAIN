@@ -116,7 +116,7 @@ def _validate_schema(payload: dict[str, Any], schema: dict[str, Any]) -> None:
     properties = schema.get("properties", {})
     if not isinstance(properties, dict):
         return
-    type_map = {
+    type_map: dict[str, type[Any] | tuple[type[Any], ...]] = {
         "string": str,
         "number": (int, float),
         "integer": int,
@@ -128,6 +128,8 @@ def _validate_schema(payload: dict[str, Any], schema: dict[str, Any]) -> None:
         if key not in payload or not isinstance(spec, dict):
             continue
         expected = spec.get("type")
+        if not isinstance(expected, str):
+            continue
         py_type = type_map.get(expected)
         if py_type is not None and not isinstance(payload[key], py_type):
             raise ValueError(f"LLM output field {key!r} must be {expected}")
@@ -290,6 +292,7 @@ def _run_skill_with_session(
         session.add(run)
         session.commit()
         session.refresh(run)
+        run_id = run.id
         if event_callback is not None:
             event_callback(
                 "skill_run_started",
@@ -303,20 +306,20 @@ def _run_skill_with_session(
             prompt = _render_prompt(skill.prompt_template, input_payload)
             content = _call_provider(skill.llm_provider, skill.llm_model, api_key, prompt)
             output = _coerce_output(content, skill.output_schema or {})
-            run = session.get(SkillRun, run.id)
-            if run is None:
+            persisted_run = session.get(SkillRun, run_id)
+            if persisted_run is None:
                 raise LookupError("skill run disappeared")
-            run.status = "success"
-            run.output_payload = output
-            run.duration_ms = int((time.perf_counter() - started) * 1000)
-            _mark_skill_run_stats(session, skill, run)
-            session.add(run)
+            persisted_run.status = "success"
+            persisted_run.output_payload = output
+            persisted_run.duration_ms = int((time.perf_counter() - started) * 1000)
+            _mark_skill_run_stats(session, skill, persisted_run)
+            session.add(persisted_run)
             session.commit()
-            session.refresh(run)
+            session.refresh(persisted_run)
 
         receipt_id = _chain_skill_run_receipt(
             session_factory,
-            run_id=run.id,
+            run_id=run_id,
             agent_name=agent_name,
             skill_name=str(skill_snapshot["name"]),
             decision="allow",
@@ -326,7 +329,7 @@ def _run_skill_with_session(
             demo_flag=receipt_demo_flag,
         )
         with session_factory() as session:
-            persisted_run = session.get(SkillRun, run.id)
+            persisted_run = session.get(SkillRun, run_id)
             if persisted_run is not None:
                 persisted_run.receipt_id = receipt_id
                 session.add(persisted_run)
@@ -340,15 +343,15 @@ def _run_skill_with_session(
         return {"run": result, "skill": skill_snapshot}
     except Exception as exc:  # noqa: BLE001
         with session_factory() as session:
-            failed = session.get(SkillRun, run.id)
+            failed = session.get(SkillRun, run_id)
             if failed is None:
                 raise
             failed.status = "failed"
             failed.error_message = str(exc)
             failed.duration_ms = int((time.perf_counter() - started) * 1000)
-            skill = session.get(Skill, skill_id)
-            if skill is not None:
-                _mark_skill_run_stats(session, skill, failed)
+            failed_skill = session.get(Skill, skill_id)
+            if failed_skill is not None:
+                _mark_skill_run_stats(session, failed_skill, failed)
             session.add(failed)
             session.commit()
             session.refresh(failed)

@@ -61,4 +61,3 @@ def test_public_api_query_entities(storage_db: None) -> None:
 
     got = query_entities(type_="document", limit=10, offset=0)
     assert len(got) == 3
-

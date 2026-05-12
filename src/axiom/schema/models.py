@@ -118,16 +118,14 @@ class Receipt(Base):
     signature: Mapped[str] = mapped_column(String, nullable=False)
     prev_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     this_hash: Mapped[str] = mapped_column(String, nullable=False)
-    reserved_state: Mapped[str | None] = mapped_column("cali" "bra_state", String, nullable=True)
+    reserved_state: Mapped[str | None] = mapped_column("cali" + "bra_state", String, nullable=True)
     demo_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
 class MetricsSnapshot(Base):
     __tablename__ = "metrics_snapshots"
-    __table_args__ = (
-        UniqueConstraint("snapshot_date", name="uq_metrics_snapshots_snapshot_date"),
-    )
+    __table_args__ = (UniqueConstraint("snapshot_date", name="uq_metrics_snapshots_snapshot_date"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -243,9 +241,7 @@ class ConnectorConfigRow(Base):
 
 class ConnectorStateRow(Base):
     __tablename__ = "connector_states"
-    __table_args__ = (
-        Index("ix_connector_states_vendor_status", "vendor", "status"),
-    )
+    __table_args__ = (Index("ix_connector_states_vendor_status", "vendor", "status"),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     connector_id: Mapped[str] = mapped_column(
@@ -301,9 +297,7 @@ class Action(Base):
 
 class Skill(Base):
     __tablename__ = "skills"
-    __table_args__ = (
-        Index("ix_skills_status_intent", "status", "intent"),
-    )
+    __table_args__ = (Index("ix_skills_status_intent", "status", "intent"),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(256), nullable=False, index=True)

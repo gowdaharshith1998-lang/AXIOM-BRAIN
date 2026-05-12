@@ -66,4 +66,3 @@ class Source(ABC):
     @abstractmethod
     def metadata(self) -> dict[str, Any]:
         raise NotImplementedError("Source.metadata is stubbed; lands in Phase 12+")
-

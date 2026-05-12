@@ -90,7 +90,9 @@ def test_e2e_github_install_to_first_entity_under_30s(
 
     started = time.perf_counter()
     with TestClient(app) as client:
-        callback = client.get("/api/internal/connectors/github/callback?code=abc&state=csrf")
+        install = client.post("/api/internal/connectors/github/install")
+        state = install.json()["state"]
+        callback = client.get(f"/api/internal/connectors/github/callback?code=abc&state={state}")
         sync = client.post("/api/internal/connectors/github/sync")
     elapsed = time.perf_counter() - started
 
@@ -130,15 +132,52 @@ def test_e2e_github_webhook_to_brain_event_propagates(
             },
         )
         with client.websocket_connect("/ws/brain?since=0") as ws:
-            envelope = ws.receive_json()
+            envelopes = [ws.receive_json(), ws.receive_json()]
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "events": 1}
-    assert envelope["type"] == "connector_event_received"
-    assert envelope["payload"] == {"vendor": "github", "event_type": "issues.opened"}
+    assert response.json() == {"ok": True, "events": 1, "ingested": 1}
+    graph_envelope = next(
+        envelope
+        for envelope in envelopes
+        if envelope["type"] in {"entity_added", "entity_modified"}
+    )
+    connector_envelope = next(
+        envelope for envelope in envelopes if envelope["type"] == "connector_event_received"
+    )
+    assert graph_envelope["source_id"] == "github:issue:12"
+    assert connector_envelope["payload"] == {"vendor": "github", "event_type": "issues.opened"}
     with Session(create_engine(db_url, future=True)) as session:
         row = session.execute(select(ConnectorEventRow)).scalar_one()
         assert row.signature_ok is True
+        entity = session.execute(
+            select(Entity).where(Entity.source_id == "github:issue:12")
+        ).scalar_one()
+        assert entity.type == "ticket"
+        assert entity.data["title"] == "Bug"
+
+
+def test_e2e_github_webhook_invalid_signature_is_not_persisted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AXIOM_CONNECTOR_GITHUB_ENABLED", "1")
+    app, db_url = _make_app(tmp_path, monkeypatch)
+    body = json.dumps({"action": "opened"}).encode()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/internal/connectors/github/webhook",
+            content=body,
+            headers={
+                "X-GitHub-Event": "issues",
+                "X-GitHub-Delivery": "delivery_bad",
+                "X-Hub-Signature-256": "sha256=bad",
+            },
+        )
+
+    assert response.status_code == 401
+    with Session(create_engine(db_url, future=True)) as session:
+        assert session.execute(select(ConnectorEventRow)).scalars().all() == []
 
 
 def test_e2e_github_writer_blocked_by_starter_pack_pii_rule(tmp_path: Path) -> None:
@@ -210,7 +249,9 @@ def test_e2e_linear_install_through_first_sync(
     )
 
     with TestClient(app) as client:
-        callback = client.get("/api/internal/connectors/linear/callback?code=abc&state=csrf")
+        install = client.post("/api/internal/connectors/linear/install")
+        state = install.json()["state"]
+        callback = client.get(f"/api/internal/connectors/linear/callback?code=abc&state={state}")
         sync = client.post("/api/internal/connectors/linear/sync")
 
     assert callback.status_code == 200
@@ -249,12 +290,17 @@ def test_e2e_slack_webhook_signature_verify_then_ingest(
         events = client.get("/api/internal/connectors/slack/events")
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "events": 1}
+    assert response.json() == {"ok": True, "events": 1, "ingested": 1}
     assert events.json()["events"][0]["event_type"] == "message"
     with Session(create_engine(db_url, future=True)) as session:
         row = session.execute(select(ConnectorEventRow)).scalar_one()
         assert row.vendor == "slack"
         assert row.signature_ok is True
+        entity = session.execute(
+            select(Entity).where(Entity.source_id == "slack:message:C1:123.456")
+        ).scalar_one()
+        assert entity.type == "message"
+        assert entity.data["text"] == "hello"
 
 
 def test_e2e_gmail_external_email_pauses_for_approval() -> None:

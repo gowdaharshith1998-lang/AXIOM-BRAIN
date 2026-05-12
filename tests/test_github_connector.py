@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.policy import PolicyDecision
 from axiom.schema.models import Base, ConnectorStateRow, Receipt
+from axiom.vault.store import get_secret_with_session
 
 
 def _sf(tmp_path: Path) -> sessionmaker[Session]:
@@ -332,12 +333,22 @@ def test_github_callback_endpoint_persists_connector_state(
     Base.metadata.create_all(engine)
     app = create_app(db_url=db_url, enable_organizer=False)
     with TestClient(app) as client:
-        response = client.get("/api/internal/connectors/github/callback?code=abc&state=csrf")
+        install = client.post("/api/internal/connectors/github/install")
+        state = install.json()["state"]
+        response = client.get(f"/api/internal/connectors/github/callback?code=abc&state={state}")
 
     assert response.status_code == 200
     with Session(engine) as session:
         state = session.execute(
             select(ConnectorStateRow).where(ConnectorStateRow.vendor == "github")
         ).scalar_one()
-        assert state.access_token == "gho_token"
+        assert state.access_token.startswith("vault:connector:github:")
+        assert (
+            get_secret_with_session(
+                session,
+                "connector:github",
+                state.access_token.removeprefix("vault:connector:github:"),
+            )
+            == "gho_token"
+        )
         assert state.account_label == "GitHub"

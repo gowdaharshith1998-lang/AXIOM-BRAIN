@@ -5,22 +5,23 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import Engine, inspect, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.govern.receipts import ReceiptInsert, chain_insert_receipt
 from axiom.schema.models import ApprovalRequest, new_id
+from axiom.storage.db import create_schema_table, schema_table_indexes
 
 ApprovalEventCallback = Callable[[str, dict[str, Any]], None]
-SessionFactory = Callable[[], Session]
+SessionFactory = sessionmaker[Session]
 
 
 def ensure_approvals_schema(engine: Engine) -> None:
     inspector = inspect(engine)
     if not inspector.has_table("approval_requests"):
-        ApprovalRequest.__table__.create(bind=engine, checkfirst=True)
+        create_schema_table(ApprovalRequest.__table__, engine)
         return
     indexes = {index["name"] for index in inspector.get_indexes("approval_requests")}
-    for index in ApprovalRequest.__table__.indexes:
+    for index in schema_table_indexes(ApprovalRequest.__table__):
         if index.name not in indexes:
             index.create(bind=engine, checkfirst=True)
 
@@ -137,11 +138,15 @@ def expire_old_requests(session_factory: SessionFactory) -> list[ApprovalRequest
     now = datetime.utcnow()
     expired: list[ApprovalRequest] = []
     with session_factory() as session:
-        rows = session.execute(
-            select(ApprovalRequest)
-            .where(ApprovalRequest.status == "pending")
-            .where(ApprovalRequest.expires_at <= now)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(ApprovalRequest)
+                .where(ApprovalRequest.status == "pending")
+                .where(ApprovalRequest.expires_at <= now)
+            )
+            .scalars()
+            .all()
+        )
         for row in rows:
             row.status = "expired"
             row.resolved_at = now

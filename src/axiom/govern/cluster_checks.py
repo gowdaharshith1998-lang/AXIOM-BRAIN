@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from axiom.organize.cluster_health import ClusterHealthSnapshot
 from axiom.organize.clusters import CLUSTER_IDS
 from axiom.schema.models import ClusterCheckRun
+from axiom.storage.db import create_schema_table
 
 SEVERITIES = ("healthy", "degraded", "critical")
 
@@ -17,7 +18,7 @@ SEVERITIES = ("healthy", "degraded", "critical")
 def ensure_cluster_check_runs_schema(engine: Engine) -> None:
     inspector = inspect(engine)
     if not inspector.has_table("cluster_check_runs"):
-        ClusterCheckRun.__table__.create(bind=engine, checkfirst=True)
+        create_schema_table(ClusterCheckRun.__table__, engine)
 
 
 def retention_limit_from_env() -> int:
@@ -112,7 +113,7 @@ def get_cluster_check_runs(
     if severity:
         query = query.where(ClusterCheckRun.severity == severity)
     bounded_limit = max(1, min(limit, 1000))
-    return (
+    return list(
         session.execute(
             query.order_by(desc(ClusterCheckRun.run_at), desc(ClusterCheckRun.id)).limit(
                 bounded_limit
@@ -141,7 +142,7 @@ def summarize_cluster_check_runs(session: Session) -> dict[str, dict[str, Any]]:
     summary: dict[str, dict[str, Any]] = {}
     for cluster_id, cluster_rows in by_cluster.items():
         total = len(cluster_rows)
-        counts = {severity: 0 for severity in SEVERITIES}
+        counts = dict.fromkeys(SEVERITIES, 0)
         last_change_at: datetime | None = None
         previous: str | None = None
         for row in cluster_rows:

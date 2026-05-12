@@ -150,9 +150,9 @@ def test_chain_insert_uses_real_ed25519(receipt_sf: sessionmaker[Session]) -> No
     assert inserted is True
     assert receipt.signing_scheme == "ed25519"
     assert len(base64.b64decode(receipt.signature)) == 64
-    assert verify_receipt_signature(receipt, ed25519_signer.load_or_create_keypair().public_key_bytes)[
-        "verified"
-    ]
+    assert verify_receipt_signature(
+        receipt, ed25519_signer.load_or_create_keypair().public_key_bytes
+    )["verified"]
 
 
 def test_verify_receipt_chain_returns_signature_verified_true_after_fix(
@@ -170,7 +170,9 @@ def test_verify_receipt_chain_returns_signature_verified_true_after_fix(
 def test_tamper_signature_column_fails_verification(receipt_sf: sessionmaker[Session]) -> None:
     receipt, _ = chain_insert_receipt(receipt_sf, _receipt_payload())
     with receipt_sf() as session:
-        session.execute(update(Receipt).where(Receipt.id == receipt.id).values(signature="tampered"))
+        session.execute(
+            update(Receipt).where(Receipt.id == receipt.id).values(signature="tampered")
+        )
         session.commit()
 
     with receipt_sf() as session:
@@ -190,7 +192,10 @@ def test_pubkey_endpoint_returns_valid_base64(tmp_path: Path) -> None:
     with TestClient(app) as client:
         body = client.get("/api/internal/signing-pubkey").json()
 
-    assert base64.b64decode(body["public_key"]) == ed25519_signer.load_or_create_keypair().public_key_bytes
+    assert (
+        base64.b64decode(body["public_key"])
+        == ed25519_signer.load_or_create_keypair().public_key_bytes
+    )
 
 
 @pytest.mark.asyncio

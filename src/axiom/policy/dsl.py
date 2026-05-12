@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Container
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -15,14 +16,21 @@ class PolicyParseError(ValueError):
 
 
 class EvalContext(Protocol):
-    action: Any
-    passport: Any
-    entity: Any
-    session: Any
+    @property
+    def action(self) -> Any: ...
+
+    @property
+    def passport(self) -> Any: ...
+
+    @property
+    def entity(self) -> Any: ...
+
+    @property
+    def session(self) -> Any: ...
 
 
 class PredicateExpr:
-    def evaluate(self, context: EvalContext) -> bool:
+    def evaluate(self, context: EvalContext) -> Any:
         raise NotImplementedError
 
     def to_source(self) -> str:
@@ -120,11 +128,11 @@ class BinaryExpr(PredicateExpr):
         if self.operator == "in":
             if isinstance(right, list) and "*" in right:
                 return True
-            return left in (right or [])
+            return left in right if isinstance(right, Container) else False
         if self.operator == "contains":
             if isinstance(left, list) and "*" in left:
                 return True
-            return right in (left or [])
+            return right in left if isinstance(left, Container) else False
         if self.operator == ">":
             return left > right
         if self.operator == ">=":
@@ -312,10 +320,7 @@ class _Parser:
         if self._match_value(")") is not None:
             return args, kwargs
         while True:
-            if (
-                self._peek().kind == "IDENT"
-                and self.tokens[self.index + 1].value == "="
-            ):
+            if self._peek().kind == "IDENT" and self.tokens[self.index + 1].value == "=":
                 key = self._advance().value
                 self._expect("OP", "=")
                 kwargs[key] = self._parse_or()

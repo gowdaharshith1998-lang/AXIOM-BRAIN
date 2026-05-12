@@ -40,4 +40,3 @@ def test_no_type_string_branches_in_phase_3_python() -> None:
                 if pat.search(line):
                     hits.append(f"{p}:{i}:{line}")
     assert hits == [], "Found type-string branches:\n" + "\n".join(hits)
-

@@ -144,9 +144,7 @@ def mark_tested_with_session(
         SecretNotFound: if no secret matches.
     """
     if status not in VALID_STATUSES:
-        raise ValueError(
-            f"invalid status {status!r}; must be one of {sorted(VALID_STATUSES)}"
-        )
+        raise ValueError(f"invalid status {status!r}; must be one of {sorted(VALID_STATUSES)}")
     row = _get_row(session, provider_id, key_name)
     if row is None:
         raise SecretNotFound(provider_id, key_name)

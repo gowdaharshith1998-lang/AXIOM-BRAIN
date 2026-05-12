@@ -71,9 +71,7 @@ def test_store_then_get_round_trip_returns_same_plaintext(
     db_session: Session, unlocked_vault: str
 ) -> None:
     plaintext = "sk-ant-test-1234567890"
-    meta = vault_store.store_secret_with_session(
-        db_session, "anthropic", "default", plaintext
-    )
+    meta = vault_store.store_secret_with_session(db_session, "anthropic", "default", plaintext)
     assert isinstance(meta, SecretMetadataDTO)
     assert meta.provider_id == "anthropic"
     assert meta.key_name == "default"
@@ -134,9 +132,7 @@ def test_list_secrets_works_when_vault_is_locked(
     assert metas[0].provider_id == "anthropic"
 
 
-def test_list_secrets_filters_by_provider(
-    db_session: Session, unlocked_vault: str
-) -> None:
+def test_list_secrets_filters_by_provider(db_session: Session, unlocked_vault: str) -> None:
     vault_store.store_secret_with_session(db_session, "anthropic", "default", "a1")
     vault_store.store_secret_with_session(db_session, "anthropic", "work", "a2")
     vault_store.store_secret_with_session(db_session, "openai", "default", "o1")
@@ -231,22 +227,21 @@ def test_delete_secret_removes_row_not_just_clears_value(
 # ─── mark_tested ────────────────────────────────────────────────────────────
 
 
-def test_mark_tested_updates_status_and_timestamp(
-    db_session: Session, unlocked_vault: str
-) -> None:
+def test_mark_tested_updates_status_and_timestamp(db_session: Session, unlocked_vault: str) -> None:
     vault_store.store_secret_with_session(db_session, "anthropic", "default", "PLAIN")
     meta = vault_store.mark_tested_with_session(db_session, "anthropic", "default", "valid")
     assert meta.status == "valid"
     assert meta.last_tested_at is not None
 
 
-def test_mark_tested_rejects_unknown_status(
-    db_session: Session, unlocked_vault: str
-) -> None:
+def test_mark_tested_rejects_unknown_status(db_session: Session, unlocked_vault: str) -> None:
     vault_store.store_secret_with_session(db_session, "anthropic", "default", "PLAIN")
     with pytest.raises(ValueError):
         vault_store.mark_tested_with_session(
-            db_session, "anthropic", "default", "bogus"  # type: ignore[arg-type]
+            db_session,
+            "anthropic",
+            "default",
+            "bogus",  # type: ignore[arg-type]
         )
 
 

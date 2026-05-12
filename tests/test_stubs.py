@@ -184,4 +184,3 @@ def test_no_calibra_imports_in_phase_2():
             hits.append(str(path))
 
     assert hits == [], f"Found calibra references in src/: {hits}"
-

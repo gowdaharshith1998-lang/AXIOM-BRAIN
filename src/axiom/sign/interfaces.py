@@ -29,4 +29,3 @@ class Signer(ABC):
     @abstractmethod
     def verify(self, signed: SignedPayload) -> bool:
         raise NotImplementedError("Signer.verify is stubbed; lands in Phase 10")
-

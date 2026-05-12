@@ -259,9 +259,7 @@ def test_slack_writer_execute_calls_chat_postmessage(tmp_path: Path) -> None:
         ),
     )
 
-    result = writer.execute(
-        writer.propose_action("post_message", {"channel": "C1", "text": "x"})
-    )
+    result = writer.execute(writer.propose_action("post_message", {"channel": "C1", "text": "x"}))
 
     assert result["ok"] is True
     assert responses.calls[0].request.headers["Authorization"] == "Bearer xoxb-bot"

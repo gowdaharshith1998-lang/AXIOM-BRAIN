@@ -1,4 +1,5 @@
 """Tests for agent_navigation_step events from the OrganizerAgent centrality loop."""
+
 from __future__ import annotations
 
 import asyncio

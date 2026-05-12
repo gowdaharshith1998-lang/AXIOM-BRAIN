@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import time
 from datetime import datetime
+from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from axiom.ingest.broadcaster import EventBroadcaster
+from axiom.schema.dto import EntityDTO
+from axiom.schema.models import Entity
 from axiom.sources.base import IngestEvent, Source
 from axiom.storage import crud
 
@@ -38,23 +42,24 @@ class IngestPipeline:
             data = payload.get("data", {})
             metadata = payload.get("metadata", {})
             nick = payload.get("nick")
+            upsert_by_source_id = bool(metadata.get("upsert_by_source_id"))
 
             full_data = dict(data)
             full_data["metadata"] = metadata
 
-            entity_dto = crud.create_entity(
-                self.session,
-                entity_type,
-                full_data,
+            entity_dto, event_type = self._persist_entity(
+                entity_type=entity_type,
+                data=full_data,
                 source_id=event.source_id,
                 cluster_id=payload.get("cluster_id"),
+                upsert_by_source_id=upsert_by_source_id,
             )
             if isinstance(nick, str) and nick:
                 self._nick_to_id[nick] = entity_dto.id
 
             await self.broadcaster.publish(
                 {
-                    "type": event.event_type,
+                    "type": event_type,
                     "timestamp": now_ms,
                     "source_id": event.source_id,
                     "persisted_id": entity_dto.id,
@@ -102,4 +107,40 @@ class IngestPipeline:
                 "persisted_id": None,
                 "payload": {},
             }
+        )
+
+    def _persist_entity(
+        self,
+        *,
+        entity_type: str,
+        data: dict[str, Any],
+        source_id: str | None,
+        cluster_id: str | None,
+        upsert_by_source_id: bool,
+    ) -> tuple[EntityDTO, str]:
+        if upsert_by_source_id and source_id:
+            existing = (
+                self.session.execute(select(Entity).where(Entity.source_id == source_id).limit(1))
+                .scalars()
+                .first()
+            )
+            if existing is not None:
+                existing.type = entity_type
+                existing.data = data
+                existing.cluster_id = cluster_id
+                existing.updated_at = datetime.utcnow()
+                self.session.add(existing)
+                self.session.commit()
+                self.session.refresh(existing)
+                return EntityDTO.model_validate(existing), "entity_modified"
+
+        return (
+            crud.create_entity(
+                self.session,
+                entity_type,
+                data,
+                source_id=source_id,
+                cluster_id=cluster_id,
+            ),
+            "entity_added",
         )

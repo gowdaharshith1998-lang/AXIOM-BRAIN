@@ -6,6 +6,7 @@ from sqlalchemy import Engine, func, inspect, select
 from sqlalchemy.orm import Session
 
 from axiom.schema.models import Entity, Source
+from axiom.storage.db import create_schema_table
 
 
 @dataclass(frozen=True)
@@ -20,7 +21,7 @@ class SourceSnapshot:
 def ensure_sources_schema(engine: Engine) -> None:
     inspector = inspect(engine)
     if not inspector.has_table("sources"):
-        Source.__table__.create(bind=engine, checkfirst=True)
+        create_schema_table(Source.__table__, engine)
     with Session(engine, expire_on_commit=False, future=True) as session:
         row = session.get(Source, "synthetic-default")
         if row is None:
@@ -51,7 +52,9 @@ def real_sources_snapshot(session: Session) -> list[dict[str, object]]:
         .order_by(Source.display_name)
     )
     rows: list[dict[str, object]] = []
-    for source_id, source_type, display_name, connected, count, last_event_at in session.execute(stmt):
+    for source_id, source_type, display_name, connected, count, last_event_at in session.execute(
+        stmt
+    ):
         rows.append(
             {
                 "source_id": source_id,

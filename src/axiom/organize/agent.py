@@ -31,8 +31,7 @@ from axiom.organize.classifier import HybridClassifier
 from axiom.organize.clusters import is_valid_cluster_id
 from axiom.organize.edge_proposer import EdgeProposer
 from axiom.retrieval.embeddings import canonical_content_hash, embed_entities_batch
-from axiom.schema.models import Entity
-from axiom.schema.models import EntityEmbedding
+from axiom.schema.models import Entity, EntityEmbedding
 
 logger = logging.getLogger("axiom.organize.agent")
 
@@ -168,9 +167,7 @@ class OrganizerAgent:
         finally:
             session.close()
 
-    async def _emit_navigation_steps(
-        self, steps: list[tuple[str, str, str | None]]
-    ) -> None:
+    async def _emit_navigation_steps(self, steps: list[tuple[str, str, str | None]]) -> None:
         if not steps or self._broadcaster is None:
             return
         max_events = 50
@@ -206,9 +203,7 @@ class OrganizerAgent:
             except Exception:  # noqa: BLE001
                 logger.exception("organizer: navigation step broadcast failed")
 
-    async def _emit_confidence_changes(
-        self, deltas: list[Any]
-    ) -> None:
+    async def _emit_confidence_changes(self, deltas: list[Any]) -> None:
         if not deltas or self._broadcaster is None:
             return
         now_ms = int(time.time() * 1000)

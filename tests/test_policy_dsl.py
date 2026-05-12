@@ -28,7 +28,7 @@ def _policy_yaml(when: str, then: str = "deny", **extra_then: Any) -> str:
         f"    when: {when}",
         "    then:",
         f"      type: {then}",
-        "      reason: \"Blocked {entity_id} for {agent_name}/{intent}\"",
+        '      reason: "Blocked {entity_id} for {agent_name}/{intent}"',
     ]
     for key, value in extra_then.items():
         if value is None:
@@ -106,7 +106,7 @@ def test_parse_simple_allow_rule_from_yaml() -> None:
 def test_parse_correct_rule_with_guidance() -> None:
     rules = parse_policy_yaml(
         _policy_yaml(
-            'data.payload contains_pii() == true',
+            "data.payload contains_pii() == true",
             then="correct",
             guidance="Redact PII before retry",
             suggested_alternative={"redact": True},
@@ -125,7 +125,7 @@ def test_parse_deny_rule_with_reason_template() -> None:
 def test_parse_pause_rule_with_approval_role() -> None:
     rules = parse_policy_yaml(
         _policy_yaml(
-            'watchdog.has_open_alert_on(entity) == true',
+            "watchdog.has_open_alert_on(entity) == true",
             then="pause",
             approval_required_role="ops",
             approval_timeout_seconds=600,
@@ -140,7 +140,7 @@ def test_parse_complex_predicate_with_and_or_not() -> None:
     rules = parse_policy_yaml(
         _policy_yaml(
             '(entity.type == "ticket" and action.intent in ["delete", "destroy"]) '
-            'or not passport.scope_clusters contains entity.cluster_id'
+            "or not passport.scope_clusters contains entity.cluster_id"
         )
     )
     assert rules[0].when.to_source()

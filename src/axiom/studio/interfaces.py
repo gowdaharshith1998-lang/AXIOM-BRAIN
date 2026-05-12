@@ -42,4 +42,3 @@ class StudioEventStream(ABC):
     @abstractmethod
     def publish(self, event: WebSocketEvent) -> None:
         raise NotImplementedError("StudioEventStream.publish is stubbed; lands in Phase 4")
-

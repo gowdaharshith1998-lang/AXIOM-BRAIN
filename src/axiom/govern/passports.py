@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.schema.models import AgentPassport, PassportCredential
 from axiom.sign.ed25519_signer import load_or_create_keypair, sign, verify
+from axiom.storage.db import create_schema_table
 
 SYSTEM_PASSPORT_ID = "demo_passport"
 SYSTEM_PASSPORT_TOKEN = "demo_passport"
@@ -98,9 +99,9 @@ def _clear_cache() -> None:
 def ensure_passports_schema(engine: Engine) -> None:
     inspector = inspect(engine)
     if not inspector.has_table("agent_passports"):
-        AgentPassport.__table__.create(bind=engine, checkfirst=True)
+        create_schema_table(AgentPassport.__table__, engine)
     if not inspector.has_table("passport_credentials"):
-        PassportCredential.__table__.create(bind=engine, checkfirst=True)
+        create_schema_table(PassportCredential.__table__, engine)
 
 
 def passport_to_dict(row: AgentPassport) -> dict[str, Any]:
@@ -313,7 +314,9 @@ def list_passports(
     active_only: bool = True,
 ) -> list[AgentPassport]:
     with session_factory() as session:
-        stmt = select(AgentPassport).order_by(AgentPassport.created_at.desc(), AgentPassport.passport_id)
+        stmt = select(AgentPassport).order_by(
+            AgentPassport.created_at.desc(), AgentPassport.passport_id
+        )
         rows = session.execute(stmt).scalars().all()
         if active_only:
             now = datetime.utcnow()
@@ -327,7 +330,7 @@ def list_passports(
             ]
         for row in rows:
             session.expunge(row)
-        return rows
+        return list(rows)
 
 
 def get_passport(session_factory: sessionmaker[Session], passport_id: str) -> AgentPassport:

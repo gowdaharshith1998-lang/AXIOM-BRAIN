@@ -31,4 +31,3 @@ class IngestPipeline(ABC):
     @abstractmethod
     async def run(self, *, since: datetime | None = None) -> AsyncIterator[IngestEvent]:
         raise NotImplementedError("IngestPipeline.run is stubbed; lands in Phase 3")
-

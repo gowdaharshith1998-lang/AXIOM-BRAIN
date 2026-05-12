@@ -59,9 +59,7 @@ def composite_score(
 ) -> float:
     pr_normalized = min(pagerank * PAGERANK_NORMALIZER, 1.0)
     blended = (
-        pr_normalized * PAGERANK_WEIGHT
-        + degree_ratio * DEGREE_WEIGHT
-        + recency * RECENCY_WEIGHT
+        pr_normalized * PAGERANK_WEIGHT + degree_ratio * DEGREE_WEIGHT + recency * RECENCY_WEIGHT
     )
     return max(0.0, min(blended, 1.0))
 
@@ -102,9 +100,7 @@ IMPORTANCE_DELTA_THRESHOLD: Final[float] = 0.05
 class CentralityScorer:
     """Recomputes ``Entity.composite_importance`` for every node."""
 
-    def recompute_all(
-        self, session: Session, *, now: datetime | None = None
-    ) -> int:
+    def recompute_all(self, session: Session, *, now: datetime | None = None) -> int:
         result = self.recompute_all_rich(session, now=now)
         return result.updated
 
@@ -132,9 +128,7 @@ class CentralityScorer:
         pagerank = self._safe_pagerank(graph)
 
         for u, v in graph.edges():
-            result.traversal_steps.append(
-                (str(u), str(v), edge_map.get((str(u), str(v))))
-            )
+            result.traversal_steps.append((str(u), str(v), edge_map.get((str(u), str(v)))))
 
         degree = dict(graph.degree())
         max_degree = max(degree.values()) if degree else 1
@@ -156,9 +150,7 @@ class CentralityScorer:
             entity.composite_importance = new_value
             result.updated += 1
             if abs(new_value - old_value) >= IMPORTANCE_DELTA_THRESHOLD:
-                result.importance_deltas.append(
-                    ImportanceDelta(entity.id, old_value, new_value)
-                )
+                result.importance_deltas.append(ImportanceDelta(entity.id, old_value, new_value))
 
         session.commit()
         return result

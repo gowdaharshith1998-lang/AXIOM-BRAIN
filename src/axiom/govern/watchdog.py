@@ -14,6 +14,7 @@ from axiom.govern.demo_flag import is_demo_target
 from axiom.govern.receipts import ReceiptInsert, chain_insert_receipt
 from axiom.govern.watchdog_rules import DEFAULT_RULES, WatchdogRule
 from axiom.schema.models import Entity, WatchdogAlert
+from axiom.storage.db import create_schema_table, schema_table_indexes
 
 logger = logging.getLogger("axiom.govern.watchdog")
 
@@ -38,7 +39,7 @@ _registered_rules: list[WatchdogRule] = list(DEFAULT_RULES)
 def ensure_watchdog_alerts_schema(engine: Engine) -> None:
     inspector = inspect(engine)
     if not inspector.has_table("watchdog_alerts"):
-        WatchdogAlert.__table__.create(bind=engine, checkfirst=True)
+        create_schema_table(WatchdogAlert.__table__, engine)
         return
     columns = {column["name"] for column in inspector.get_columns("watchdog_alerts")}
     expected = {
@@ -58,7 +59,7 @@ def ensure_watchdog_alerts_schema(engine: Engine) -> None:
     if not expected.issubset(columns):
         return
     indexes = {index["name"] for index in inspector.get_indexes("watchdog_alerts")}
-    for index in WatchdogAlert.__table__.indexes:
+    for index in schema_table_indexes(WatchdogAlert.__table__):
         if index.name not in indexes:
             index.create(bind=engine, checkfirst=True)
 
@@ -171,11 +172,15 @@ def list_open_alerts(
         stmt = stmt.join(Entity, Entity.id == WatchdogAlert.entity_id).where(
             Entity.cluster_id == cluster_id
         )
-    rows = session.execute(
-        stmt.order_by(desc(WatchdogAlert.detected_at), desc(WatchdogAlert.alert_id)).limit(
-            bounded_limit
+    rows = (
+        session.execute(
+            stmt.order_by(desc(WatchdogAlert.detected_at), desc(WatchdogAlert.alert_id)).limit(
+                bounded_limit
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return sorted(
         rows,
         key=lambda alert: (SEVERITY_RANK.get(alert.severity, 0), alert.detected_at),

@@ -61,4 +61,3 @@ def test_neighbors_depth_validation(db_session: Session) -> None:
     a = crud.create_entity(db_session, "people", {"name": "A"}, source_id=None)
     with pytest.raises(ValueError):
         crud.list_neighbors(db_session, a.id, depth=3)
-

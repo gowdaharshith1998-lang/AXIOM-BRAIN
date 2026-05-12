@@ -106,7 +106,9 @@ def _linked_decision(session: Session, process_id: str) -> None:
     session.commit()
 
 
-def test_emitter_emit_all_walks_all_process_entities(skill_db: tuple[sessionmaker[Session], str]) -> None:
+def test_emitter_emit_all_walks_all_process_entities(
+    skill_db: tuple[sessionmaker[Session], str],
+) -> None:
     sf, _db_url = skill_db
     from axiom.skills.emitter import ProcessSkillEmitter
 
@@ -117,7 +119,7 @@ def test_emitter_emit_all_walks_all_process_entities(skill_db: tuple[sessionmake
 
 
 def test_emitter_emit_one_returns_manifest_for_one_process(
-    skill_db: tuple[sessionmaker[Session], str]
+    skill_db: tuple[sessionmaker[Session], str],
 ) -> None:
     sf, _db_url = skill_db
     from axiom.skills.emitter import ProcessSkillEmitter
@@ -129,7 +131,9 @@ def test_emitter_emit_one_returns_manifest_for_one_process(
     assert manifest.scope_clusters == ["customer_support"]
 
 
-def test_emitter_infers_classify_intent_from_steps(skill_db: tuple[sessionmaker[Session], str]) -> None:
+def test_emitter_infers_classify_intent_from_steps(
+    skill_db: tuple[sessionmaker[Session], str],
+) -> None:
     sf, _db_url = skill_db
     from axiom.skills.emitter import ProcessSkillEmitter
 
@@ -138,7 +142,9 @@ def test_emitter_infers_classify_intent_from_steps(skill_db: tuple[sessionmaker[
         assert ProcessSkillEmitter(session).emit_one(process.id).intent == "classify"
 
 
-def test_emitter_infers_summarize_intent_from_steps(skill_db: tuple[sessionmaker[Session], str]) -> None:
+def test_emitter_infers_summarize_intent_from_steps(
+    skill_db: tuple[sessionmaker[Session], str],
+) -> None:
     sf, _db_url = skill_db
     from axiom.skills.emitter import ProcessSkillEmitter
 
@@ -155,7 +161,7 @@ def test_emitter_infers_summarize_intent_from_steps(skill_db: tuple[sessionmaker
 
 
 def test_emitter_infers_transform_intent_as_fallback(
-    skill_db: tuple[sessionmaker[Session], str]
+    skill_db: tuple[sessionmaker[Session], str],
 ) -> None:
     sf, _db_url = skill_db
     from axiom.skills.emitter import ProcessSkillEmitter
@@ -168,7 +174,7 @@ def test_emitter_infers_transform_intent_as_fallback(
 
 
 def test_emitter_compiles_linked_decisions_into_prompt(
-    skill_db: tuple[sessionmaker[Session], str]
+    skill_db: tuple[sessionmaker[Session], str],
 ) -> None:
     sf, _db_url = skill_db
     from axiom.skills.emitter import ProcessSkillEmitter
@@ -182,7 +188,7 @@ def test_emitter_compiles_linked_decisions_into_prompt(
 
 
 def test_compile_skills_idempotent_on_same_process(
-    skill_db: tuple[sessionmaker[Session], str]
+    skill_db: tuple[sessionmaker[Session], str],
 ) -> None:
     sf, _db_url = skill_db
     from axiom.skills.emitter import compile_skills_from_processes
@@ -196,7 +202,7 @@ def test_compile_skills_idempotent_on_same_process(
 
 
 def test_compile_skills_emits_skill_compiled_ws_event(
-    skill_db: tuple[sessionmaker[Session], str]
+    skill_db: tuple[sessionmaker[Session], str],
 ) -> None:
     sf, _db_url = skill_db
     from axiom.skills.emitter import compile_skills_from_processes
@@ -212,7 +218,7 @@ def test_compile_skills_emits_skill_compiled_ws_event(
 
 
 def test_compile_endpoint_dry_run_returns_manifests_without_persisting(
-    skill_db: tuple[sessionmaker[Session], str]
+    skill_db: tuple[sessionmaker[Session], str],
 ) -> None:
     sf, db_url = skill_db
     from axiom.studio.server import create_app
@@ -221,7 +227,9 @@ def test_compile_endpoint_dry_run_returns_manifests_without_persisting(
         _process_entity(session)
     app = create_app(db_url=db_url, enable_organizer=False)
     with TestClient(app) as client:
-        response = client.post("/api/internal/skills/compile-from-processes", json={"dry_run": True})
+        response = client.post(
+            "/api/internal/skills/compile-from-processes", json={"dry_run": True}
+        )
         assert response.status_code == 200
         assert response.json()["dry_run"] is True
         assert response.json()["compiled"][0]["name"] == "refund_review"
@@ -230,7 +238,7 @@ def test_compile_endpoint_dry_run_returns_manifests_without_persisting(
 
 
 def test_r7_watchdog_rule_fires_for_uncompiled_process(
-    skill_db: tuple[sessionmaker[Session], str]
+    skill_db: tuple[sessionmaker[Session], str],
 ) -> None:
     sf, _db_url = skill_db
     from axiom.govern.watchdog_rules import process_without_compiled_skill
@@ -299,7 +307,7 @@ def test_serialize_skill_md_is_deterministic(skill_db: tuple[sessionmaker[Sessio
 
 
 def test_serialize_then_parse_roundtrip_preserves_fields(
-    skill_db: tuple[sessionmaker[Session], str]
+    skill_db: tuple[sessionmaker[Session], str],
 ) -> None:
     sf, _db_url = skill_db
     with sf() as session:
@@ -495,6 +503,7 @@ async def test_skill_mcp_tool_wiring(
 ) -> None:
     _sf, db_url = skill_db
     _fake_llm(monkeypatch)
+    monkeypatch.setenv("AXIOM_MCP_ALLOW_SYSTEM_PASSPORT", "1")
     from axiom.mcp.server import build_mcp_server
 
     mcp = build_mcp_server(db_url=db_url)
@@ -518,7 +527,9 @@ async def test_skill_mcp_tool_wiring(
     assert "name: summarize_note" in discovered["skill_md"]
     assert "Summarize {note}" in discovered["skill_md"]
 
-    fetched = _mcp_payload(await mcp.call_tool("axiom_get_skill", {"skill_id": registered["skill"]["id"]}))
+    fetched = _mcp_payload(
+        await mcp.call_tool("axiom_get_skill", {"skill_id": registered["skill"]["id"]})
+    )
     assert fetched["skill"]["skill_md"] == discovered["skill_md"]
 
 
@@ -561,7 +572,7 @@ def test_upload_md_endpoint_registers_skill(skill_db: tuple[sessionmaker[Session
 
 
 def test_download_md_endpoint_returns_valid_skill_md(
-    skill_db: tuple[sessionmaker[Session], str]
+    skill_db: tuple[sessionmaker[Session], str],
 ) -> None:
     _sf, db_url = skill_db
     from axiom.studio.server import create_app

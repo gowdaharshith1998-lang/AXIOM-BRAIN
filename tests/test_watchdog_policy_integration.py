@@ -170,7 +170,9 @@ async def test_watchdog_alert_raised_emits_policy_clause_activated_ws_event(
     assert any(event["type"] == "policy_clause_activated" for event in broadcaster.envelopes)
 
 
-def test_policy_list_filters_by_source(watchdog_policy_sf: tuple[sessionmaker[Session], str]) -> None:
+def test_policy_list_filters_by_source(
+    watchdog_policy_sf: tuple[sessionmaker[Session], str],
+) -> None:
     _sf, db_url = watchdog_policy_sf
     app = create_app(db_url=db_url, enable_organizer=False)
     with TestClient(app) as client:

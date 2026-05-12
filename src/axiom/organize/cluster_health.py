@@ -82,14 +82,19 @@ def compute_brain_health_score(
     """
     Composite score in [0, 1].
     Formula:
-      0.40 * classified_ratio + 0.35 * events_component + 0.15 * fps_component + 0.10 * cluster_coverage
+      0.40 * classified_ratio + 0.35 * events_component
+      + 0.15 * fps_component + 0.10 * cluster_coverage
     with a hard idle-penalty of -0.15 when events_per_min <= 0.
     """
     classified_ratio = min(max(classified_pct / 100.0, 0.0), 1.0)
     events_component = 1.0 if events_per_min > 0 else 0.0
     fps_component = min(max(fps / 50.0, 0.0), 1.0)
-    coverage = 0.0 if total_clusters <= 0 else min(max(clusters_present / float(total_clusters), 0.0), 1.0)
-    score = 0.40 * classified_ratio + 0.35 * events_component + 0.15 * fps_component + 0.10 * coverage
+    coverage = (
+        0.0 if total_clusters <= 0 else min(max(clusters_present / float(total_clusters), 0.0), 1.0)
+    )
+    score = (
+        0.40 * classified_ratio + 0.35 * events_component + 0.15 * fps_component + 0.10 * coverage
+    )
     if events_per_min <= 0:
         score -= 0.15
     return min(max(score, 0.0), 1.0)

@@ -59,4 +59,3 @@ async def test_synthetic_disconnect_clears_cache() -> None:
 
     await s.disconnect()
     assert s._data is None  # noqa: SLF001 (test)
-

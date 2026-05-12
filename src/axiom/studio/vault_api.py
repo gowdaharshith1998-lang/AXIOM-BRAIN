@@ -8,7 +8,8 @@ Plaintext discipline:
   * No GET endpoint ever returns plaintext.
   * Plaintext is never logged.
 
-# TODO(5.13.x): add authentication before multi-tenant. Single-user dev for now.
+# Protected by app-level API auth when AXIOM_API_TOKEN / AXIOM_AUTH_REQUIRED is set.
+# Single-user dev remains unauthenticated by default.
 """
 
 from __future__ import annotations
@@ -26,7 +27,6 @@ from axiom.providers import (
     list_providers,
     verify_secret,
 )
-from axiom.providers.models import ProviderMetadata
 from axiom.vault import (
     DuplicateSecret,
     SecretMetadataDTO,
@@ -57,9 +57,7 @@ class StoreSecretRequest(BaseModel):
     @classmethod
     def _validate_key_name(cls, v: str) -> str:
         if not _KEY_NAME_RE.match(v):
-            raise ValueError(
-                "key_name must be ASCII alphanumeric, dash, or underscore only"
-            )
+            raise ValueError("key_name must be ASCII alphanumeric, dash, or underscore only")
         return v
 
 
@@ -94,7 +92,9 @@ class DeleteSecretResponse(BaseModel):
 def _raise_vault_error(exc: Exception) -> None:
     """Map vault/provider exceptions to HTTPException."""
     if isinstance(exc, VaultLocked):
-        raise HTTPException(503, detail="Vault locked. Run `python -m axiom.cli vault init`.") from exc
+        raise HTTPException(
+            503, detail="Vault locked. Run `python -m axiom.cli vault init`."
+        ) from exc
     if isinstance(exc, VaultCorrupt):
         raise HTTPException(500, detail="Vault decryption failed.") from exc
     if isinstance(exc, SecretNotFound):
@@ -151,7 +151,9 @@ def api_store_secret(body: StoreSecretRequest) -> StoreSecretResponse:
 def api_delete_secret(provider_id: str, key_name: str) -> DeleteSecretResponse:
     deleted = delete_secret(provider_id, key_name)
     if not deleted:
-        raise HTTPException(404, detail=f"no secret for provider_id={provider_id!r} key_name={key_name!r}")
+        raise HTTPException(
+            404, detail=f"no secret for provider_id={provider_id!r} key_name={key_name!r}"
+        )
     return DeleteSecretResponse(deleted=True)
 
 
@@ -168,19 +170,25 @@ def api_test_secret(provider_id: str, key_name: str) -> TestSecretResponse:
         None,
     )
     if meta is None:
-        raise HTTPException(404, detail=f"no secret for provider_id={provider_id!r} key_name={key_name!r}")
+        raise HTTPException(
+            404, detail=f"no secret for provider_id={provider_id!r} key_name={key_name!r}"
+        )
     return TestSecretResponse(result=result, secret=meta)
 
 
 @router.put("/api/secrets/{provider_id}/{key_name}", status_code=200)
-def api_rotate_secret(provider_id: str, key_name: str, body: StoreSecretRequest) -> StoreSecretResponse:
+def api_rotate_secret(
+    provider_id: str, key_name: str, body: StoreSecretRequest
+) -> StoreSecretResponse:
     """Replace an existing secret's plaintext value (delete + re-store)."""
     if body.provider_id != provider_id or body.key_name != key_name:
         raise HTTPException(400, detail="body provider_id/key_name must match URL path")
 
     deleted = delete_secret(provider_id, key_name)
     if not deleted:
-        raise HTTPException(404, detail=f"no secret for provider_id={provider_id!r} key_name={key_name!r}")
+        raise HTTPException(
+            404, detail=f"no secret for provider_id={provider_id!r} key_name={key_name!r}"
+        )
 
     try:
         meta = store_secret(provider_id, key_name, body.plaintext)

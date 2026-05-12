@@ -150,9 +150,7 @@ class CompanyState:
             candidates = [entity for entity in recent if entity is not None]
             if not candidates:
                 candidates = [
-                    entity
-                    for entities in self.entities_by_type.values()
-                    for entity in entities
+                    entity for entities in self.entities_by_type.values() for entity in entities
                 ]
         if not candidates:
             raise ValueError(f"no entities available for type {entity_type!r}")

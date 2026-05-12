@@ -7,7 +7,7 @@ from sqlalchemy import Engine, desc, inspect, select
 from sqlalchemy.orm import Session
 
 from axiom.schema.models import Skill, SkillRun
-from axiom.storage.db import get_session
+from axiom.storage.db import create_schema_table, get_session
 
 SkillIntent = Literal["classify", "summarize", "extract", "transform", "monitor"]
 TriggerType = Literal["manual", "schedule", "event"]
@@ -114,16 +114,18 @@ def ensure_skills_schema(engine: Engine) -> None:
                 ):
                     conn.exec_driver_sql(f"DROP INDEX IF EXISTS {index_name}")
                 conn.exec_driver_sql("DROP TABLE skills")
-            Skill.__table__.create(bind=engine, checkfirst=True)
+            create_schema_table(Skill.__table__, engine)
     else:
-        Skill.__table__.create(bind=engine, checkfirst=True)
+        create_schema_table(Skill.__table__, engine)
     if not inspector.has_table("skill_runs"):
-        SkillRun.__table__.create(bind=engine, checkfirst=True)
+        create_schema_table(SkillRun.__table__, engine)
     else:
         run_columns = {column["name"] for column in inspector.get_columns("skill_runs")}
         if "idempotency_key" not in run_columns:
             with engine.begin() as conn:
-                conn.exec_driver_sql("ALTER TABLE skill_runs ADD COLUMN idempotency_key VARCHAR(256)")
+                conn.exec_driver_sql(
+                    "ALTER TABLE skill_runs ADD COLUMN idempotency_key VARCHAR(256)"
+                )
         with engine.begin() as conn:
             conn.exec_driver_sql(
                 "CREATE UNIQUE INDEX IF NOT EXISTS ix_skill_runs_skill_idempotency "
@@ -198,10 +200,11 @@ def list_skills_with_session(
         stmt = stmt.where(Skill.intent == _validate_choice(intent, VALID_INTENTS, "intent"))
     if trigger_type is not None:
         stmt = stmt.where(
-            Skill.trigger_type == _validate_choice(trigger_type, VALID_TRIGGER_TYPES, "trigger_type")
+            Skill.trigger_type
+            == _validate_choice(trigger_type, VALID_TRIGGER_TYPES, "trigger_type")
         )
     stmt = stmt.order_by(desc(Skill.created_at), Skill.name)
-    return session.execute(stmt).scalars().all()
+    return list(session.execute(stmt).scalars().all())
 
 
 def get_skill_with_session(session: Session, skill_id: str) -> Skill:
@@ -233,7 +236,7 @@ def list_skill_runs_with_session(
         .order_by(desc(SkillRun.run_at), desc(SkillRun.id))
         .limit(limit)
     )
-    return session.execute(stmt).scalars().all()
+    return list(session.execute(stmt).scalars().all())
 
 
 def register_skill(**kwargs: Any) -> dict[str, Any]:
