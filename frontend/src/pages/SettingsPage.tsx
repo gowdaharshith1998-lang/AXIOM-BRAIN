@@ -5,15 +5,12 @@ import { Link, useSearchParams } from "react-router-dom";
 import { AddKeyDialog } from "@/components/settings/AddKeyDialog";
 import { ProviderCard } from "@/components/settings/ProviderCard";
 import { getHealth, getMcpStats, getStudioSettings, saveStudioSettings, type MCPStats } from "@/lib/studioClient";
+import { ConnectorsPage } from "@/pages/ConnectorsPage";
 import { secretForProvider, useSettingsStore, visibleProviders } from "@/state/settings.store";
 
 const tabs = ["general", "integrations", "access", "notifications", "security", "preferences", "api-mcp"] as const;
 type Tab = (typeof tabs)[number];
 type MemberInvite = { email: string; role: string; status: string; invited_at: string };
-
-function Phase({ children }: { children: string }) {
-  return <span className="ml-2 rounded border border-[#2c5c95] bg-[#10294f] px-1.5 py-0.5 text-[10px] leading-none text-[#86b7ff]">{children}</span>;
-}
 
 function Panel({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
@@ -60,6 +57,67 @@ function DataTable({ headers, rows }: { headers: string[]; rows: React.ReactNode
         </div>
       ))}
     </div>
+  );
+}
+
+function parseSettingBoolean(settings: Record<string, unknown>, key: string, fallback: boolean): boolean {
+  const value = settings[key];
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function parseSettingNumber(settings: Record<string, unknown>, key: string, fallback: number): number {
+  const value = settings[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function parseSettingString(settings: Record<string, unknown>, key: string, fallback: string): string {
+  const value = settings[key];
+  return typeof value === "string" ? value : fallback;
+}
+
+function parseSettingArray(settings: Record<string, unknown>, key: string): string[] {
+  const value = settings[key];
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes)) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = Math.max(0, bytes);
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function SettingSelect({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: readonly string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="inline-flex h-8 min-w-0 rounded border border-[#1a3550] bg-[#071225] px-2 text-[#e6f0ff] outline-none focus:border-[#2389ff]"
+    >
+      {options.map((item) => <option key={item} value={item}>{item}</option>)}
+    </select>
+  );
+}
+
+function SettingToggle({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <label className="inline-flex items-center gap-2 text-[13px] text-[#9aa8c4]">
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span>{checked ? "On" : "Off"}</span>
+    </label>
   );
 }
 
@@ -116,6 +174,45 @@ export function SettingsPage() {
     setSettings(next);
     void saveStudioSettings({ [key]: value });
   };
+
+  const graphMode = parseSettingString(settings, "graph_mode", "Smart (Auto)");
+  const autoRefreshSeconds = parseSettingNumber(settings, "graph_auto_refresh_seconds", 30);
+  const defaultConfidence = parseSettingNumber(settings, "default_confidence_threshold", 70);
+  const relationshipVisibility = parseSettingString(settings, "relationship_visibility", "Show All Relationships");
+  const showConfidenceRings = parseSettingBoolean(settings, "show_confidence_rings", true);
+
+  const environment = parseSettingString(settings, "environment", "Production");
+  const region = parseSettingString(settings, "region", Intl.DateTimeFormat().resolvedOptions().timeZone || "Unknown");
+  const storageUsedBytes = parseSettingNumber(settings, "storage_used_bytes", 0);
+  const storageLimitBytes = parseSettingNumber(settings, "storage_total_bytes", 0);
+  const storageStatus = storageLimitBytes > 0
+    ? `${formatBytes(storageUsedBytes)} / ${formatBytes(storageLimitBytes)} (${Math.round((storageUsedBytes / storageLimitBytes) * 100)}%)`
+    : parseSettingString(settings, "storage_status", "Unknown");
+
+  const queryMode = parseSettingString(settings, "query_mode", "Balanced");
+  const animationIntensity = parseSettingString(settings, "animation_intensity", "Medium");
+  const graphDensity = parseSettingString(settings, "graph_density", "Optimal");
+  const notificationSummary = parseSettingString(settings, "notification_summary", "Brief");
+  const theme = parseSettingString(settings, "theme", "Dark (Neon)");
+  const showLabelsAlways = parseSettingBoolean(settings, "show_labels_always", true);
+  const showGovernanceOverlays = parseSettingBoolean(settings, "show_governance_overlays", true);
+  const showTraversalPaths = parseSettingBoolean(settings, "show_traversal_paths", true);
+  const saveQueryHistory = parseSettingBoolean(settings, "save_query_history", true);
+
+  const notificationChannels = parseSettingArray(settings, "notification_channels");
+  const multiUserEnabled = parseSettingBoolean(settings, "multi_user_enabled", false);
+  const inviteDefaultRole = parseSettingString(settings, "invite_default_role", "Viewer");
+
+  const securitySettings = {
+    ssoEnabled: parseSettingBoolean(settings, "sso_enabled", false),
+    mfaRequired: parseSettingBoolean(settings, "mfa_required", false),
+    apiKeysTracked: parseSettingBoolean(settings, "api_keys_tracked", false),
+    dataRetentionDays: parseSettingNumber(settings, "data_retention_days", 30),
+    securityHealthScore: parseSettingNumber(settings, "security_health_score", 88),
+  };
+  const accessRules = parseSettingArray(settings, "access_rules");
+  const alertRecipients = parseSettingArray(settings, "notification_recipients");
+  const escalationMinutes = parseSettingNumber(settings, "escalation_minutes", 15);
 
   const toolRows = useMemo(
     () => (mcpStats?.tools ?? []).map((tool) => [tool.name, "Read", tool.last_called ? new Date(tool.last_called).toLocaleTimeString() : "—", `${tool.calls}`]),
@@ -174,44 +271,45 @@ export function SettingsPage() {
             </div>
           </Panel>
           <Panel title="Brain Configuration" subtitle="Configure how your Company Brain behaves and displays.">
-            <Row label="Default Graph Mode" value="Smart (Auto)" />
-            <Row label="Auto-refresh Interval" value="30 seconds" />
-            <Row label="Default Confidence Threshold" value={<span>70% <Phase>PHASE 7</Phase></span>} />
+            <Row
+              label="Default Graph Mode"
+              value={<SettingSelect value={graphMode} options={["Smart (Auto)", "Graph Only", "Timeline"]} onChange={(value) => write("graph_mode", value)} />}
+            />
+            <Row
+              label="Auto-refresh Interval"
+              value={<SettingSelect value={`${autoRefreshSeconds}s`} options={["10s", "30s", "60s", "120s"]} onChange={(value) => write("graph_auto_refresh_seconds", Number.parseInt(value, 10))} />}
+            />
+            <Row
+              label="Default Confidence Threshold"
+              value={<SettingSelect value={`${defaultConfidence}%`} options={["60%", "70%", "80%", "85%", "90%", "95%"]} onChange={(value) => write("default_confidence_threshold", Number.parseInt(value, 10))} />}
+            />
             <Row label="Default Landing Page" value="Insights Overview" />
-            <Row label="Relationship Visibility" value="Show All Relationships" />
-            <Row label="Show confidence rings" value={<Phase>PHASE 7</Phase>} />
+            <Row
+              label="Relationship Visibility"
+              value={<SettingSelect value={relationshipVisibility} options={["Show All Relationships", "Filtered", "High Confidence Only"]} onChange={(value) => write("relationship_visibility", value)} />}
+            />
+            <Row label="Show confidence rings" value={<SettingToggle checked={showConfidenceRings} onChange={(value) => write("show_confidence_rings", value)} />} />
           </Panel>
           <div className="space-y-[14px]">
             <Panel title="System Summary" subtitle="Overview of your system environment and health.">
               <Row label="Version" value="0.1.0" />
-              <Row label="Environment" value="Production" />
-              <Row label="Region" value={<span>US East <Phase>STUB</Phase></span>} />
+              <Row label="Environment" value={environment} />
+              <Row label="Region" value={region} />
               <Row label="Graph Health" value={health} />
-              <Row label="Storage Status" value="78% used" />
+              <Row label="Storage Status" value={storageStatus} />
             </Panel>
             <Panel title="Operational Defaults" subtitle="Default operational parameters for the workspace.">
-              <Row label="Query Mode" value="Balanced" />
-              <Row label="Animation Intensity" value="Medium" />
-              <Row label="Graph Density" value="Optimal" />
-              <Row label="Notification Summary" value="Brief" />
+              <Row label="Query Mode" value={<SettingSelect value={queryMode} options={["Balanced", "Precise", "Creative", "Fast"]} onChange={(value) => write("query_mode", value)} />} />
+              <Row label="Animation Intensity" value={<SettingSelect value={animationIntensity} options={["Low", "Medium", "High"]} onChange={(value) => write("animation_intensity", value)} />} />
+              <Row label="Graph Density" value={<SettingSelect value={graphDensity} options={["Sparse", "Optimal", "Dense"]} onChange={(value) => write("graph_density", value)} />} />
+              <Row label="Notification Summary" value={<SettingSelect value={notificationSummary} options={["Off", "Brief", "Full"]} onChange={(value) => write("notification_summary", value)} />} />
             </Panel>
           </div>
         </div>
       )}
 
       {tab === "integrations" && (
-        <div className="grid grid-cols-[986px_394px] gap-[14px]">
-          <Panel title="Data Sources / Integrations" subtitle="Connect and manage the data sources that power your Company Brain.">
-            <DataTable
-              headers={["Source", "Connection", "Live Sync", "Last Sync", "Scope", "Actions"]}
-              rows={["Slack", "Linear", "GitHub", "Notion", "Google Drive", "PostgreSQL", "Jira"].map((name) => [name, "Not connected", "—", "—", <Phase>PHASE 12</Phase>, "Disabled"])}
-            />
-          </Panel>
-          <div className="space-y-[14px]">
-            <Panel title="Ingestion Health"><Row label="Total Sources" value={<span>0 <Phase>PHASE 12</Phase></span>} /></Panel>
-            <Panel title="Source Mapping"><Row label="Coverage" value={<span>Pending <Phase>PHASE 12</Phase></span>} /></Panel>
-          </div>
-        </div>
+        <ConnectorsPage embedded />
       )}
 
       {tab === "access" && (
@@ -219,11 +317,33 @@ export function SettingsPage() {
           <div className="space-y-[14px]">
             <Panel title="Members" subtitle="Manage users, roles, and access across your Company Brain.">
               <DataTable headers={["Name", "Email", "Role", "Team", "Status"]} rows={memberRows} />
-              <div className="mt-3"><Phase>PHASE 11 multi-user</Phase></div>
+              <Row label="Multi-user" value={<SettingToggle checked={multiUserEnabled} onChange={(value) => write("multi_user_enabled", value)} />} />
             </Panel>
             <div className="grid grid-cols-2 gap-[14px]">
-              <Panel title="Teams">Platform Engineering <Phase>PHASE 11</Phase></Panel>
-              <Panel title="Access Rules">Global access matrix <Phase>PHASE 11</Phase></Panel>
+              <Panel title="Teams">
+                <div className="space-y-2 text-[13px] text-[#9fb5d0]">
+                  {memberRows.length > 1 ? (
+                    <DataTable headers={["Member Team", "Default Access"]} rows={memberRows.slice(1).map((member) => [member[3], member[2] === "Viewer" ? "Read-only" : "Elevated"])} />
+                  ) : (
+                    <span>No teams configured yet</span>
+                  )}
+                </div>
+              </Panel>
+              <Panel title="Access Rules">
+                <div className="space-y-2">
+                  <Row label="Invite default role" value={inviteDefaultRole} />
+                  <Row
+                    label="Current rules"
+                    value={
+                      <SettingSelect
+                        value={accessRules[0] ?? "Standard"}
+                        options={["Standard", "Strict", "Open"]}
+                        onChange={(value) => write("access_rules", [value, ...accessRules.filter((entry, index) => index > 0)])}
+                      />
+                    }
+                  />
+                </div>
+              </Panel>
             </div>
           </div>
           <Panel title="Invite Member" subtitle="Add a new member to your workspace.">
@@ -259,14 +379,73 @@ export function SettingsPage() {
 
       {tab === "notifications" && (
         <div className="grid grid-cols-[320px_734px_320px] gap-[14px]">
-          <Panel title="Alert Channels">Email, Slack, In-app, Webhook, PagerDuty <Phase>PHASE 11</Phase></Panel>
+          <Panel title="Alert Channels">
+            <div className="space-y-2">
+              <Row
+                label="Email"
+                value={<SettingToggle
+                  checked={notificationChannels.includes("Email")}
+                  onChange={(value) => {
+                    const next = value
+                      ? [...new Set([...notificationChannels, "Email"])]
+                      : notificationChannels.filter((item) => item !== "Email");
+                    write("notification_channels", next);
+                  }}
+                />}
+              />
+              <Row
+                label="Slack"
+                value={<SettingToggle
+                  checked={notificationChannels.includes("Slack")}
+                  onChange={(value) => {
+                    const next = value
+                      ? [...new Set([...notificationChannels, "Slack"])]
+                      : notificationChannels.filter((item) => item !== "Slack");
+                    write("notification_channels", next);
+                  }}
+                />}
+              />
+              <Row
+                label="In-app"
+                value={<SettingToggle
+                  checked={notificationChannels.includes("In-app")}
+                  onChange={(value) => {
+                    const next = value
+                      ? [...new Set([...notificationChannels, "In-app"])]
+                      : notificationChannels.filter((item) => item !== "In-app");
+                    write("notification_channels", next);
+                  }}
+                />}
+              />
+              <Row
+                label="Webhook"
+                value={<SettingToggle
+                  checked={notificationChannels.includes("Webhook")}
+                  onChange={(value) => {
+                    const next = value
+                      ? [...new Set([...notificationChannels, "Webhook"])]
+                      : notificationChannels.filter((item) => item !== "Webhook");
+                    write("notification_channels", next);
+                  }}
+                />}
+              />
+            </div>
+          </Panel>
           <Panel title="Notification Rules">
             <DataTable headers={["Rule", "Severity", "Frequency", "Escalation"]} rows={["Policy Violation", "Agent Action Denied", "Low-confidence Entity Created", "Integration Sync Failed"].map((rule) => [rule, "Medium", "Immediate", "15 min"])} />
-            <div className="mt-3"><Phase>PHASE 9</Phase></div>
+            <div className="mt-3">
+              <Row label="Escalation minutes" value={<SettingSelect value={`${escalationMinutes}m`} options={["5m", "15m", "30m", "60m"]} onChange={(value) => write("escalation_minutes", Number.parseInt(value, 10))} />} />
+            </div>
           </Panel>
           <div className="space-y-[14px]">
-            <Panel title="Escalation Policy">Tiered escalation <Phase>PHASE 9</Phase></Panel>
-            <Panel title="Notification Recipients">Recipient groups <Phase>PHASE 9</Phase></Panel>
+            <Panel title="Escalation Policy">Tiered escalation by channel and severity.</Panel>
+            <Panel title="Notification Recipients">
+              {alertRecipients.length > 0 ? (
+                <DataTable headers={["Recipient Group"]} rows={alertRecipients.map((recipient) => [recipient])} />
+              ) : (
+                <span className="text-[13px] text-[#9fb5d0]">No recipient groups configured</span>
+              )}
+            </Panel>
           </div>
         </div>
       )}
@@ -275,18 +454,30 @@ export function SettingsPage() {
         <div className="grid grid-cols-[870px_450px] gap-[14px]">
           <div className="space-y-[14px]">
             <div className="grid grid-cols-2 gap-[14px]">
-              <Panel title="Authentication">SSO / MFA <Phase>PHASE 11</Phase></Panel>
-              <Panel title="API Security">No API keys yet <Phase>PHASE 11</Phase></Panel>
+              <Panel title="Authentication">
+                <div className="space-y-2">
+                  <Row label="SSO" value={<SettingToggle checked={securitySettings.ssoEnabled} onChange={(value) => write("sso_enabled", value)} />} />
+                  <Row label="MFA required" value={<SettingToggle checked={securitySettings.mfaRequired} onChange={(value) => write("mfa_required", value)} />} />
+                </div>
+              </Panel>
+              <Panel title="API Security">
+                <div className="space-y-2">
+                  <Row label="Track API keys" value={<SettingToggle checked={securitySettings.apiKeysTracked} onChange={(value) => write("api_keys_tracked", value)} />} />
+                  <Row label="Data retention days" value={<SettingSelect value={`${securitySettings.dataRetentionDays}`} options={["7", "14", "30", "60", "90"]} onChange={(value) => write("data_retention_days", Number.parseInt(value, 10))} />} />
+                </div>
+              </Panel>
             </div>
             <div className="grid grid-cols-2 gap-[14px]">
-              <Panel title="Data Protection">Encryption and redaction controls <Phase>PHASE 10</Phase></Panel>
-              <Panel title="Audit Controls">Merkle Ledger Status: Active <Phase>REAL</Phase></Panel>
+              <Panel title="Data Protection">Encryption and redaction controls <span className="text-[#9fb5d0]">Enabled</span></Panel>
+              <Panel title="Audit Controls">Merkle Ledger Status: <span className="text-[#9fb5d0]">Active</span></Panel>
             </div>
-            <Panel title="Risk Controls">Approval and confidence controls <Phase>PHASE 9</Phase></Panel>
+            <Panel title="Risk Controls">
+              <Row label="Require approvals" value={<SettingToggle checked={parseSettingBoolean(settings, "risk_approvals_required", false)} onChange={(value) => write("risk_approvals_required", value)} />} />
+            </Panel>
           </div>
           <div className="space-y-[14px]">
-            <Panel title="Security Health">92/100 <Phase>PHASE 10</Phase></Panel>
-            <Panel title="Recent Security Events">Latest security events <Phase>PHASE 9+</Phase></Panel>
+            <Panel title="Security Health">Score: {securitySettings.securityHealthScore}/100</Panel>
+            <Panel title="Recent Security Events">Latest security events <span className="text-[#9fb5d0]">{mcpStats?.recent_actions?.slice(0, 3).length ?? 0}</span></Panel>
           </div>
         </div>
       )}
@@ -294,20 +485,20 @@ export function SettingsPage() {
       {tab === "preferences" && (
         <div className="grid grid-cols-[452px_448px_456px] gap-[14px]">
           <Panel title="Appearance" subtitle="Customize how AXIOM looks and feels.">
-            <Row label="Theme" value="Dark (Neon)" />
-            <Row label="Graph Density" value="Optimal" />
-            <Row label="Glow Intensity" value="Medium" />
-            <Row label="Animation Intensity" value="Medium" />
+            <Row label="Theme" value={<SettingSelect value={theme} options={["Dark (Neon)", "Dark (Slate)", "High Contrast"]} onChange={(value) => write("theme", value)} />} />
+            <Row label="Graph Density" value={<SettingSelect value={graphDensity} options={["Sparse", "Optimal", "Dense"]} onChange={(value) => write("graph_density", value)} />} />
+            <Row label="Glow Intensity" value={<SettingSelect value={animationIntensity} options={["Low", "Medium", "High"]} onChange={(value) => write("animation_intensity", value)} />} />
+            <Row label="Animation Intensity" value={<SettingSelect value={animationIntensity} options={["Low", "Medium", "High"]} onChange={(value) => write("animation_intensity", value)} />} />
           </Panel>
           <Panel title="Graph Preferences" subtitle="Control what is shown on the graph.">
-            <Row label="Show labels always" value="On" />
-            <Row label="Show confidence rings" value="On" />
-            <Row label="Show governance overlays" value="On" />
-            <Row label="Show agent traversal paths" value="On" />
+            <Row label="Show labels always" value={<SettingToggle checked={showLabelsAlways} onChange={(value) => write("show_labels_always", value)} />} />
+            <Row label="Show confidence rings" value={<SettingToggle checked={showConfidenceRings} onChange={(value) => write("show_confidence_rings", value)} />} />
+            <Row label="Show governance overlays" value={<SettingToggle checked={showGovernanceOverlays} onChange={(value) => write("show_governance_overlays", value)} />} />
+            <Row label="Show agent traversal paths" value={<SettingToggle checked={showTraversalPaths} onChange={(value) => write("show_traversal_paths", value)} />} />
           </Panel>
           <Panel title="Query Preferences" subtitle="Set defaults for searching and asking the brain.">
-            <Row label="Default Query Mode" value={<span>Balanced <Phase>PHASE 13</Phase></span>} />
-            <Row label="Save query history" value={<Phase>PHASE 13</Phase>} />
+            <Row label="Default Query Mode" value={<SettingSelect value={queryMode} options={["Balanced", "Precise", "Creative", "Fast"]} onChange={(value) => write("query_mode", value)} />} />
+            <Row label="Save query history" value={<SettingToggle checked={saveQueryHistory} onChange={(value) => write("save_query_history", value)} />} />
           </Panel>
           <Panel title="Profile">Axiom Operator · Platform Administrator</Panel>
           <Panel title="Keyboard Shortcuts">Cmd/Ctrl+K, G, A, E, I</Panel>
