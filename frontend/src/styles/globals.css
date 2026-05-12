@@ -13,6 +13,8 @@ body {
   background: #020711;
   color: rgba(255, 255, 255, 0.9);
   font-family: Inter, "Avenir Next", "Helvetica Neue", sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
   overflow: hidden;
 }
 
@@ -23,7 +25,7 @@ body {
     linear-gradient(90deg, var(--axiom-grid-color) 1px, transparent 1px),
     #020811;
   --axiom-grid-size: 32px 32px;
-  --axiom-font-scale: 1.1;
+  --axiom-font-scale: 1;
 }
 
 .studio-root {
