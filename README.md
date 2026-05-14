@@ -15,12 +15,15 @@ These paths exist and run end-to-end in this repo:
 - **Hybrid cluster classifier:** **Keyword scoring** across seven cluster vocabularies with deterministic tie-breaks; **optional Anthropic LLM fallback** only when keyword scores are weak or ambiguous (fully offline-safe when no API key — falls back to keywords / default cluster). Model is configurable in code at `HybridClassifier`.
 - **Organizer loops:** Periodic classification, PageRank-style **composite importance**, and **within-cluster edge proposals** (many edges are `same_cluster_related` — structural suggestion, not curated semantics).
 - **Cluster health monitoring:** Per-cluster ingest snapshots and health transitions surfaced via API and events.
-- **Studio API:** Entity/edge dumps, cluster health, Levenshtein-ranked **entity search** — used by the UI.
-- **Frontend "living brain":** React + Three.js **3D graph** (hex nodes, clusters, conduits, camera motion) driven by **live REST bootstrap + WebSocket updates**.
+- **Studio API:** Entity/edge dumps, cluster health, hybrid retrieval (lexical + semantic + graph fusion), real GitHub / Linear / Slack / Notion / Gmail connectors with OAuth state validation, webhook signature enforcement, and a Fernet-backed secrets vault.
+- **Ask the Brain:** `POST /api/brain/ask` runs hybrid retrieval against the live graph, sends a grounded prompt to a stored LLM provider key (Anthropic or OpenAI from `/api/internal/llm-keys`), and returns the answer with **clickable entity citations** — the UI mounts the citations in `AskPanel` and dispatches `axiom:focus-entity` for the canvas.
+- **MCP server:** Passport-gated tools (`axiom_query_brain`, `axiom_get_entity`, `axiom_traverse`, `axiom_record_action`, `axiom_check_policy`, …) with ed25519-signed receipts and a passport TTL cap.
+- **Governance:** Watchdog rule engine (6 detectors), approvals workflow, agent registry, policy active-clauses API.
+- **Frontend "living brain":** React + Three.js **3D graph** (hex nodes, clusters, conduits, camera motion) driven by **live REST bootstrap + WebSocket updates**, full Studio pages for Connectors, Passports, Skills, Settings, Governance, Insights, Agents, and Approvals.
 - **⌘K command palette:** Debounced search wired to backend ranking (with sensible client fallback).
 - **Schema & migrations:** Alembic migrations and CRUD tests around the storage layer.
 
-**Explicitly not production-grade yet:** There is **no** real multi-mode policy engine, **no** cryptographic signing of agent actions, **no** real Slack/GitHub/Linear/Notion connectors, and **no** MCP server or executable agent skills in this repo today. Some UI and websocket traffic **simulates** agent actions and receipts for demo atmosphere; that is **not** verified governance.
+**Production boundary:** Designed for **single-tenant production** behind HTTPS with `AXIOM_ENV=production` + a strong `AXIOM_API_TOKEN` (see [`docs/PRODUCTION.md`](docs/PRODUCTION.md)). Multi-tenant SaaS with per-user RBAC, managed backups, and tenant isolation are still future work.
 
 ---
 
@@ -68,6 +71,8 @@ cd frontend && npm install && npm run dev
 
 Open the Vite URL (typically `http://localhost:5173`). The UI expects the API at **`http://127.0.0.1:8000`** unless you configure otherwise.
 
+For a single-origin production container, see [`docs/PRODUCTION.md`](docs/PRODUCTION.md).
+
 ---
 
 ## Configuration
@@ -76,8 +81,18 @@ Copy `.env.example` to `.env` and fill in any keys you need. Notable values:
 
 | Variable | Purpose |
 | --- | --- |
-| `ANTHROPIC_API_KEY` | Optional. Enables the hybrid classifier's **optional** Anthropic LLM fallback when keyword classification is ambiguous or weak. When unset, classification stays **keyword-only** (and default cluster fallback). |
+| `ANTHROPIC_API_KEY` | Optional. Enables the hybrid classifier's **optional** Anthropic LLM fallback when keyword classification is ambiguous or weak. When unset, classification stays **keyword-only** (and default cluster fallback). Provider keys for **Ask the Brain** are stored in the encrypted vault via `POST /api/internal/llm-keys` — *not* through this env var. |
 | `DATABASE_URL` | SQLAlchemy URL. Defaults to `sqlite:///./axiom.db`. |
+| `AXIOM_API_TOKEN` | Optional for local dev, required for deployed use. When set, non-exempt HTTP API routes require `Authorization: Bearer <token>` or `X-AXIOM-API-Key: <token>`; browser WebSockets use the `axiom.auth` subprotocol. |
+| `AXIOM_AUTH_REQUIRED` | Optional fail-closed switch. Set to `1` in production so protected routes return `503` if `AXIOM_API_TOKEN` is missing. `AXIOM_ENV=production` also fails closed. |
+| `AXIOM_ALLOW_WS_QUERY_TOKEN` | Disabled by default. Set only during controlled migrations to allow legacy `/ws/brain?token=<token>` auth. |
+| `AXIOM_MCP_ALLOW_SYSTEM_PASSPORT` | Disabled by default. Enables demo-only MCP system passport fallback outside production. |
+| `AXIOM_ALLOW_WILDCARD_PASSPORTS` | Disabled by default. Allows API-issued wildcard passport scopes only for controlled admin/development use. |
+| `AXIOM_OAUTH_STATE_TTL_SECONDS` | Connector OAuth callback state lifetime. Defaults to 600 seconds and is clamped to at least 60 seconds. |
+| `AXIOM_GMAIL_PUBSUB_AUDIENCE` | Required for Gmail Pub/Sub push webhooks. Must match the configured push OIDC audience. |
+| `AXIOM_GMAIL_PUBSUB_SERVICE_ACCOUNT` | Optional Gmail Pub/Sub service-account email pin. When set, Gmail webhook JWTs must contain this email. |
+| `AXIOM_ENV` | Set to `production` for deployed instances. Production mode disables demo simulator streams. |
+| `AXIOM_VAULT_KEY` | Fernet master key for the encrypted secrets vault. Required for operations that read or write plaintext credentials, including connector OAuth/webhook secrets and access tokens. |
 
 ---
 
