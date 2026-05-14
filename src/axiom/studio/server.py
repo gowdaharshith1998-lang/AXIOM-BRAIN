@@ -209,6 +209,7 @@ from axiom.studio.auth import (
     websocket_auth_subprotocol,
     websocket_is_authenticated,
 )
+from axiom.studio.brain_ask_api import router as brain_ask_router
 from axiom.studio.llm_keys_api import router as llm_keys_router
 from axiom.studio.sources import ensure_sources_schema, real_sources_snapshot
 from axiom.studio.vault_api import router as vault_router
@@ -736,6 +737,7 @@ def create_app(
 
     app.include_router(vault_router)
     app.include_router(llm_keys_router)
+    app.include_router(brain_ask_router)
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:

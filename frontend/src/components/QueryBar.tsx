@@ -1,5 +1,9 @@
 import { useState, type KeyboardEvent } from "react";
 
+import { AskPanel } from "@/components/AskPanel";
+
+type QueryMode = "search" | "ask";
+
 const prompts = [
   "What impacted Q2 revenue?",
   "Show risks to launch",
@@ -10,6 +14,8 @@ const prompts = [
 
 export function QueryBar() {
   const [value, setValue] = useState("");
+  const [mode, setMode] = useState<QueryMode>("search");
+  const [askSeed, setAskSeed] = useState("");
 
   const openPalette = () => window.dispatchEvent(new Event("axiom:open-palette"));
   const submit = (text = value) => {
@@ -19,6 +25,10 @@ export function QueryBar() {
       return;
     }
     setValue(query);
+    if (mode === "ask") {
+      setAskSeed(query);
+      return;
+    }
     window.dispatchEvent(new CustomEvent("axiom:traverse-clusters", { detail: { query } }));
     window.dispatchEvent(new CustomEvent("axiom:palette-query", { detail: { query } }));
   };
@@ -33,6 +43,27 @@ export function QueryBar() {
       <div className="mx-auto mb-2 flex w-max items-center gap-2 rounded-xl border border-white/10 bg-[#07111d]/68 px-4 py-2 font-mono text-xs text-[#E8F0FF]/62 shadow-xl backdrop-blur-xl">
         <span className="h-2 w-2 rounded-full bg-[#45f0a1] shadow-[0_0_10px_#45f0a1]" />
         Queryable by humans + AI agents
+        <span className="mx-2 h-3 w-px bg-white/15" />
+        <div role="tablist" aria-label="Query mode" className="flex items-center gap-1">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "search"}
+            className={`rounded-full px-2 py-0.5 text-[11px] font-mono transition ${mode === "search" ? "bg-[#00E5D8]/20 text-[#00E5D8]" : "text-[#E8F0FF]/55 hover:text-[#E8F0FF]"}`}
+            onClick={() => setMode("search")}
+          >
+            Search
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "ask"}
+            className={`rounded-full px-2 py-0.5 text-[11px] font-mono transition ${mode === "ask" ? "bg-[#00E5D8]/20 text-[#00E5D8]" : "text-[#E8F0FF]/55 hover:text-[#E8F0FF]"}`}
+            onClick={() => setMode("ask")}
+          >
+            Ask
+          </button>
+        </div>
       </div>
       <div className="flex items-center gap-3 rounded-2xl border border-[#00E5D8]/55 bg-[#07111d]/72 px-5 py-3 shadow-[0_0_60px_rgba(0,229,216,0.11)] backdrop-blur-xl">
         <SearchIcon />
@@ -72,6 +103,7 @@ export function QueryBar() {
           </button>
         ))}
       </div>
+      {mode === "ask" && askSeed ? <AskPanel initialQuestion={askSeed} /> : null}
     </div>
   );
 }
