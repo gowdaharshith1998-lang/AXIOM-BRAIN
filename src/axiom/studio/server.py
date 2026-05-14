@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hmac
 import json
+import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
@@ -424,6 +425,7 @@ def _policy_rule_row(rule: PolicyRule) -> dict[str, Any]:
 
 
 SETTINGS_FILE = Path("axiom_studio_settings.json")
+log = logging.getLogger("axiom.studio")
 MCP_TOOL_NAMES = [
     "axiom_query_brain",
     "axiom_get_entity",
@@ -505,7 +507,8 @@ def create_app(
         if SETTINGS_FILE.exists():
             try:
                 app.state.studio_settings = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-            except Exception:
+            except Exception:  # noqa: BLE001
+                log.exception("failed to load studio settings; starting with empty dict")
                 app.state.studio_settings = {}
         previous_health: dict[str, str] = {}
         last_seq = broadcaster.current_seq
@@ -546,7 +549,7 @@ def create_app(
                     with session_local() as session:
                         take_snapshot(session)
                 except Exception:  # noqa: BLE001
-                    pass
+                    log.exception("metrics snapshot loop iteration failed; will retry")
 
         async def cluster_check_retention_loop() -> None:
             while True:
@@ -554,7 +557,7 @@ def create_app(
                     with session_local() as session:
                         cleanup_cluster_check_runs(session, retention_limit_from_env())
                 except Exception:  # noqa: BLE001
-                    pass
+                    log.exception("cluster_check retention sweep failed; will retry")
                 await asyncio.sleep(21_600)
 
         health_task = asyncio.create_task(cluster_health_loop())
@@ -578,13 +581,13 @@ def create_app(
             with session_local() as session:
                 backfill_agent_registry_from_receipts(session)
         except Exception:  # noqa: BLE001
-            pass
+            log.exception("agent registry backfill failed during startup; continuing")
 
         try:
             with session_local() as session:
                 bootstrap_embeddings(session)
         except Exception:  # noqa: BLE001
-            pass
+            log.exception("entity embeddings bootstrap failed during startup; continuing")
 
         snapshot_task: asyncio.Task[None] | None = None
         if snapshots_enabled:
@@ -602,7 +605,7 @@ def create_app(
                     if session.get(MetricsSnapshot, today_id) is None:
                         take_snapshot(session)
             except Exception:  # noqa: BLE001
-                pass
+                log.exception("metrics snapshot startup priming failed; continuing")
             snapshot_task = asyncio.create_task(snapshot_loop())
             app.state.snapshot_task = snapshot_task
 
@@ -616,7 +619,7 @@ def create_app(
                 await organizer.backfill_once()
             except Exception:  # noqa: BLE001
                 # Backfill is best-effort; the loop will retry continuously.
-                pass
+                log.exception("organizer initial backfill failed; loop will retry")
             organizer.start()
             app.state.organizer = organizer
 
@@ -754,8 +757,8 @@ def create_app(
         app.state.studio_settings = existing
         try:
             SETTINGS_FILE.write_text(json.dumps(existing, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001
+            log.exception("failed to persist studio settings to %s", SETTINGS_FILE)
         return {"settings": existing}
 
     connector_vendors = {"github", "linear", "slack", "notion", "gmail"}
@@ -2475,7 +2478,7 @@ def create_app(
                 try:
                     take_snapshot(session)
                 except Exception:  # noqa: BLE001
-                    pass
+                    log.exception("on-demand metric snapshot failed; serving cached rows")
             rows = get_snapshots(session, days=days)
         if metric == "brain_health":
             rows = rows[-36:]
