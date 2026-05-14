@@ -1285,6 +1285,126 @@ class AxiomMCPService:
             "truncated": len(visited) >= cap,
         }
 
+    def _walk_snippet(self, entity: _EntityLite) -> str:
+        """Short, deterministic content preview for a walked node."""
+        data = entity.data or {}
+        for key in ("summary", "description", "body", "text", "note", "subject"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                text = value.strip()
+                return text[:279] + "…" if len(text) > 280 else text
+        return ""
+
+    def walk(
+        self,
+        query: str,
+        frontier_ids: list[str],
+        edge_types: list[str] | None = None,
+        direction: Direction = "both",
+        max_neighbors: int = 10,
+    ) -> dict[str, Any]:
+        """One steerable hop for agentic graph traversal.
+
+        Unlike ``traverse`` (a one-shot BFS dump of node IDs), ``walk`` expands
+        exactly one hop from the given frontier, ranks the reachable neighbors
+        by relevance to ``query``, and returns them *with inline content* so an
+        agent can read what it found and decide the next frontier itself —
+        without N follow-up ``get_entity`` calls. Call it iteratively.
+        """
+        safe_max = min(max(max_neighbors, 1), 50)
+        with self._session_factory() as session:
+            self._refresh_cache_if_needed(session)
+
+        known = [fid for fid in frontier_ids if fid in self._cache.entities]
+        skipped = [fid for fid in frontier_ids if fid not in self._cache.entities]
+        if not known:
+            raise LookupError(
+                "no known entity ids in frontier: "
+                f"{frontier_ids[:10]}"
+            )
+
+        q = (query or "").strip()
+        frontier_set = set(known)
+        # best (score, hop) per neighbor across all frontier nodes
+        best: dict[str, dict[str, Any]] = {}
+        nav_steps: list[tuple[str, str, str | None]] = []
+
+        for from_id in known:
+            rels: list[tuple[str, str, str]] = []
+            if direction in ("outgoing", "both"):
+                rels.extend(self._cache.outgoing.get(from_id, []))
+            if direction in ("incoming", "both"):
+                rels.extend(self._cache.incoming.get(from_id, []))
+            for next_id, edge_id, relationship in rels:
+                if edge_types and relationship not in edge_types:
+                    continue
+                if next_id in frontier_set:
+                    continue
+                neighbor = self._cache.entities.get(next_id)
+                if neighbor is None:
+                    continue
+                nav_steps.append((from_id, next_id, edge_id))
+                if q:
+                    relevance = self._score_walk(q, neighbor)
+                else:
+                    relevance = float(neighbor.composite_importance or 0.0)
+                existing = best.get(next_id)
+                if existing is None or relevance > existing["score"]:
+                    best[next_id] = {
+                        "id": next_id,
+                        "type": neighbor.type,
+                        "title": _title_from_data(neighbor.id, neighbor.data),
+                        "snippet": self._walk_snippet(neighbor),
+                        "cluster_id": neighbor.cluster_id,
+                        "composite_importance": round(
+                            float(neighbor.composite_importance or 0.0), 6
+                        ),
+                        "score": round(float(relevance), 6),
+                        "relationship": relationship,
+                        "from_id": from_id,
+                        "edge_id": edge_id,
+                    }
+
+        if self._events is not None:
+            self._events.emit_steps(nav_steps)
+
+        ranked = sorted(
+            best.values(),
+            key=lambda hop: (-hop["score"], -hop["composite_importance"], hop["title"].casefold()),
+        )
+        next_hops = ranked[:safe_max]
+        return {
+            "query": q,
+            "frontier": known,
+            "skipped": skipped,
+            "direction": direction,
+            "edge_types": edge_types,
+            "next_hops": next_hops,
+            "neighbors_found": len(best),
+            "truncated": len(best) > safe_max,
+            "exhausted": len(best) == 0,
+        }
+
+    @staticmethod
+    def _score_walk(query: str, neighbor: _EntityLite) -> float:
+        """Relevance of a neighbor to the walk query (title + data text)."""
+        title = _title_from_data(neighbor.id, neighbor.data)
+        title_score = _score_title(query, title)
+        haystack = " ".join(
+            str(value) for value in (neighbor.data or {}).values()
+        ).casefold()
+        q = query.casefold().strip()
+        text_score = 0.0
+        if q and q in haystack:
+            text_score = 0.7
+        elif q:
+            tokens = [tok for tok in q.split() if tok]
+            if tokens and all(tok in haystack for tok in tokens):
+                text_score = 0.6
+        score = max(title_score, text_score)
+        # small structural boost so well-connected nodes break ties upward
+        return score + min(float(neighbor.composite_importance or 0.0), 1.0) * 0.05
+
     def list_sources(self) -> dict[str, Any]:
         with self._session_factory() as session:
             rows = real_sources_snapshot(session)
@@ -1382,6 +1502,37 @@ def build_mcp_server(
                 cluster_id=cluster_id,
             )
             return service.traverse(from_id, edge_types, max_depth, direction)
+        except LookupError as exc:
+            raise ToolError(str(exc)) from exc
+
+    @tool(
+        name="axiom_walk",
+        description=(
+            "One steerable hop for agentic graph RAG: rank a frontier's "
+            "neighbors by relevance to a query and return them with inline "
+            "content. Call iteratively, feeding chosen ids back as the frontier."
+        ),
+    )
+    def axiom_walk(
+        query: str,
+        frontier_ids: list[str],
+        edge_types: list[str] | None = None,
+        direction: Direction = "both",
+        max_neighbors: int = 10,
+        passport_token: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            cluster_id, _importance, _alternative, _entity = service._entity_context(
+                frontier_ids[0] if frontier_ids else ""
+            )
+            service._require_passport_scope(
+                passport_token=passport_token,
+                intent="read",
+                cluster_id=cluster_id,
+            )
+            return service.walk(
+                query, frontier_ids, edge_types, direction, max_neighbors
+            )
         except LookupError as exc:
             raise ToolError(str(exc)) from exc
 

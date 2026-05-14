@@ -16,7 +16,7 @@ from axiom.retrieval.embeddings import (
 )
 from axiom.schema.models import Edge, Entity, EntityEmbedding
 
-SearchMode = Literal["hybrid", "lexical", "semantic", "graph"]
+SearchMode = Literal["hybrid", "lexical", "semantic", "graph", "ppr"]
 METHODS: tuple[str, ...] = ("lexical", "semantic", "graph")
 
 
@@ -190,11 +190,30 @@ def hybrid_search(
     cluster_id: str | None = None,
     provider: EmbeddingProvider | None = None,
 ) -> dict[str, Any]:
-    if mode not in {"hybrid", "lexical", "semantic", "graph"}:
-        raise ValueError("mode must be one of hybrid, lexical, semantic, graph")
+    if mode not in {"hybrid", "lexical", "semantic", "graph", "ppr"}:
+        raise ValueError("mode must be one of hybrid, lexical, semantic, graph, ppr")
     safe_top_k = _safe_limit(top_k)
     if not query.strip():
         return {"results": [], "breakdown": _empty_breakdown(), "count": 0, "mode": mode}
+
+    if mode == "ppr":
+        # Lazy import keeps graph_rank's dependency on this module one-directional.
+        from axiom.retrieval.graph_rank import personalized_pagerank_search
+
+        ppr_results = personalized_pagerank_search(
+            session,
+            query,
+            top_k=safe_top_k,
+            entity_types=entity_types,
+            cluster_id=cluster_id,
+            provider=provider,
+        )
+        return {
+            "results": ppr_results,
+            "breakdown": _empty_breakdown(),
+            "count": len(ppr_results),
+            "mode": mode,
+        }
 
     method_results: dict[str, list[SearchResult]] = {}
     selected_methods = METHODS if mode == "hybrid" else (mode,)

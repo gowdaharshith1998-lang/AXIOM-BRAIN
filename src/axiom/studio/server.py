@@ -431,6 +431,7 @@ MCP_TOOL_NAMES = [
     "axiom_query_brain",
     "axiom_get_entity",
     "axiom_traverse",
+    "axiom_walk",
     "axiom_list_sources",
     "axiom_record_action",
     "axiom_check_policy",
