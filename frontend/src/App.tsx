@@ -18,7 +18,6 @@ import { SchedulesPage } from "@/pages/agents/SchedulesPage";
 import { TriggersPage } from "@/pages/agents/TriggersPage";
 import { ConnectorsPage } from "@/pages/ConnectorsPage";
 import { ExplorePage } from "@/pages/ExplorePage";
-import { GovernancePage } from "@/pages/GovernancePage";
 import { InsightsPage } from "@/pages/InsightsPage";
 import { PassportsPage } from "@/pages/PassportsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
@@ -29,7 +28,6 @@ const navItems = [
   ["/graph", "Graph"],
   ["/explore", "Explore"],
   ["/insights", "Insights"],
-  ["/governance", "Governance"],
   ["/agents", "Agents"],
   ["/skills", "Skills"],
   ["/settings", "Settings"],
@@ -39,7 +37,6 @@ const agentNavItems = [
   ["/graph", "Graph"],
   ["/explore", "Explore"],
   ["/insights", "Insights"],
-  ["/governance", "Governance"],
   ["/agents", "Agents"],
   ["/skills", "Skills"],
   ["/agents/schedules", "Schedules"],
@@ -81,10 +78,9 @@ function StudioShell() {
   const isAgentsRoute = location.pathname.startsWith("/agents");
   const isSkillsRoute = location.pathname.startsWith("/skills");
   const isExploreRoute = location.pathname.startsWith("/explore");
-  const isGovernanceRoute = location.pathname === "/governance";
   const isInsightsRoute = location.pathname === "/insights";
   const isSettingsRoute = location.pathname.startsWith("/settings");
-  const hasCompactHeader = isGovernanceRoute || isInsightsRoute;
+  const hasCompactHeader = isInsightsRoute;
   const shellNavItems = isAgentsRoute ? agentNavItems : navItems;
 
   useEffect(() => {
@@ -164,7 +160,7 @@ function StudioShell() {
         <header className={`fixed left-[228px] right-0 top-0 z-30 flex items-start justify-between border-b border-[#132339] px-8 ${hasCompactHeader ? "h-[60px] pt-4" : "h-[112px] pt-7"}`}>
           {hasCompactHeader ? (
             <div className="absolute left-1/2 top-5 -translate-x-1/2 text-[15px] text-[#b9c1cf]">
-              {isInsightsRoute ? "Unified intelligence. Informed decisions. Reduced risk." : "Unified governance. Verifiable trust. Continuous compliance."}
+              {"Unified intelligence. Informed decisions. Reduced risk."}
             </div>
           ) : (
             <div>
@@ -259,7 +255,6 @@ export function App() {
           <Route path="/skills" element={<SkillsPage />} />
           <Route path="/explore/*" element={<ExplorePage />} />
           <Route path="/insights" element={<InsightsPage />} />
-          <Route path="/governance" element={<GovernancePage />} />
           <Route path="*" element={<Navigate to="/graph" replace />} />
         </Route>
       </Routes>
