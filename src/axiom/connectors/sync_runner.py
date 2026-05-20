@@ -431,6 +431,32 @@ async def sync_all_connected_connectors(
     return {"results": results}
 
 
+async def run_initial_sync(
+    session_factory: sessionmaker[Session],
+    broadcaster: EventBroadcaster,
+) -> dict[str, Any]:
+    """Run one sync cycle immediately after startup (before the periodic loop)."""
+    if not vault_is_unlocked():
+        log.warning("Initial startup sync skipped — vault is locked")
+        return {"skipped": "vault_locked", "results": []}
+
+    with session_factory() as session:
+        vendors = list(
+            session.execute(
+                select(ConnectorStateRow.vendor).where(ConnectorStateRow.status == "connected")
+            )
+            .scalars()
+            .all()
+        )
+
+    if not vendors:
+        log.info("Initial startup sync skipped — no connected connectors")
+        return {"skipped": "none_connected", "results": []}
+
+    log.info("Initial startup sync triggered for %s", ", ".join(vendors))
+    return await sync_all_connected_connectors(session_factory, broadcaster)
+
+
 async def connector_sync_loop(
     session_factory: sessionmaker[Session],
     broadcaster: EventBroadcaster,
@@ -439,18 +465,14 @@ async def connector_sync_loop(
         log.warning("Connector auto-sync disabled — vault is locked")
         return
 
-    delay = connector_startup_delay_seconds()
-    if delay:
-        await asyncio.sleep(delay)
-
     interval = connector_sync_interval_seconds()
     log.info("Connector auto-sync enabled (interval=%ss)", interval)
 
     while True:
+        await asyncio.sleep(interval)
         try:
             summary = await sync_all_connected_connectors(session_factory, broadcaster)
             if summary.get("results"):
                 log.info("Connector auto-sync cycle finished: %d vendor(s)", len(summary["results"]))
         except Exception:
             log.exception("Connector auto-sync cycle failed; will retry")
-        await asyncio.sleep(interval)

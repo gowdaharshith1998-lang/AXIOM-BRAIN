@@ -1,16 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
-type ConnectorStatus = {
-  vendor: string;
-  status: "connected" | "disconnected" | "error";
-  configured?: boolean;
-  account_label?: string | null;
-  last_sync_at?: string | null;
-  entities_ingested?: number;
-  events_24h?: number;
-  writes_blocked_week?: number;
-  watch_mode?: "webhook" | "polling";
-};
+import {
+  CONNECTOR_VENDORS,
+  useConnectorsStore,
+} from "@/state/connectors.store";
 
 type RecentEvent = {
   vendor: string;
@@ -27,16 +20,10 @@ type SetupForm = {
   workspace_id: string;
 };
 
-const vendors = [
-  { id: "github", label: "GitHub" },
-  { id: "linear", label: "Linear" },
-  { id: "slack", label: "Slack" },
-  { id: "notion", label: "Notion" },
-  { id: "gmail", label: "Gmail" },
-];
-
 export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
-  const [statuses, setStatuses] = useState<ConnectorStatus[]>([]);
+  const statuses = useConnectorsStore((s) => s.connectors);
+  const fetchStatuses = useConnectorsStore((s) => s.fetchStatuses);
+  const incrementConnectorEvents = useConnectorsStore((s) => s.incrementConnectorEvents);
   const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
   const [drawerVendor, setDrawerVendor] = useState<string | null>(null);
   const [actionMessages, setActionMessages] = useState<Record<string, string>>({});
@@ -58,23 +45,16 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
-  async function load() {
-    const response = await fetch("/api/internal/connectors/status");
-    if (!response.ok) return;
-    const payload = await response.json();
-    setStatuses(Array.isArray(payload.connectors) ? payload.connectors : []);
-  }
-
   useEffect(() => {
-    void load();
-  }, []);
+    void fetchStatuses();
+  }, [fetchStatuses]);
 
   useEffect(() => {
     const onOAuthMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
       const data = event.data as { type?: string; vendor?: string; ok?: boolean; detail?: string } | null;
       if (!data || data.type !== "axiom:connector-oauth" || !data.vendor) return;
-      void load();
+      void fetchStatuses();
       setActionMessage(
         data.vendor,
         data.ok ? data.detail || "Connected" : data.detail || "Authorization failed",
@@ -82,7 +62,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
     };
     window.addEventListener("message", onOAuthMessage);
     return () => window.removeEventListener("message", onOAuthMessage);
-  }, []);
+  }, [fetchStatuses]);
 
   useEffect(() => {
     if (typeof WebSocket === "undefined") return;
@@ -107,13 +87,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
             ...existing,
           ].slice(0, 50));
           if (event.type === "connector_event_received") {
-            setStatuses((existing) =>
-              existing.map((status) =>
-                status.vendor === vendor
-                  ? { ...status, events_24h: (status.events_24h || 0) + 1 }
-                  : status,
-              ),
-            );
+            incrementConnectorEvents(vendor);
           }
         }
       } catch {
@@ -121,7 +95,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
       }
     };
     return () => socket.close();
-  }, []);
+  }, [incrementConnectorEvents]);
 
   const byVendor = useMemo(
     () => new Map(statuses.map((status) => [status.vendor, status])),
@@ -195,7 +169,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
         setActionMessage(vendor, message);
         return;
       }
-      await load();
+      await fetchStatuses();
       const install = await startInstall(vendor);
       if (install.ok) {
         setSetupVendor(null);
@@ -219,7 +193,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
         setActionMessage(vendor, await responseMessage(response, "Connector sync failed"));
         return;
       }
-      await load();
+      await fetchStatuses();
       setActionMessage(vendor, "Sync complete");
     } catch {
       setActionMessage(vendor, "Connector request failed");
@@ -268,7 +242,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
         setActionMessage(vendor, await responseMessage(response, "Disconnect failed"));
         return;
       }
-      await load();
+      await fetchStatuses();
       setActionMessage(vendor, "Disconnected");
     } catch {
       setActionMessage(vendor, "Connector request failed");
@@ -280,7 +254,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
       <section className="settings-panel">
         <h3 className="settings-panel-title">Connectors</h3>
         <div className="settings-panel-body space-y-3">
-          {vendors.map((vendor) => {
+          {CONNECTOR_VENDORS.map((vendor) => {
             const status = byVendor.get(vendor.id);
             const connected = status?.status === "connected";
             const configured = status?.configured !== false;
@@ -459,7 +433,7 @@ function emptySetupForm(vendor: string): SetupForm {
 }
 
 function labelFor(vendor: string): string {
-  return vendors.find((item) => item.id === vendor)?.label ?? vendor;
+  return CONNECTOR_VENDORS.find((item) => item.id === vendor)?.label ?? vendor;
 }
 
 function ConnectorSetupField({

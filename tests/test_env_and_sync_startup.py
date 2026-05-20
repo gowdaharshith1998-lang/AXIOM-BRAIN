@@ -85,6 +85,42 @@ def test_sync_all_lists_connected_vendor_strings(monkeypatch: Any) -> None:
     assert len(summary["results"]) == 2
 
 
+def test_run_initial_sync_logs_connected_vendors(
+    monkeypatch: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    from axiom.connectors import sync_runner
+    from axiom.ingest.broadcaster import EventBroadcaster
+
+    class _FakeSession:
+        def __enter__(self) -> _FakeSession:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def execute(self, _stmt: object) -> object:
+            class _Result:
+                def scalars(self) -> _Result:
+                    return self
+
+                def all(self) -> list[str]:
+                    return ["github", "gmail"]
+
+            return _Result()
+
+    async def _fake_sync_all(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {"results": [{"vendor": "github"}]}
+
+    monkeypatch.setattr(sync_runner, "vault_is_unlocked", lambda: True)
+    monkeypatch.setattr(sync_runner, "sync_all_connected_connectors", _fake_sync_all)
+
+    with caplog.at_level("INFO"):
+        __import__("asyncio").run(
+            sync_runner.run_initial_sync(lambda: _FakeSession(), EventBroadcaster())
+        )
+    assert "Initial startup sync triggered for github, gmail" in caplog.text
+
+
 def test_sync_all_skips_when_vault_locked(monkeypatch: Any) -> None:
     from axiom.connectors import sync_runner
     from axiom.ingest.broadcaster import EventBroadcaster

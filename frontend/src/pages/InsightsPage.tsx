@@ -463,36 +463,157 @@ function OverviewTab({ data }: { data: RealData }) {
   );
 }
 
+type TrendsMetricCard = {
+  title: string;
+  value: string;
+  detail: string;
+  accent: Accent;
+  points?: TimedPoint[];
+  numericValue: number;
+  compactDetail?: boolean;
+  truncateValue?: boolean;
+};
+
 function TrendsTab({ data }: { data: RealData }) {
   const [query, setQuery] = useState("");
   const [hideEmpty, setHideEmpty] = useState(false);
-  const cards = [
-    { title: "Entities Created", value: data.entities.length, detail: "/api/entities", accent: "blue" as Accent, points: data.charts.entityDaily },
-    { title: "Relationships Created", value: data.edges.length, detail: "/api/edges", accent: "cyan" as Accent, points: data.charts.edgeDaily },
-    { title: "Real Agent Actions", value: data.agentActions.length, detail: "Demo actions excluded", accent: "purple" as Accent, points: data.charts.actionDaily },
-    { title: "Real Receipts", value: data.receipts.length, detail: "Demo receipts excluded", accent: "green" as Accent, points: data.charts.receiptDaily },
-    { title: "Real Insights", value: data.insights.length, detail: "Demo insights excluded", accent: "amber" as Accent, points: data.charts.insightDaily },
-  ].filter((card) => card.title.toLowerCase().includes(query.toLowerCase()))
-    .filter((card) => !hideEmpty || card.value > 0 || hasChartData(card.points));
+  const topDegree = useMemo(
+    () => buildDegreeRows(data.entities, data.edges)[0],
+    [data.entities, data.edges],
+  );
+  const activeAgents = useMemo(() => realAgentNames(data).length, [data]);
+
+  const allCards = useMemo<TrendsMetricCard[]>(
+    () => [
+      {
+        title: "Entities Created",
+        value: formatNumber(data.entities.length),
+        detail: "/api/entities",
+        accent: "blue",
+        points: data.charts.entityDaily,
+        numericValue: data.entities.length,
+      },
+      {
+        title: "Relationships Created",
+        value: formatNumber(data.edges.length),
+        detail: "/api/edges",
+        accent: "cyan",
+        points: data.charts.edgeDaily,
+        numericValue: data.edges.length,
+      },
+      {
+        title: "Real Agent Actions",
+        value: formatNumber(data.agentActions.length),
+        detail: "Demo actions excluded",
+        accent: "purple",
+        points: data.charts.actionDaily,
+        numericValue: data.agentActions.length,
+      },
+      {
+        title: "Most Connected Entity",
+        value: topDegree ? titleForEntity(topDegree.entity) : "N/A",
+        detail: topDegree ? `${topDegree.degree} edges` : "No edges",
+        accent: "blue",
+        numericValue: topDegree?.degree ?? 0,
+        truncateValue: true,
+      },
+      {
+        title: "Active Real Agents",
+        value: formatNumber(activeAgents),
+        detail: "From non-demo actions and MCP stats",
+        accent: "green",
+        numericValue: activeAgents,
+        compactDetail: true,
+      },
+      {
+        title: "Real Receipts",
+        value: formatNumber(data.receipts.length),
+        detail: "Demo receipts excluded",
+        accent: "green",
+        points: data.charts.receiptDaily,
+        numericValue: data.receipts.length,
+      },
+      {
+        title: "Real Insights",
+        value: formatNumber(data.insights.length),
+        detail: "Demo insights excluded",
+        accent: "amber",
+        points: data.charts.insightDaily,
+        numericValue: data.insights.length,
+      },
+      {
+        title: "Success Rate",
+        value: formatPercent(receiptSuccessRate(data.receipts), 1),
+        detail: "From real receipts",
+        accent: "purple",
+        numericValue: receiptSuccessRate(data.receipts) ?? 0,
+        compactDetail: true,
+      },
+    ],
+    [activeAgents, data, topDegree],
+  );
+
+  const cards = allCards
+    .filter((card) => card.title.toLowerCase().includes(query.toLowerCase()))
+    .filter((card) => !hideEmpty || card.numericValue > 0 || (card.points ? hasChartData(card.points) : false));
 
   return (
-    <>
-      <div className="ins-trends-top">
-        <div className="ins-date"><span>{data.days}-day window</span><Icon name="calendar" /></div>
-        <label className="ins-search"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search real metrics..." /></label>
-        <button type="button" className="ins-filter-button" onClick={() => setHideEmpty((value) => !value)}>
-          <Icon name="filter" /> {hideEmpty ? "Show Empty Metrics" : "Hide Empty Metrics"}
+    <div className="ins-trends-tab">
+      <div className="ins-trends-toolbar">
+        <div className="ins-date ins-trends-control">
+          <span>{data.days}-day window</span>
+          <Icon name="calendar" />
+        </div>
+        <label className="ins-search ins-trends-control">
+          <Icon name="search" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search real metrics..."
+          />
+        </label>
+        <button
+          type="button"
+          className="ins-filter-button ins-trends-control"
+          onClick={() => setHideEmpty((value) => !value)}
+        >
+          <Icon name="filter" />
+          {hideEmpty ? "Show Empty Metrics" : "Hide Empty Metrics"}
         </button>
-        <TrendHighlight title="Most Connected Entity" value={buildDegreeRows(data.entities, data.edges)[0]?.entity ? titleForEntity(buildDegreeRows(data.entities, data.edges)[0].entity) : "N/A"} delta={buildDegreeRows(data.entities, data.edges)[0] ? `${buildDegreeRows(data.entities, data.edges)[0].degree} edges` : "No edges"} accent="blue" />
-        <TrendHighlight title="Active Real Agents" value={formatNumber(realAgentNames(data).length)} delta="From non-demo actions and MCP stats" accent="green" />
-        <TrendHighlight title="Success Rate" value={formatPercent(receiptSuccessRate(data.receipts), 1)} delta="From real receipts" accent="purple" />
       </div>
 
       <div className="ins-grid ins-trend-grid">
         {cards.map((card) => (
-          <Panel key={card.title} title={card.title} action={<button type="button" className="ins-icon-button" aria-label={`Download ${card.title} trend`} onClick={() => downloadMetricCsv(card.title, card.points)}><Icon name="download" /></button>}>
-            <div className="ins-trend-metric"><strong>{formatNumber(card.value)}</strong><span>{card.detail}</span></div>
-            <MiniLineChart accent={card.accent} points={card.points} />
+          <Panel
+            key={card.title}
+            title={card.title}
+            className="ins-trend-card"
+            action={
+              card.points ? (
+                <button
+                  type="button"
+                  className="ins-icon-button"
+                  aria-label={`Download ${card.title} trend`}
+                  onClick={() => downloadMetricCsv(card.title, card.points!)}
+                >
+                  <Icon name="download" />
+                </button>
+              ) : undefined
+            }
+          >
+            <div className={cx("ins-trend-metric", card.compactDetail && "ins-trend-metric--stacked")}>
+              <strong className={cx(card.truncateValue && "ins-trend-value-truncate")} title={card.truncateValue ? card.value : undefined}>
+                {card.value}
+              </strong>
+              <span className={cx("ins-trend-metric-detail", card.compactDetail && "ins-trend-metric-detail--compact", `ins-${card.accent}`)}>
+                {card.detail}
+              </span>
+            </div>
+            {card.points ? (
+              <MiniLineChart accent={card.accent} points={card.points} />
+            ) : (
+              <div className="ins-trend-chart-placeholder" aria-hidden="true" />
+            )}
           </Panel>
         ))}
       </div>
@@ -509,17 +630,6 @@ function TrendsTab({ data }: { data: RealData }) {
           </div>
         </div>
       </Panel>
-    </>
-  );
-}
-
-function TrendHighlight({ title, value, delta, accent }: { title: string; value: string; delta: string; accent: Accent }) {
-  return (
-    <div className={cx("ins-trend-highlight", `ins-${accent}`)}>
-      <HexIcon icon={accent === "red" ? "warning" : "shield"} accent={accent} />
-      <span>{title}</span>
-      <strong>{value}</strong>
-      <b>{delta}</b>
     </div>
   );
 }
@@ -750,7 +860,7 @@ export function InsightsPage() {
             </button>
           ))}
         </nav>
-        <div className="insights-body">{content}</div>
+        <div className="insights-body insights-body-scroll">{content}</div>
       </div>
     </div>
   );

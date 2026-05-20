@@ -2130,6 +2130,11 @@ body {
   padding-top: 14px;
 }
 
+.insights-body-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
 .insights-footer {
   display: flex;
   justify-content: center;
@@ -2243,7 +2248,13 @@ body {
 }
 
 .ins-trend-grid {
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.ins-trend-card {
+  width: 100%;
+  min-width: 0;
 }
 
 .ins-panel,
@@ -2708,12 +2719,42 @@ body {
   line-height: 1;
 }
 
-.ins-trends-top {
-  display: grid;
-  grid-template-columns: 250px 320px 170px repeat(3, 1fr);
-  align-items: start;
+.ins-trends-tab {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.ins-trends-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
+  min-width: 0;
+}
+
+.ins-trends-control {
+  height: 40px;
+  min-height: 40px;
+  font-size: 14px;
+}
+
+.ins-trends-toolbar .ins-filter-button {
+  font-size: 14px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.ins-trends-toolbar .ins-search {
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 360px;
+}
+
+.ins-trends-toolbar .ins-date {
+  flex: 0 0 auto;
 }
 
 @media (max-width: 1400px) {
@@ -2722,15 +2763,15 @@ body {
     width: 100%;
   }
 
-  .ins-trends-top {
+  .ins-trend-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-.ins-trends-top .ins-date,
-.ins-trends-top .ins-search,
-.ins-trends-top .ins-filter-button {
-  height: 40px;
+@media (max-width: 900px) {
+  .ins-trend-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .ins-search input {
@@ -2812,6 +2853,49 @@ body {
   margin-left: 9px;
   color: #9eacbf;
   font-size: calc(13px * var(--axiom-font-scale));
+}
+
+.ins-trend-metric--stacked span {
+  margin-left: 0;
+}
+
+.ins-trend-metric-detail {
+  display: inline;
+}
+
+.ins-trend-metric--stacked {
+  display: block;
+}
+
+.ins-trend-metric--stacked strong {
+  display: block;
+}
+
+.ins-trend-metric-detail--compact {
+  display: block;
+  margin-top: 6px;
+  color: #12e29b;
+  font-size: 12px;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.ins-trend-metric-detail--compact.ins-purple {
+  color: #a35cff;
+}
+
+.ins-trend-value-truncate {
+  display: block;
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ins-trend-chart-placeholder {
+  height: 182px;
+  border-radius: 6px;
+  background: rgba(5, 15, 31, 0.35);
 }
 
 .ins-trend-delta {

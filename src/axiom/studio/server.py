@@ -27,7 +27,9 @@ from sqlalchemy.orm import sessionmaker
 from axiom.api.search import EntitySearchResult, search_entities
 from axiom.connectors.sync_runner import (
     connector_sync_loop,
+    run_initial_sync,
     schedule_connector_sync_after_oauth,
+    sync_all_connected_connectors,
     sync_gmail,
     sync_github,
     sync_linear,
@@ -653,6 +655,7 @@ def create_app(
 
         app.state.vault_unlocked = log_vault_startup_status()
         if app.state.vault_unlocked:
+            asyncio.create_task(run_initial_sync(session_local, broadcaster))
             app.state.connector_sync_task = asyncio.create_task(
                 connector_sync_loop(session_local, broadcaster)
             )
@@ -2389,6 +2392,10 @@ def create_app(
                 for row in rows
             ]
         }
+
+    @app.post("/api/internal/connectors/sync-all")
+    async def post_connectors_sync_all() -> dict[str, Any]:
+        return await sync_all_connected_connectors(session_local, broadcaster)
 
     @app.get("/api/internal/connectors/status")
     def get_connectors_status() -> dict[str, Any]:

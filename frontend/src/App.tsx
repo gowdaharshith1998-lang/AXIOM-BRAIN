@@ -4,6 +4,9 @@ import { BrowserRouter, NavLink, Navigate, Outlet, Route, Routes, useLocation, u
 import { Brain } from "@/components/Brain";
 import { BrainHealthCard } from "@/components/BrainHealthCard";
 import { CommandPalette } from "@/components/CommandPalette";
+import { ConnectorBootstrap } from "@/components/ConnectorBootstrap";
+import { ConnectorLoadingIndicator } from "@/components/ConnectorLoadingIndicator";
+import { ConnectorStatusBar } from "@/components/ConnectorStatusBar";
 import { EdgeLegend } from "@/components/EdgeLegend";
 import { EntityInspector } from "@/components/EntityInspector";
 import { PendingApprovalsBadge } from "@/components/PendingApprovalsBadge";
@@ -169,6 +172,7 @@ function StudioShell() {
             </div>
           )}
           <div className="ml-auto mt-[-4px] flex items-center gap-2">
+            <ConnectorLoadingIndicator />
             <PendingApprovalsBadge />
             <div className="flex h-[38px] items-center gap-2 rounded-lg border border-[#1d3452] bg-[#071328] px-4 text-[16px] text-[#14e0a7]">
               <span className={`h-2.5 w-2.5 rounded-full ${connectionStatus === "live" ? "bg-[#16f0a9]" : "bg-[#5f728f]"}`} />
@@ -200,6 +204,7 @@ function StudioShell() {
 function GraphPage() {
   return (
     <>
+      <ConnectorStatusBar />
       <BrainHealthCard />
       <div className="absolute inset-0">
         <Brain />
@@ -239,6 +244,7 @@ function WsStatusBridge() {
 export function App() {
   return (
     <BrowserRouter>
+      <ConnectorBootstrap />
       <WsStatusBridge />
       <Routes>
         <Route element={<StudioShell />}>
