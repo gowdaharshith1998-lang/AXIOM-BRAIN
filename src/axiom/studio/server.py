@@ -8,6 +8,7 @@ import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,7 +16,7 @@ from typing import Annotated, Any, NoReturn, cast
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import Table, create_engine, desc, func, select
@@ -860,6 +861,59 @@ def create_app(
             and (config.redirect_uri or "").strip()
         )
 
+    def _resolve_connector_redirect_uri(redirect_uri: str, request: Request) -> str:
+        uri = redirect_uri.strip()
+        if uri.startswith("http://") or uri.startswith("https://"):
+            return uri
+        base = os.environ.get("AXIOM_PUBLIC_BASE_URL", "").rstrip("/") or str(request.base_url).rstrip("/")
+        return f"{base}{uri if uri.startswith('/') else f'/{uri}'}"
+
+    def _connector_config_with_resolved_redirect(config: ConnectorConfig, request: Request) -> ConnectorConfig:
+        redirect_uri = (config.redirect_uri or "").strip()
+        if not redirect_uri:
+            return config
+        resolved = _resolve_connector_redirect_uri(redirect_uri, request)
+        if resolved == config.redirect_uri:
+            return config
+        return replace(config, redirect_uri=resolved)
+
+    def _connector_oauth_callback_html(
+        vendor: str,
+        *,
+        ok: bool,
+        detail: str,
+        payload: dict[str, Any] | None = None,
+    ) -> HTMLResponse:
+        message = {
+            "type": "axiom:connector-oauth",
+            "vendor": vendor,
+            "ok": ok,
+            "detail": detail,
+            "payload": payload or {},
+        }
+        encoded = json.dumps(message).replace("</", "<\\/")
+        status_text = "Connected" if ok else "Authorization failed"
+        html = f"""<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>AXIOM {vendor.title()} Connector</title></head>
+<body style="font-family: sans-serif; background:#06101b; color:#e8f2ff; padding:24px;">
+  <h1 style="font-size:18px; margin:0 0 8px;">{status_text}</h1>
+  <p style="margin:0; color:#9aa8c4;">{detail}</p>
+  <script>
+    (function() {{
+      var msg = {encoded};
+      try {{
+        if (window.opener && !window.opener.closed) {{
+          window.opener.postMessage(msg, window.location.origin);
+        }}
+      }} catch (error) {{}}
+      window.setTimeout(function() {{ window.close(); }}, 500);
+    }})();
+  </script>
+</body>
+</html>"""
+        return HTMLResponse(content=html)
+
     def _require_connector_configured(config: ConnectorConfig, label: str) -> None:
         if not _connector_configured(config):
             raise HTTPException(
@@ -1078,11 +1132,15 @@ def create_app(
     def put_connector_config(
         vendor: str,
         body: Annotated[ConnectorConfigIn, Body()],
+        request: Request,
     ) -> dict[str, Any]:
         if vendor not in connector_vendors:
             raise HTTPException(status_code=404, detail="connector not found")
         default = _connector_config_for(vendor)
-        redirect_uri = (body.redirect_uri or default.redirect_uri or "").strip()
+        redirect_uri = _resolve_connector_redirect_uri(
+            (body.redirect_uri or default.redirect_uri or "").strip(),
+            request,
+        )
         config = ConnectorConfig(
             id=vendor,
             vendor=vendor,
@@ -1764,75 +1822,84 @@ def create_app(
         _require_connector_configured(notion_config(), "Notion")
 
     @app.post("/api/internal/connectors/notion/install")
-    def post_notion_install() -> dict[str, Any]:
+    def post_notion_install(request: Request) -> dict[str, Any]:
         require_notion_enabled()
-        config = notion_config()
+        config = _connector_config_with_resolved_redirect(notion_config(), request)
         state = _new_connector_oauth_state()
         _persist_connector_install_config(config, state)
         return {"authorize_url": NotionOAuth(config).authorize_url(state), "state": state}
 
     @app.get("/api/internal/connectors/notion/callback")
-    def get_notion_callback(code: str, state: str) -> dict[str, Any]:
-        require_notion_enabled()
-        config = notion_config()
-        _consume_connector_oauth_state(config, state)
-        oauth_state = NotionOAuth(config).exchange_code(code)
-        with session_local() as session:
-            config_row = session.get(ConnectorConfigRow, config.id)
-            if config_row is None:
-                config_row = ConnectorConfigRow(
-                    id=config.id,
+    def get_notion_callback(request: Request, code: str, state: str) -> HTMLResponse:
+        try:
+            require_notion_enabled()
+            config = _connector_config_with_resolved_redirect(notion_config(), request)
+            _consume_connector_oauth_state(config, state)
+            oauth_state = NotionOAuth(config).exchange_code(code)
+            with session_local() as session:
+                config_row = session.get(ConnectorConfigRow, config.id)
+                if config_row is None:
+                    config_row = ConnectorConfigRow(
+                        id=config.id,
+                        vendor="notion",
+                        oauth_client_id=config.oauth_client_id,
+                        oauth_client_secret=_put_connector_secret(
+                            session,
+                            "notion",
+                            "oauth_client_secret",
+                            config.oauth_client_secret or "",
+                        )
+                        if config.oauth_client_secret
+                        else None,
+                        redirect_uri=config.redirect_uri,
+                        scopes=[],
+                        workspace_id=config.workspace_id,
+                        install_state="connected",
+                    )
+                    session.add(config_row)
+                else:
+                    config_row.install_state = "connected"
+                    session.add(config_row)
+                row = ConnectorStateRow(
+                    id=oauth_state.id,
+                    connector_id=config.id,
                     vendor="notion",
-                    oauth_client_id=config.oauth_client_id,
-                    oauth_client_secret=_put_connector_secret(
+                    access_token=_put_connector_token(
                         session,
                         "notion",
-                        "oauth_client_secret",
-                        config.oauth_client_secret or "",
+                        oauth_state.id,
+                        "access_token",
+                        oauth_state.access_token,
                     )
-                    if config.oauth_client_secret
-                    else None,
-                    redirect_uri=config.redirect_uri,
-                    scopes=[],
-                    workspace_id=config.workspace_id,
-                    install_state="connected",
+                    or "",
+                    refresh_token=_put_connector_token(
+                        session,
+                        "notion",
+                        oauth_state.id,
+                        "refresh_token",
+                        oauth_state.refresh_token,
+                    ),
+                    token_expires_at=oauth_state.token_expires_at,
+                    account_id=oauth_state.account_id,
+                    account_label=oauth_state.account_label or "Notion Workspace",
+                    installed_by=oauth_state.installed_by,
+                    status="connected",
                 )
-                session.add(config_row)
-            else:
-                config_row.install_state = "connected"
-                session.add(config_row)
-            row = ConnectorStateRow(
-                id=oauth_state.id,
-                connector_id=config.id,
-                vendor="notion",
-                access_token=_put_connector_token(
-                    session,
-                    "notion",
-                    oauth_state.id,
-                    "access_token",
-                    oauth_state.access_token,
-                )
-                or "",
-                refresh_token=_put_connector_token(
-                    session,
-                    "notion",
-                    oauth_state.id,
-                    "refresh_token",
-                    oauth_state.refresh_token,
-                ),
-                token_expires_at=oauth_state.token_expires_at,
-                account_id=oauth_state.account_id,
-                account_label=oauth_state.account_label or "Notion Workspace",
-                installed_by=oauth_state.installed_by,
-                status="connected",
-            )
-            session.add(row)
-            session.commit()
-        return {
-            "status": "connected",
-            "account_label": oauth_state.account_label or "Notion Workspace",
-            "watch_mode": "polling",
-        }
+                session.add(row)
+                session.commit()
+            result = {
+                "status": "connected",
+                "account_label": oauth_state.account_label or "Notion Workspace",
+                "watch_mode": "polling",
+            }
+            detail = f"Notion connected as {result['account_label']}"
+            return _connector_oauth_callback_html("notion", ok=True, detail=detail, payload=result)
+        except HTTPException as exc:
+            detail = str(exc.detail)
+            return _connector_oauth_callback_html("notion", ok=False, detail=detail)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Notion OAuth callback failed")
+            return _connector_oauth_callback_html("notion", ok=False, detail=str(exc) or "Notion authorization failed")
 
     @app.post("/api/internal/connectors/notion/sync")
     async def post_notion_sync() -> dict[str, Any]:

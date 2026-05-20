@@ -241,6 +241,27 @@ describe("ConnectorsPage", () => {
     expect(screen.getByText("Connector setup required")).toBeInTheDocument();
   });
 
+  it("connector_setup_shows_error_in_modal_when_save_fails", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === "/api/internal/connectors/status") {
+        return jsonResponse({ connectors: [{ vendor: "notion", status: "disconnected", configured: false }] });
+      }
+      if (url === "/api/internal/connectors/notion/config") {
+        return Promise.resolve(new Response(JSON.stringify({ detail: "Notion connector setup required" }), { status: 409 }));
+      }
+      return jsonResponse({});
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Notion" }));
+    fireEvent.change(await screen.findByLabelText("OAuth client ID"), { target: { value: "client-id" } });
+    fireEvent.change(screen.getByLabelText("OAuth client secret"), { target: { value: "client-secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save & Connect" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Notion connector setup required");
+    expect(screen.getByRole("dialog", { name: "Set up Notion connector" })).toBeInTheDocument();
+  });
+
   it("connector_setup_saves_config_then_opens_authorization", async () => {
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
       if (url === "/api/internal/connectors/status") {

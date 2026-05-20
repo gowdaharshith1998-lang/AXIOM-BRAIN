@@ -42,6 +42,8 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
   const [actionMessages, setActionMessages] = useState<Record<string, string>>({});
   const [setupVendor, setSetupVendor] = useState<string | null>(null);
   const [setupForm, setSetupForm] = useState<SetupForm>(() => emptySetupForm("github"));
+  const [setupSaving, setSetupSaving] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
 
   function setActionMessage(vendor: string, message: string) {
     setActionMessages((existing) => ({ ...existing, [vendor]: message }));
@@ -65,6 +67,21 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
 
   useEffect(() => {
     void load();
+  }, []);
+
+  useEffect(() => {
+    const onOAuthMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as { type?: string; vendor?: string; ok?: boolean; detail?: string } | null;
+      if (!data || data.type !== "axiom:connector-oauth" || !data.vendor) return;
+      void load();
+      setActionMessage(
+        data.vendor,
+        data.ok ? data.detail || "Connected" : data.detail || "Authorization failed",
+      );
+    };
+    window.addEventListener("message", onOAuthMessage);
+    return () => window.removeEventListener("message", onOAuthMessage);
   }, []);
 
   useEffect(() => {
@@ -114,9 +131,11 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
   function openSetup(vendor: string) {
     setSetupVendor(vendor);
     setSetupForm(emptySetupForm(vendor));
+    setSetupError(null);
+    setSetupSaving(false);
   }
 
-  async function startInstall(vendor: string) {
+  async function startInstall(vendor: string): Promise<{ ok: boolean; error?: string }> {
     setActionMessage(vendor, "Connecting...");
     try {
       const response = await fetch(`/api/internal/connectors/${vendor}/install`, { method: "POST" });
@@ -124,17 +143,26 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
         const message = await responseMessage(response, "Connector install failed");
         setActionMessage(vendor, message);
         if (response.status === 409) openSetup(vendor);
-        return;
+        return { ok: false, error: message };
       }
       const payload = await response.json();
       if (typeof payload.authorize_url === "string") {
-        window.open(payload.authorize_url, `axiom-${vendor}-oauth`, "width=720,height=780");
-        setActionMessage(vendor, "Opening authorization");
-        return;
+        const popup = window.open(payload.authorize_url, `axiom-${vendor}-oauth`, "width=720,height=780");
+        if (!popup) {
+          const message = "Popup blocked. Allow popups for this site, then try again.";
+          setActionMessage(vendor, message);
+          return { ok: false, error: message };
+        }
+        setActionMessage(vendor, "Complete authorization in the popup window");
+        return { ok: true };
       }
-      setActionMessage(vendor, "Authorize URL unavailable");
+      const message = "Authorize URL unavailable";
+      setActionMessage(vendor, message);
+      return { ok: false, error: message };
     } catch {
-      setActionMessage(vendor, "Connector request failed");
+      const message = "Connector request failed";
+      setActionMessage(vendor, message);
+      return { ok: false, error: message };
     }
   }
 
@@ -150,8 +178,10 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
 
   async function saveSetup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!setupVendor) return;
+    if (!setupVendor || setupSaving) return;
     const vendor = setupVendor;
+    setSetupSaving(true);
+    setSetupError(null);
     setActionMessage(vendor, "Saving connector setup...");
     try {
       const response = await fetch(`/api/internal/connectors/${vendor}/config`, {
@@ -160,15 +190,24 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
         body: JSON.stringify(setupForm),
       });
       if (!response.ok) {
-        setActionMessage(vendor, await responseMessage(response, "Connector setup failed"));
+        const message = await responseMessage(response, "Connector setup failed");
+        setSetupError(message);
+        setActionMessage(vendor, message);
         return;
       }
       await load();
-      setSetupVendor(null);
-      setActionMessage(vendor, "Connector setup saved");
-      await startInstall(vendor);
+      const install = await startInstall(vendor);
+      if (install.ok) {
+        setSetupVendor(null);
+        return;
+      }
+      setSetupError(install.error || "Could not start authorization");
     } catch {
-      setActionMessage(vendor, "Connector request failed");
+      const message = "Connector request failed";
+      setSetupError(message);
+      setActionMessage(vendor, message);
+    } finally {
+      setSetupSaving(false);
     }
   }
 
@@ -348,6 +387,11 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
             <p className="mt-2 text-[13px] text-[#9aa8c4]">
               Add the OAuth app credentials, then AXIOM will open the provider authorization flow.
             </p>
+            {setupError ? (
+              <div className="mt-4 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-[13px] text-red-100" role="alert">
+                {setupError}
+              </div>
+            ) : null}
             <div className="mt-5 space-y-3">
               <ConnectorSetupField
                 label="OAuth client ID"
@@ -378,15 +422,20 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
               />
             </div>
             <div className="mt-6 flex justify-end gap-3">
-              <button type="button" className="settings-action-muted" onClick={() => setSetupVendor(null)}>
+              <button type="button" className="settings-action-muted" disabled={setupSaving} onClick={() => setSetupVendor(null)}>
                 Cancel
               </button>
               <button
                 type="submit"
                 className="settings-action"
-                disabled={!setupForm.oauth_client_id.trim() || !setupForm.oauth_client_secret.trim() || !setupForm.redirect_uri.trim()}
+                disabled={
+                  setupSaving ||
+                  !setupForm.oauth_client_id.trim() ||
+                  !setupForm.oauth_client_secret.trim() ||
+                  !setupForm.redirect_uri.trim()
+                }
               >
-                Save & Connect
+                {setupSaving ? "Saving..." : "Save & Connect"}
               </button>
             </div>
           </form>
