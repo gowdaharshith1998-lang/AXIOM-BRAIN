@@ -147,8 +147,14 @@ function HexIcon({ icon, accent = "blue" }: { icon: string; accent?: Accent }) {
   );
 }
 
-function EmptyState({ children = "No real data available for this panel yet." }: { children?: React.ReactNode }) {
-  return <div className="ins-empty">{children}</div>;
+function EmptyState({
+  children = "No real data available for this panel yet.",
+  className,
+}: {
+  children?: React.ReactNode;
+  className?: string;
+}) {
+  return <div className={cx("ins-empty", className)}>{children}</div>;
 }
 
 function Sparkline({ accent = "blue", points }: { accent?: Accent; points: TimedPoint[] }) {
@@ -190,15 +196,37 @@ function MiniLineChart({ accent = "blue", points }: { accent?: Accent; points: T
   );
 }
 
-function KpiCard({ title, value, detail, icon, accent = "blue", points }: { title: string; value: string; detail: string; icon: string; accent?: Accent; points?: TimedPoint[] }) {
+function KpiCard({
+  title,
+  value,
+  detail,
+  icon,
+  accent = "blue",
+  points,
+  iconBackground = false,
+}: {
+  title: string;
+  value: string;
+  detail: string;
+  icon: string;
+  accent?: Accent;
+  points?: TimedPoint[];
+  iconBackground?: boolean;
+}) {
   return (
-    <section className={cx("ins-kpi", `ins-${accent}`)}>
+    <section className={cx("ins-kpi", `ins-${accent}`, iconBackground && "ins-kpi--icon-bg")}>
       <div className="ins-kpi-copy">
         <div className="ins-panel-title">{title} <span>ⓘ</span></div>
         <div className="ins-kpi-value">{value}</div>
         <div className="ins-kpi-detail">{detail}</div>
       </div>
-      <HexIcon icon={icon} accent={accent} />
+      {iconBackground ? (
+        <span className="ins-kpi-icon-bg" aria-hidden>
+          <HexIcon icon={icon} accent={accent} />
+        </span>
+      ) : (
+        <HexIcon icon={icon} accent={accent} />
+      )}
       {points ? <Sparkline accent={accent} points={points} /> : null}
     </section>
   );
@@ -216,8 +244,16 @@ function Panel({ title, children, className, action }: { title: string; children
   );
 }
 
-function StatusPill({ children, tone = "green" }: { children: React.ReactNode; tone?: Accent }) {
-  return <span className={cx("ins-pill", `ins-${tone}`)}>{children}</span>;
+function StatusPill({
+  children,
+  tone = "green",
+  compact = false,
+}: {
+  children: React.ReactNode;
+  tone?: Accent;
+  compact?: boolean;
+}) {
+  return <span className={cx("ins-pill", `ins-${tone}`, compact && "ins-pill--compact")}>{children}</span>;
 }
 
 function HeaderTools({ timeRange, setTimeRange, dataAsOf }: { timeRange: string; setTimeRange: (value: string) => void; dataAsOf: string }) {
@@ -646,69 +682,96 @@ function RiskTab({ data }: { data: RealData }) {
   const riskExposure = data.entities.length ? ((criticalInsights.length * 3 + warningInsights.length + lowConfidence.length + deniedReceipts.length + deniedActions.length) / data.entities.length) * 100 : null;
 
   return (
-    <>
+    <div className="ins-risk-tab">
       <div className="ins-grid ins-risk-kpis">
-        <KpiCard title="Derived Risk Exposure" value={formatPercent(riskExposure, 1)} detail="Computed from real risk signals only" icon="shield" accent="red" points={data.charts.insightDaily} />
-        <KpiCard title="Critical Insights" value={formatNumber(criticalInsights.length)} detail="Non-demo critical insight events" icon="warning" accent="red" points={data.charts.insightDaily} />
-        <KpiCard title="Denied Decisions" value={formatNumber(deniedReceipts.length + deniedActions.length)} detail="Real receipts and actions" icon="policy" accent="amber" points={data.charts.receiptDaily} />
-        <KpiCard title="Low-Confidence Entities" value={formatNumber(lowConfidence.length)} detail="Composite importance below 0.4" icon="target" accent="amber" points={data.charts.entityDaily} />
+        <KpiCard title="Derived Risk Exposure" value={formatPercent(riskExposure, 1)} detail="Computed from real risk signals only" icon="shield" accent="red" points={data.charts.insightDaily} iconBackground />
+        <KpiCard title="Critical Insights" value={formatNumber(criticalInsights.length)} detail="Non-demo critical insight events" icon="warning" accent="red" points={data.charts.insightDaily} iconBackground />
+        <KpiCard title="Denied Decisions" value={formatNumber(deniedReceipts.length + deniedActions.length)} detail="Real receipts and actions" icon="policy" accent="amber" points={data.charts.receiptDaily} iconBackground />
+        <KpiCard title="Low-Confidence Entities" value={formatNumber(lowConfidence.length)} detail="Composite importance below 0.4" icon="target" accent="amber" points={data.charts.entityDaily} iconBackground />
       </div>
-      <div className="ins-grid ins-risk-layout">
-        <Panel title="Risk Signal Matrix">
+
+      <div className="ins-risk-main">
+        <Panel title="Risk Signal Matrix" className="ins-risk-panel">
           {data.entities.length || data.insights.length || data.receipts.length ? (
             <div className="ins-risk-matrix">
               {[criticalInsights.length, warningInsights.length, deniedReceipts.length, deniedActions.length, lowConfidence.length, data.insights.length, data.receipts.length, data.agentActions.length, data.edges.length, data.entities.length].map((value, index) => <span key={index}>{value}</span>)}
             </div>
-          ) : <EmptyState>No risk inputs are available.</EmptyState>}
+          ) : (
+            <EmptyState className="ins-risk-empty">No risk inputs are available.</EmptyState>
+          )}
         </Panel>
-        <Panel title="Lowest Confidence Entities">
+
+        <Panel title="Lowest Confidence Entities" className="ins-risk-panel">
           {lowConfidence.length ? (
-            <div className="ins-table">
+            <div className="ins-risk-entity-list">
               {lowConfidence.slice(0, 5).map((entity, index) => (
-                <button key={entity.id} type="button" onClick={() => setSelected(index)} className={cx(index === selected && "is-selected")}>
-                  <span><Icon name="shield" /> <b>{titleForEntity(entity)}</b><small>{clusterLabel(entity.cluster_id)}</small></span>
-                  <strong>{formatPercent((entity.composite_importance ?? 0) * 100, 0)}</strong>
-                  <StatusPill tone="amber">Low confidence</StatusPill>
+                <button
+                  key={entity.id}
+                  type="button"
+                  onClick={() => setSelected(index)}
+                  className={cx("ins-risk-entity-row", index === selected && "is-selected")}
+                >
+                  <span className="ins-risk-entity-main">
+                    <Icon name="shield" />
+                    <span className="ins-risk-entity-text">
+                      <b title={titleForEntity(entity)}>{titleForEntity(entity)}</b>
+                      <small>{clusterLabel(entity.cluster_id)}</small>
+                    </span>
+                  </span>
+                  <strong className="ins-risk-entity-pct">{formatPercent((entity.composite_importance ?? 0) * 100, 0)}</strong>
+                  <StatusPill tone="amber" compact>Low confidence</StatusPill>
                 </button>
               ))}
             </div>
-          ) : <EmptyState>No low-confidence entities found in real data.</EmptyState>}
+          ) : (
+            <EmptyState className="ins-risk-empty">No low-confidence entities found in real data.</EmptyState>
+          )}
         </Panel>
-        <div className="ins-side-stack">
-          <Panel title="Real Critical / Warning Insights">
-            {data.insights.length ? <InsightRows insights={data.insights} /> : <EmptyState>No real insight risks.</EmptyState>}
+
+        <div className="ins-risk-side-stack">
+          <Panel title="Real Critical / Warning Insights" className="ins-risk-panel">
+            {data.insights.length ? <InsightRows insights={data.insights} /> : <EmptyState className="ins-risk-empty">No real insight risks.</EmptyState>}
           </Panel>
-          <Panel title="Denied Policy Decisions">
+          <Panel title="Denied Policy Decisions" className="ins-risk-panel">
             {deniedReceipts.length || deniedActions.length ? (
-              <div className="ins-compact-rows">
-                {deniedReceipts.map((receipt) => <div key={receipt.receipt_id}><span>{receipt.action_id}</span><strong>{receipt.agent_name}</strong><StatusPill tone="red">Denied</StatusPill></div>)}
-                {deniedActions.map((action) => <div key={action.action_id}><span>{action.skill_called}</span><strong>{action.agent_name}</strong><StatusPill tone="red">Denied</StatusPill></div>)}
+              <div className="ins-compact-rows ins-risk-compact-rows">
+                {deniedReceipts.map((receipt) => <div key={receipt.receipt_id}><span>{receipt.action_id}</span><strong>{receipt.agent_name}</strong><StatusPill tone="red" compact>Denied</StatusPill></div>)}
+                {deniedActions.map((action) => <div key={action.action_id}><span>{action.skill_called}</span><strong>{action.agent_name}</strong><StatusPill tone="red" compact>Denied</StatusPill></div>)}
               </div>
-            ) : <EmptyState>No real denied decisions.</EmptyState>}
+            ) : (
+              <EmptyState className="ins-risk-empty">No real denied decisions.</EmptyState>
+            )}
           </Panel>
         </div>
-        <Panel title="Incident Correlation / Risk Propagation">
+      </div>
+
+      <div className="ins-risk-bottom">
+        <Panel title="Incident Correlation / Risk Propagation" className="ins-risk-panel ins-risk-panel--tall">
           {data.insights.some((insight) => insight.related_entity_ids.length > 0) ? (
-            <div className="ins-propagation">
+            <div className="ins-propagation ins-propagation--risk">
               {data.insights.flatMap((insight) => insight.related_entity_ids).slice(0, 6).map((id) => (
                 <div key={id} className="ins-amber"><HexIcon icon="warning" accent="amber" /><span>{titleForEntity(data.entities.find((entity) => entity.id === id) ?? ({ id, type: "entity", data: {}, source_id: null, created_at: "", updated_at: "" } as Entity))}</span></div>
               ))}
             </div>
-          ) : <EmptyState>No related entities in real insight events.</EmptyState>}
+          ) : (
+            <EmptyState className="ins-risk-empty">No related entities in real insight events.</EmptyState>
+          )}
         </Panel>
-        <Panel title="Action Recommendations">
+        <Panel title="Action Recommendations" className="ins-risk-panel ins-risk-panel--tall">
           {data.insights.some((insight) => insight.recommended_actions.length > 0) ? (
-            <div className="ins-action-table">
+            <div className="ins-action-table ins-risk-action-table">
               {data.insights.flatMap((insight) => insight.recommended_actions.map((action) => ({ insight, action }))).slice(0, 6).map(({ insight, action }, index) => (
                 <button type="button" key={`${insight.insight_id}-${action}`} className={index === selected ? "is-selected" : undefined} onClick={() => setSelected(index)}>
-                  <span>{action}</span><StatusPill tone={insight.severity === "critical" ? "red" : insight.severity === "warning" ? "amber" : "blue"}>{insight.severity}</StatusPill>
+                  <span>{action}</span><StatusPill tone={insight.severity === "critical" ? "red" : insight.severity === "warning" ? "amber" : "blue"} compact>{insight.severity}</StatusPill>
                 </button>
               ))}
             </div>
-          ) : <EmptyState>No real recommendations available.</EmptyState>}
+          ) : (
+            <EmptyState className="ins-risk-empty">No real recommendations available.</EmptyState>
+          )}
         </Panel>
       </div>
-    </>
+    </div>
   );
 }
 
