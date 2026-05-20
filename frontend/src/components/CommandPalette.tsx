@@ -246,8 +246,20 @@ export function CommandPalette() {
           aria-modal="true"
           aria-label="Ask the brain"
           onKeyDown={onPaletteKeyDown}
+          onClick={closePalette}
         >
-          <div className="mx-auto mt-16 w-[min(600px,calc(100vw-32px))] overflow-hidden rounded-2xl border border-white/10 bg-[#070914]/85 shadow-2xl shadow-cyan-500/10 backdrop-blur-xl">
+          <button
+            type="button"
+            aria-label="Close search"
+            className="absolute left-4 top-4 z-40 rounded-md border border-white/10 bg-black/45 px-2.5 py-1.5 font-mono text-sm text-white/55 shadow-lg backdrop-blur transition hover:border-white/25 hover:bg-black/70 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/40"
+            onClick={closePalette}
+          >
+            ←
+          </button>
+          <div
+            className="mx-auto mt-16 w-[min(600px,calc(100vw-32px))] overflow-hidden rounded-2xl border border-white/10 bg-[#070914]/85 shadow-2xl shadow-cyan-500/10 backdrop-blur-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="border-b border-white/10 p-4">
               <input
                 ref={inputRef}
