@@ -59,31 +59,35 @@ export function ConnectorStatusBar() {
 
   return (
     <div
-      className="pointer-events-auto fixed left-[228px] right-0 top-0 z-20 flex flex-wrap items-center gap-2 border-b border-[#132339] bg-[#040b16]/88 px-4 py-2 backdrop-blur-md"
+      className="pointer-events-auto fixed left-[228px] right-0 top-0 z-20 border-b border-[#132339] bg-[#040b16]/88 px-4 py-2 backdrop-blur-md"
       role="region"
       aria-label="Connector status"
     >
-      <span className="mr-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#7fa2c8]">
-        Sources
-      </span>
-      {loading && connectors.length === 0 ? (
-        <span className="text-[10px] text-[#7fa2c8]">Checking connectors…</span>
-      ) : null}
-      {CONNECTOR_VENDORS.map((vendor) => (
-        <ConnectorChip key={vendor.id} row={byVendor.get(vendor.id)} />
-      ))}
-      <button
-        type="button"
-        className="ml-auto shrink-0 rounded-md border border-[#1d3452] bg-[#0b1a2e] px-3 py-1 text-[11px] font-medium text-[#9bc9ff] transition hover:border-[#2f8cff] hover:text-[#eef5ff] disabled:opacity-50"
-        onClick={() => void onResync()}
-        disabled={syncingAll || loading}
-      >
-        {syncingAll ? "Re-syncing…" : "Re-sync"}
-      </button>
-      {message ? (
-        <span className="w-full text-[10px] text-[#8ba8cb]" role="status">
-          {message}
+      <div className="flex flex-nowrap items-center gap-2">
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#7fa2c8]">
+          Sources
         </span>
+        {loading && connectors.length === 0 ? (
+          <span className="shrink-0 text-[10px] text-[#7fa2c8]">Checking connectors…</span>
+        ) : null}
+        <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2 overflow-x-auto">
+          {CONNECTOR_VENDORS.map((vendor) => (
+            <ConnectorChip key={vendor.id} row={byVendor.get(vendor.id)} />
+          ))}
+        </div>
+        <button
+          type="button"
+          className="ml-auto shrink-0 rounded-md border border-[#1d3452] bg-[#0b1a2e] px-3 py-1 text-[11px] font-medium text-[#9bc9ff] transition hover:border-[#2f8cff] hover:text-[#eef5ff] disabled:opacity-50"
+          onClick={() => void onResync()}
+          disabled={syncingAll || loading}
+        >
+          {syncingAll ? "Re-syncing…" : "Re-sync"}
+        </button>
+      </div>
+      {message ? (
+        <p className="mt-1 text-[10px] text-[#8ba8cb]" role="status">
+          {message}
+        </p>
       ) : null}
     </div>
   );

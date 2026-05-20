@@ -159,7 +159,7 @@ function StudioShell() {
         )}
       </aside>
 
-      {!isExploreRoute && !isAgentsRoute && !isSkillsRoute ? (
+      {!isExploreRoute && !isAgentsRoute && !isSkillsRoute && !isGraphRoute ? (
         <header className={`fixed left-[228px] right-0 top-0 z-30 flex items-start justify-between border-b border-[#132339] px-8 ${hasCompactHeader ? "h-[60px] pt-4" : "h-[112px] pt-7"}`}>
           {hasCompactHeader ? (
             <div className="absolute left-1/2 top-5 -translate-x-1/2 text-[15px] text-[#b9c1cf]">

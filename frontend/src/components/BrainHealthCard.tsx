@@ -41,12 +41,38 @@ function historyFromPayload(payload: BrainHealthMetricResponse): number[] {
     .slice(-36);
 }
 
+function CompactStatusPill({
+  label,
+  tone,
+  pulse = false,
+}: {
+  label: string;
+  tone: "live" | "syncing" | "offline" | "neutral";
+  pulse?: boolean;
+}) {
+  const dotClass =
+    tone === "live"
+      ? "bg-[#45f0a1] shadow-[0_0_6px_#45f0a1]"
+      : tone === "syncing"
+        ? "bg-amber-400"
+        : tone === "offline"
+          ? "bg-rose-400"
+          : "bg-[#6b7280]";
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5 rounded border border-white/10 bg-white/[0.04] px-2 py-0.5 text-xs text-[#E8F0FF]/75">
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass} ${pulse ? "animate-pulse" : ""}`} aria-hidden />
+      {label}
+    </span>
+  );
+}
+
 export function BrainHealthCard() {
   const entityCount = useBrainStore((s) => s.entities.size);
   const edgeCount = useBrainStore((s) => s.edges.size);
   const entities = useBrainStore((s) => s.entities);
   const clusterHealth = useBrainStore((s) => s.clusterHealth);
   const fps = useBrainStore((s) => s.fps);
+  const connectionStatus = useBrainStore((s) => s.connectionStatus);
 
   const [eventTimes, setEventTimes] = useState<number[]>([]);
 
@@ -153,31 +179,29 @@ export function BrainHealthCard() {
           ? "font-semibold text-amber-400"
           : "font-semibold text-rose-400";
 
+  const liveTone =
+    connectionStatus === "live" ? "live" : connectionStatus === "syncing" ? "syncing" : "offline";
+  const liveLabel = connectionStatus === "live" ? "LIVE" : connectionStatus === "syncing" ? "SYNCING" : "OFFLINE";
+  const healthStatusLabel =
+    pillKind === "initializing"
+      ? "Initializing"
+      : pillKind === "healthy"
+        ? "Healthy"
+        : pillKind === "degraded"
+          ? "Degraded"
+          : "Critical";
+  const healthTone =
+    pillKind === "healthy" ? "live" : pillKind === "degraded" ? "syncing" : pillKind === "critical" ? "offline" : "neutral";
+
   return (
-    <section className="fixed right-6 top-6 z-30 w-[248px] rounded-2xl border border-[#274057]/70 bg-[#07111d]/70 p-5 font-mono text-[#E8F0FF]/82 shadow-[0_22px_70px_rgba(0,0,0,0.36)] backdrop-blur-xl">
-      <div className="mb-5 flex items-center justify-between">
+    <section className="fixed right-6 top-[48px] z-30 mt-2 w-[248px] rounded-2xl border border-[#274057]/70 bg-[#07111d]/70 p-5 font-mono text-[#E8F0FF]/82 shadow-[0_22px_70px_rgba(0,0,0,0.36)] backdrop-blur-xl">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <CompactStatusPill label={String(eventsPerMin)} tone="neutral" />
+        <CompactStatusPill label={liveLabel} tone={liveTone} pulse={connectionStatus === "live"} />
+      </div>
+      <div className="mb-4 flex items-center justify-between gap-2">
         <div className="text-xs uppercase tracking-[0.18em] text-[#E8F0FF]/72">Brain Health</div>
-        {pillKind === "initializing" ? (
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#9aa8c4]">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#6b7280]" aria-hidden />
-            Initializing
-          </div>
-        ) : pillKind === "healthy" ? (
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#45f0a1]">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#45f0a1] shadow-[0_0_10px_#45f0a1]" aria-hidden />
-            Healthy
-          </div>
-        ) : pillKind === "degraded" ? (
-          <div className="flex items-center gap-2 text-xs font-semibold text-amber-400">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.45)]" aria-hidden />
-            Degraded
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 text-xs font-semibold text-rose-400">
-            <span className="h-1.5 w-1.5 rounded-full bg-rose-400 shadow-[0_0_10px_rgba(251,113,133,0.45)]" aria-hidden />
-            Critical
-          </div>
-        )}
+        <CompactStatusPill label={healthStatusLabel} tone={healthTone} pulse={pillKind === "healthy"} />
       </div>
       <div className="space-y-4 text-sm">
         <Row label="Entities" value={formatCount(entityCount)} />
