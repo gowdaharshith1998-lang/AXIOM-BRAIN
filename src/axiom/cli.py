@@ -109,6 +109,9 @@ def cmd_vault_status(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    from axiom.env import load_axiom_env
+
+    load_axiom_env()
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(prog="axiom")
     sub = parser.add_subparsers(dest="cmd", required=True)

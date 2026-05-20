@@ -13,6 +13,11 @@ type ExploreData = {
   entities: Entity[];
   edges: Edge[];
   clusterHealth: Record<string, ClusterHealthSnapshot>;
+  eventsPerMin: number;
+};
+
+type ClusterHealthResponse = Record<string, ClusterHealthSnapshot | Record<string, unknown>> & {
+  overall?: { events_per_min?: number };
 };
 
 type GraphIndex = {
@@ -37,6 +42,26 @@ async function request<T>(url: string): Promise<T> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return (await response.json()) as T;
+}
+
+function parseClusterHealth(payload: ClusterHealthResponse): {
+  clusterHealth: Record<string, ClusterHealthSnapshot>;
+  eventsPerMin: number;
+} {
+  const clusterHealth: Record<string, ClusterHealthSnapshot> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (key === "overall" || typeof value !== "object" || value === null) continue;
+    const snapshot = value as ClusterHealthSnapshot;
+    if (typeof snapshot.cluster_id === "string" && typeof snapshot.ingest_rate_per_min === "number") {
+      clusterHealth[key] = snapshot;
+    }
+  }
+  const overallRate = payload.overall?.events_per_min;
+  const clusterRate = Object.values(clusterHealth).reduce((sum, item) => sum + item.ingest_rate_per_min, 0);
+  return {
+    clusterHealth,
+    eventsPerMin: typeof overallRate === "number" ? overallRate : clusterRate,
+  };
 }
 
 function cx(...classes: Array<string | false | null | undefined>) {
@@ -422,20 +447,31 @@ export function ExplorePage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      request<Entity[]>("/api/entities"),
-      request<Edge[]>("/api/edges"),
-      request<Record<string, ClusterHealthSnapshot>>("/api/cluster_health"),
-    ]).then(([entities, edges, clusterHealth]) => {
-      if (!cancelled) {
-        setData({ entities, edges, clusterHealth });
+
+    async function refreshExploreData() {
+      try {
+        const [entities, edges, clusterPayload] = await Promise.all([
+          request<Entity[]>("/api/entities"),
+          request<Edge[]>("/api/edges"),
+          request<ClusterHealthResponse>("/api/cluster_health"),
+        ]);
+        if (cancelled) return;
+        const { clusterHealth, eventsPerMin } = parseClusterHealth(clusterPayload);
+        setData({ entities, edges, clusterHealth, eventsPerMin });
         setError(null);
+      } catch (err: unknown) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Unable to load explore data");
       }
-    }).catch((err: unknown) => {
-      if (!cancelled) setError(err instanceof Error ? err.message : "Unable to load explore data");
-    });
+    }
+
+    void refreshExploreData();
+    const timer = window.setInterval(() => {
+      void refreshExploreData();
+    }, 15_000);
+
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, []);
 
@@ -471,8 +507,8 @@ export function ExplorePage() {
   const pageRows = sorted.slice((page - 1) * 10, page * 10);
   const rows = buildRows(pageRows, graphIndex, selectedId, (entity) => setSelectedId(entity.id));
   const sectionCount = sorted.length;
-  const clusterRows = Object.values(data?.clusterHealth ?? {}).filter((item) => typeof item.ingest_rate_per_min === "number");
-  const eventsPerMin = clusterRows.reduce((sum, item) => sum + item.ingest_rate_per_min, 0);
+  const clusterRows = Object.values(data?.clusterHealth ?? {});
+  const eventsPerMin = data?.eventsPerMin ?? 0;
 
   useEffect(() => {
     setPage(1);

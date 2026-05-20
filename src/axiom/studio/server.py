@@ -16,7 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated, Any, NoReturn, cast
 
-from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket
+from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +25,17 @@ from sqlalchemy import Table, create_engine, desc, func, select
 from sqlalchemy.orm import sessionmaker
 
 from axiom.api.search import EntitySearchResult, search_entities
+from axiom.connectors.sync_runner import (
+    connector_sync_loop,
+    schedule_connector_sync_after_oauth,
+    sync_gmail,
+    sync_github,
+    sync_linear,
+    sync_notion,
+    sync_slack,
+    sync_vendor,
+)
+from axiom.env import load_axiom_env, log_vault_startup_status
 from axiom.connectors.base import ConnectorConfig
 from axiom.connectors.github.ingest import (
     fetch_initial_repos as github_fetch_initial_repos,
@@ -430,6 +441,9 @@ def _policy_rule_row(rule: PolicyRule) -> dict[str, Any]:
 
 SETTINGS_FILE = Path("axiom_studio_settings.json")
 log = logging.getLogger("axiom.studio")
+
+load_axiom_env()
+
 MCP_TOOL_NAMES = [
     "axiom_query_brain",
     "axiom_get_entity",
@@ -502,6 +516,8 @@ def create_app(
         app.state.watchdog = None
         app.state.snapshot_task = None
         app.state.cluster_check_retention_task = None
+        app.state.connector_sync_task = None
+        app.state.vault_unlocked = False
         app.state.organizer = None
         app.state.events_per_min = 0.0
         app.state.studio_settings = {}
@@ -635,6 +651,14 @@ def create_app(
         watchdog.start()
         app.state.watchdog = watchdog
 
+        app.state.vault_unlocked = log_vault_startup_status()
+        if app.state.vault_unlocked:
+            app.state.connector_sync_task = asyncio.create_task(
+                connector_sync_loop(session_local, broadcaster)
+            )
+        else:
+            app.state.connector_sync_task = None
+
         if live_source is None:
             try:
                 yield
@@ -650,6 +674,8 @@ def create_app(
                     warden_task.cancel()
                 if snapshot_task is not None:
                     snapshot_task.cancel()
+                if app.state.connector_sync_task is not None:
+                    app.state.connector_sync_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await health_task
                 if agent_action_task is not None:
@@ -660,9 +686,9 @@ def create_app(
                 if warden_task is not None:
                     with suppress(asyncio.CancelledError):
                         await warden_task
-                if snapshot_task is not None:
+                if app.state.connector_sync_task is not None:
                     with suppress(asyncio.CancelledError):
-                        await snapshot_task
+                        await app.state.connector_sync_task
                 engine.dispose()
             return
 
@@ -695,6 +721,8 @@ def create_app(
                         warden_task.cancel()
                     if snapshot_task is not None:
                         snapshot_task.cancel()
+                    if app.state.connector_sync_task is not None:
+                        app.state.connector_sync_task.cancel()
                     with suppress(asyncio.CancelledError):
                         await health_task
                     if agent_action_task is not None:
@@ -708,6 +736,9 @@ def create_app(
                     if snapshot_task is not None:
                         with suppress(asyncio.CancelledError):
                             await snapshot_task
+                    if app.state.connector_sync_task is not None:
+                        with suppress(asyncio.CancelledError):
+                            await app.state.connector_sync_task
                     engine.dispose()
 
     app = FastAPI(title="AXIOM Studio API", lifespan=lifespan)
@@ -1108,9 +1139,17 @@ def create_app(
     def _execute_connector_oauth_callback(
         vendor: str,
         connect: Callable[[], _OAuthCallbackResult],
+        background_tasks: BackgroundTasks | None = None,
     ) -> HTMLResponse:
         try:
             result = connect()
+            if background_tasks is not None:
+                background_tasks.add_task(
+                    _post_oauth_connector_sync,
+                    vendor,
+                )
+            else:
+                schedule_connector_sync_after_oauth(vendor, session_local, broadcaster)
             account_label = str(result.get("account_label") or "").strip() or None
             return _connector_oauth_callback_html(
                 vendor,
@@ -1129,6 +1168,15 @@ def create_app(
                 ok=False,
                 detail=str(exc) or "Authorization failed",
             )
+
+    async def _post_oauth_connector_sync(vendor: str) -> None:
+        try:
+            with session_local() as session:
+                await sync_vendor(session, vendor, broadcaster)
+        except LookupError:
+            log.warning("Post-OAuth sync skipped — %s not connected", vendor)
+        except Exception:
+            log.exception("Post-OAuth sync failed for %s", vendor)
 
     def _require_connector_configured(config: ConnectorConfig, label: str) -> None:
         if not _connector_configured(config):
@@ -1408,7 +1456,12 @@ def create_app(
         return {"authorize_url": GitHubOAuth(config).authorize_url(state), "state": state}
 
     @app.get("/api/internal/connectors/github/callback")
-    def get_github_callback(request: Request, code: str, state: str) -> HTMLResponse:
+    def get_github_callback(
+        request: Request,
+        code: str,
+        state: str,
+        background_tasks: BackgroundTasks,
+    ) -> HTMLResponse:
         def _connect() -> dict[str, Any]:
             require_github_enabled()
             config = _connector_config_with_resolved_redirect(github_config(), request)
@@ -1475,44 +1528,16 @@ def create_app(
                 session.commit()
             return {"status": "connected", "account_label": oauth_state.account_label or "GitHub"}
 
-        return _execute_connector_oauth_callback("github", _connect)
+        return _execute_connector_oauth_callback("github", _connect, background_tasks)
 
     @app.post("/api/internal/connectors/github/sync")
     async def post_github_sync() -> dict[str, Any]:
         require_github_enabled()
-        with session_local() as session:
-            state = (
-                session.execute(
-                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "github")
-                )
-                .scalars()
-                .first()
-            )
-            if state is None:
-                raise HTTPException(status_code=404, detail="GitHub connector not installed")
-            token_state = _connector_token_state(session, state)
-            repos = github_fetch_initial_repos(token_state)
-            entities: list[dict[str, Any]] = []
-            edges: list[dict[str, Any]] = []
-            for repo in repos:
-                repo_entity = github_normalize_repo(repo)
-                entities.append(repo_entity)
-                repo_name = str(repo["full_name"])
-                for issue in github_fetch_issues(token_state, repo_name):
-                    issue_entity = github_normalize_issue(repo_name, issue)
-                    entities.append(issue_entity)
-                    edges.append(
-                        github_repo_to_issue_edge(repo_entity["nick"], issue_entity["nick"])
-                    )
-                for pull_request in github_fetch_pull_requests(token_state, repo_name):
-                    pr_entity = github_normalize_pull_request(repo_name, pull_request)
-                    entities.append(pr_entity)
-                    edges.append(github_repo_to_pr_edge(repo_entity["nick"], pr_entity["nick"]))
-            count = await apply_to_brain(session, entities, edges, broadcaster=broadcaster)
-            state.last_sync_at = datetime.utcnow()
-            session.add(state)
-            session.commit()
-        return {"status": "ok", "ingested": count}
+        try:
+            with session_local() as session:
+                return await sync_github(session, broadcaster)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/api/internal/connectors/github/webhook")
     async def post_github_webhook(request: Request) -> dict[str, Any]:
@@ -1611,7 +1636,12 @@ def create_app(
         return {"authorize_url": LinearOAuth(config).authorize_url(state), "state": state}
 
     @app.get("/api/internal/connectors/linear/callback")
-    def get_linear_callback(request: Request, code: str, state: str) -> HTMLResponse:
+    def get_linear_callback(
+        request: Request,
+        code: str,
+        state: str,
+        background_tasks: BackgroundTasks,
+    ) -> HTMLResponse:
         def _connect() -> dict[str, Any]:
             require_linear_enabled()
             config = _connector_config_with_resolved_redirect(linear_config(), request)
@@ -1681,59 +1711,16 @@ def create_app(
                 "account_label": oauth_state.account_label or "Linear Workspace",
             }
 
-        return _execute_connector_oauth_callback("linear", _connect)
+        return _execute_connector_oauth_callback("linear", _connect, background_tasks)
 
     @app.post("/api/internal/connectors/linear/sync")
     async def post_linear_sync() -> dict[str, Any]:
         require_linear_enabled()
-        with session_local() as session:
-            state = (
-                session.execute(
-                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "linear")
-                )
-                .scalars()
-                .first()
-            )
-            if state is None:
-                raise HTTPException(status_code=404, detail="Linear connector not installed")
-            token_state = _connector_token_state(session, state)
-            teams = linear_fetch_teams(token_state)
-            projects = linear_fetch_projects(token_state)
-            entities: list[dict[str, Any]] = []
-            edges: list[dict[str, Any]] = []
-            projects_by_id: dict[str, dict[str, Any]] = {}
-            for project in projects:
-                project_entity = linear_normalize_project(project)
-                projects_by_id[str(project["id"])] = project_entity
-                entities.append(project_entity)
-            for team in teams:
-                team_entity = linear_normalize_team(team)
-                entities.append(team_entity)
-                for issue in linear_fetch_issues_for_team(token_state, str(team["id"])):
-                    issue_entity = linear_normalize_issue(issue)
-                    entities.append(issue_entity)
-                    edges.append(
-                        linear_team_to_issue_edge(team_entity["nick"], issue_entity["nick"])
-                    )
-                    project_payload = issue.get("project")
-                    project_id = (
-                        str(project_payload.get("id"))
-                        if isinstance(project_payload, dict)
-                        else ""
-                    )
-                    linked_project_entity = projects_by_id.get(project_id)
-                    if linked_project_entity is not None:
-                        edges.append(
-                            linear_project_to_issue_edge(
-                                linked_project_entity["nick"],
-                                issue_entity["nick"],
-                            )
-                        )
-            count = await apply_to_brain(session, entities, edges, broadcaster=broadcaster)
-            state.last_sync_at = datetime.utcnow()
-            session.add(state)
-            session.commit()
-        return {"status": "ok", "ingested": count}
+        try:
+            with session_local() as session:
+                return await sync_linear(session, broadcaster)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/api/internal/connectors/linear/webhook")
     async def post_linear_webhook(request: Request) -> dict[str, Any]:
@@ -1832,7 +1819,12 @@ def create_app(
         return {"authorize_url": SlackOAuth(config).authorize_url(state), "state": state}
 
     @app.get("/api/internal/connectors/slack/callback")
-    def get_slack_callback(request: Request, code: str, state: str) -> HTMLResponse:
+    def get_slack_callback(
+        request: Request,
+        code: str,
+        state: str,
+        background_tasks: BackgroundTasks,
+    ) -> HTMLResponse:
         def _connect() -> dict[str, Any]:
             require_slack_enabled()
             config = _connector_config_with_resolved_redirect(slack_config(), request)
@@ -1902,58 +1894,16 @@ def create_app(
                 "account_label": oauth_state.account_label or "Slack Workspace",
             }
 
-        return _execute_connector_oauth_callback("slack", _connect)
+        return _execute_connector_oauth_callback("slack", _connect, background_tasks)
 
     @app.post("/api/internal/connectors/slack/sync")
     async def post_slack_sync() -> dict[str, Any]:
         require_slack_enabled()
-        with session_local() as session:
-            state = (
-                session.execute(
-                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "slack")
-                )
-                .scalars()
-                .first()
-            )
-            if state is None:
-                raise HTTPException(status_code=404, detail="Slack connector not installed")
-            token_state = _connector_token_state(session, state)
-            entities: list[dict[str, Any]] = []
-            edges: list[dict[str, Any]] = []
-            for user in slack_fetch_users(token_state):
-                entities.append(slack_normalize_user(user))
-            for channel in slack_fetch_channels(token_state):
-                channel_entity = slack_normalize_channel(channel)
-                entities.append(channel_entity)
-                channel_id = str(channel["id"])
-                for message in slack_fetch_recent_messages_per_channel(token_state, channel_id):
-                    message_entity = slack_normalize_message(channel_id, message)
-                    entities.append(message_entity)
-                    edges.append(
-                        slack_channel_to_message_edge(
-                            channel_entity["nick"],
-                            message_entity["nick"],
-                        )
-                    )
-                    parent_ts = message.get("thread_ts")
-                    if parent_ts and parent_ts != message.get("ts"):
-                        edges.append(
-                            slack_thread_parent_child_edge(
-                                f"message:{channel_id}:{parent_ts}",
-                                message_entity["nick"],
-                            )
-                        )
-                    edges.extend(
-                        slack_message_mention_edges(
-                            message_entity["nick"],
-                            str(message.get("text") or ""),
-                        )
-                    )
-            count = await apply_to_brain(session, entities, edges, broadcaster=broadcaster)
-            state.last_sync_at = datetime.utcnow()
-            session.add(state)
-            session.commit()
-        return {"status": "ok", "ingested": count}
+        try:
+            with session_local() as session:
+                return await sync_slack(session, broadcaster)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/api/internal/connectors/slack/webhook", response_model=None)
     async def post_slack_webhook(request: Request) -> dict[str, Any] | PlainTextResponse:
@@ -2055,7 +2005,12 @@ def create_app(
         return {"authorize_url": NotionOAuth(config).authorize_url(state), "state": state}
 
     @app.get("/api/internal/connectors/notion/callback")
-    def get_notion_callback(request: Request, code: str, state: str) -> HTMLResponse:
+    def get_notion_callback(
+        request: Request,
+        code: str,
+        state: str,
+        background_tasks: BackgroundTasks,
+    ) -> HTMLResponse:
         def _connect() -> dict[str, Any]:
             require_notion_enabled()
             config = _connector_config_with_resolved_redirect(notion_config(), request)
@@ -2118,41 +2073,16 @@ def create_app(
                 "watch_mode": "polling",
             }
 
-        return _execute_connector_oauth_callback("notion", _connect)
+        return _execute_connector_oauth_callback("notion", _connect, background_tasks)
 
     @app.post("/api/internal/connectors/notion/sync")
     async def post_notion_sync() -> dict[str, Any]:
         require_notion_enabled()
-        with session_local() as session:
-            state = (
-                session.execute(
-                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "notion")
-                )
-                .scalars()
-                .first()
-            )
-            if state is None:
-                raise HTTPException(status_code=404, detail="Notion connector not installed")
-            token_state = _connector_token_state(session, state)
-            entities: list[dict[str, Any]] = []
-            edges: list[dict[str, Any]] = []
-            for database in notion_fetch_databases(token_state):
-                database_entity = notion_normalize_database(database)
-                entities.append(database_entity)
-                for page in notion_fetch_pages_in_database(token_state, str(database["id"])):
-                    page_entity = notion_normalize_page(page)
-                    entities.append(page_entity)
-                    edges.append(
-                        notion_database_to_page_edge(
-                            database_entity["nick"],
-                            page_entity["nick"],
-                        )
-                    )
-            count = await apply_to_brain(session, entities, edges, broadcaster=broadcaster)
-            state.last_sync_at = datetime.utcnow()
-            session.add(state)
-            session.commit()
-        return {"status": "ok", "ingested": count, "watch_mode": "polling"}
+        try:
+            with session_local() as session:
+                return await sync_notion(session, broadcaster)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/api/internal/connectors/notion/poll")
     async def post_notion_poll() -> dict[str, Any]:
@@ -2248,7 +2178,12 @@ def create_app(
         return {"authorize_url": GmailOAuth(config).authorize_url(state), "state": state}
 
     @app.get("/api/internal/connectors/gmail/callback")
-    def get_gmail_callback(request: Request, code: str, state: str) -> HTMLResponse:
+    def get_gmail_callback(
+        request: Request,
+        code: str,
+        state: str,
+        background_tasks: BackgroundTasks,
+    ) -> HTMLResponse:
         def _connect() -> dict[str, Any]:
             require_gmail_enabled()
             config = _connector_config_with_resolved_redirect(gmail_config(), request)
@@ -2307,40 +2242,16 @@ def create_app(
                 session.commit()
             return {"status": "connected", "account_label": oauth_state.account_label or "Gmail"}
 
-        return _execute_connector_oauth_callback("gmail", _connect)
+        return _execute_connector_oauth_callback("gmail", _connect, background_tasks)
 
     @app.post("/api/internal/connectors/gmail/sync")
     async def post_gmail_sync() -> dict[str, Any]:
         require_gmail_enabled()
-        with session_local() as session:
-            state = (
-                session.execute(
-                    select(ConnectorStateRow).where(ConnectorStateRow.vendor == "gmail")
-                )
-                .scalars()
-                .first()
-            )
-            if state is None:
-                raise HTTPException(status_code=404, detail="Gmail connector not installed")
-            token_state = _connector_token_state(session, state)
-            entities: list[dict[str, Any]] = []
-            edges: list[dict[str, Any]] = []
-            for label in gmail_fetch_labels(token_state):
-                entities.append(gmail_normalize_label(label))
-            for thread in gmail_fetch_threads(token_state):
-                thread_entity = gmail_normalize_thread(thread)
-                entities.append(thread_entity)
-                for message in gmail_fetch_messages_in_thread(token_state, str(thread["id"])):
-                    message_entity = gmail_normalize_message(message)
-                    entities.append(message_entity)
-                    edges.append(
-                        gmail_thread_to_message_edge(thread_entity["nick"], message_entity["nick"])
-                    )
-            count = await apply_to_brain(session, entities, edges, broadcaster=broadcaster)
-            state.last_sync_at = datetime.utcnow()
-            session.add(state)
-            session.commit()
-        return {"status": "ok", "ingested": count}
+        try:
+            with session_local() as session:
+                return await sync_gmail(session, broadcaster)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/api/internal/connectors/gmail/webhook")
     async def post_gmail_webhook(request: Request) -> dict[str, Any]:

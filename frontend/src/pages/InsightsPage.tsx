@@ -152,7 +152,13 @@ function EmptyState({ children = "No real data available for this panel yet." }:
 }
 
 function Sparkline({ accent = "blue", points }: { accent?: Accent; points: TimedPoint[] }) {
-  if (!hasChartData(points)) return <div className="ins-spark-empty">No data</div>;
+  if (!hasChartData(points)) {
+    return (
+      <span className="ins-spark-badge" aria-label="No trend data for this period">
+        No data
+      </span>
+    );
+  }
   const values = points.map((point) => point.value);
   const max = Math.max(...values);
   const min = Math.min(...values);
@@ -375,23 +381,33 @@ function OverviewTab({ data }: { data: RealData }) {
         <KpiCard title="Real Insights" value={formatNumber(data.insights.length)} detail="Demo insights are excluded" icon="warning" accent="amber" points={data.charts.insightDaily} />
       </div>
 
-      <div className="ins-grid ins-overview-main">
-        <Panel title="Top Connection Drivers">
+      <div className="ins-overview-stack">
+        <Panel title="Top Connection Drivers" className="ins-overview-drivers">
           <p className="ins-muted">Ranked by actual graph degree from loaded edges.</p>
           {degreeRows.length ? (
             <div className="ins-connection-map">
-              {degreeRows.map((row, index) => (
-                <div key={row.entity.id} className={cx("ins-map-node", `is-${["blue", "purple", "green", "amber"][index]}`)}>
-                  <HexIcon icon={row.entity.type === "policy" ? "policy" : "cube"} accent={(["blue", "purple", "green", "amber"][index] ?? "blue") as Accent} />
-                  <strong>{titleForEntity(row.entity)}</strong>
-                  <span>{row.degree} connection{row.degree === 1 ? "" : "s"}</span>
+              <div className="ins-map-grid">
+                {(["tl", "tr", "bl", "br"] as const).map((slot, index) => {
+                  const row = degreeRows[index];
+                  const accent = (["blue", "purple", "green", "amber"][index] ?? "blue") as Accent;
+                  return (
+                    <div key={slot} className={cx("ins-map-slot", `ins-map-slot-${slot}`)}>
+                      {row ? (
+                        <div className={cx("ins-map-node", `is-${accent}`)}>
+                          <HexIcon icon={row.entity.type === "policy" ? "policy" : "cube"} accent={accent} />
+                          <strong title={titleForEntity(row.entity)}>{titleForEntity(row.entity)}</strong>
+                          <span>{row.degree} connection{row.degree === 1 ? "" : "s"}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+                <div className="ins-map-core">
+                  <HexIcon icon="insights" accent="blue" />
+                  <strong>Axiom Company Brain</strong>
+                  <span>{formatNumber(data.entities.length)} entities</span>
+                  <b>{formatNumber(data.edges.length)} relationships</b>
                 </div>
-              ))}
-              <div className="ins-map-core">
-                <HexIcon icon="insights" accent="blue" />
-                <strong>Axiom Company Brain</strong>
-                <span>{formatNumber(data.entities.length)} entities</span>
-                <b>{formatNumber(data.edges.length)} relationships</b>
               </div>
             </div>
           ) : <EmptyState>No relationships are loaded yet.</EmptyState>}
@@ -400,7 +416,7 @@ function OverviewTab({ data }: { data: RealData }) {
           </div>
         </Panel>
 
-        <Panel title="Insight Summary">
+        <Panel title="Insight Summary" className="ins-overview-summary">
           <p className="ins-muted">Only non-demo warden insights are shown.</p>
           {data.insights.length ? (
             <div className="ins-summary-list">
