@@ -91,7 +91,9 @@ def test_connector_oauth_callback_rejects_invalid_state(
         response = client.get("/api/internal/connectors/github/callback?code=abc&state=wrong-state")
 
     assert install.status_code == 200
-    assert response.status_code == 400
+    assert response.status_code == 200
+    assert "Connection Failed" in response.text
+    assert "invalid OAuth state" in response.text
 
 
 def test_connector_webhook_rejects_invalid_signature_without_storing(

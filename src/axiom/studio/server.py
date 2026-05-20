@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import html
 import hmac
 import json
 import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import TypeVar
 from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -877,13 +879,28 @@ def create_app(
             return config
         return replace(config, redirect_uri=resolved)
 
+    _CONNECTOR_VENDOR_LABELS = {
+        "github": "GitHub",
+        "linear": "Linear",
+        "slack": "Slack",
+        "notion": "Notion",
+        "gmail": "Gmail",
+    }
+
+    def _connector_vendor_label(vendor: str) -> str:
+        return _CONNECTOR_VENDOR_LABELS.get(vendor, vendor.replace("_", " ").title())
+
     def _connector_oauth_callback_html(
         vendor: str,
         *,
         ok: bool,
         detail: str,
+        account_label: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> HTMLResponse:
+        vendor_label = _connector_vendor_label(vendor)
+        safe_detail = html.escape(detail)
+        safe_account = html.escape(account_label.strip()) if account_label and account_label.strip() else ""
         message = {
             "type": "axiom:connector-oauth",
             "vendor": vendor,
@@ -891,28 +908,227 @@ def create_app(
             "detail": detail,
             "payload": payload or {},
         }
-        encoded = json.dumps(message).replace("</", "<\\/")
-        status_text = "Connected" if ok else "Authorization failed"
-        html = f"""<!doctype html>
+        encoded_message = json.dumps(message).replace("</", "<\\/")
+        auto_close_ms = 3000 if ok else 0
+        icon_class = "oauth-icon oauth-icon--ok" if ok else "oauth-icon oauth-icon--error"
+        icon_glyph = "✓" if ok else "✕"
+        heading = "Connected Successfully" if ok else "Connection Failed"
+        subtext = (
+            f"{html.escape(vendor_label)} has been connected to your Company Brain."
+            if ok
+            else "We could not complete the connection."
+        )
+        account_block = (
+            f'<p class="oauth-account">Signed in as: <span>{safe_account}</span></p>'
+            if ok and safe_account
+            else ""
+        )
+        error_block = (
+            f'<p class="oauth-error-detail">{safe_detail}</p>' if not ok else ""
+        )
+        page_html = f"""<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>AXIOM {vendor.title()} Connector</title></head>
-<body style="font-family: sans-serif; background:#06101b; color:#e8f2ff; padding:24px;">
-  <h1 style="font-size:18px; margin:0 0 8px;">{status_text}</h1>
-  <p style="margin:0; color:#9aa8c4;">{detail}</p>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AXIOM — {html.escape(vendor_label)}</title>
+  <style>
+    *, *::before, *::after {{ box-sizing: border-box; }}
+    html, body {{
+      margin: 0;
+      min-height: 100%;
+      font-family: Inter, "Avenir Next", "Helvetica Neue", sans-serif;
+      color: #e8f2ff;
+      background: #0a0f1a;
+    }}
+    body {{
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background-color: #0a0f1a;
+      background-image:
+        radial-gradient(circle at 50% 0%, rgba(0, 212, 170, 0.12), transparent 42%),
+        linear-gradient(rgba(25, 83, 137, 0.14) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(25, 83, 137, 0.14) 1px, transparent 1px);
+      background-size: auto, 32px 32px, 32px 32px;
+    }}
+    .oauth-shell {{
+      width: min(420px, 100%);
+      text-align: center;
+    }}
+    .oauth-brand {{
+      margin: 0 0 28px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.42em;
+      text-indent: 0.42em;
+      color: #f3f7ff;
+      text-shadow: 0 0 24px rgba(0, 212, 170, 0.35);
+    }}
+    .oauth-card {{
+      border: 1px solid rgba(0, 212, 170, 0.28);
+      border-radius: 16px;
+      padding: 36px 28px 28px;
+      background:
+        radial-gradient(circle at 100% 0%, rgba(0, 212, 170, 0.08), transparent 40%),
+        linear-gradient(180deg, rgba(7, 17, 34, 0.96), rgba(5, 12, 24, 0.98));
+      box-shadow:
+        0 24px 80px rgba(0, 0, 0, 0.45),
+        inset 0 1px 0 rgba(0, 212, 170, 0.12);
+    }}
+    .oauth-icon {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 72px;
+      height: 72px;
+      margin: 0 auto 20px;
+      border-radius: 50%;
+      font-size: 36px;
+      font-weight: 700;
+      line-height: 1;
+      animation: oauth-pop 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }}
+    .oauth-icon--ok {{
+      color: #0a0f1a;
+      background: linear-gradient(145deg, #00d4aa, #00a88a);
+      box-shadow: 0 0 40px rgba(0, 212, 170, 0.45);
+    }}
+    .oauth-icon--error {{
+      color: #ffe8ea;
+      background: linear-gradient(145deg, #ff4f57, #c92a35);
+      box-shadow: 0 0 32px rgba(255, 79, 87, 0.35);
+    }}
+    .oauth-title {{
+      margin: 0 0 10px;
+      font-size: 22px;
+      font-weight: 600;
+      color: #f1f7ff;
+    }}
+    .oauth-subtext {{
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.5;
+      color: #94a4ba;
+    }}
+    .oauth-account {{
+      margin: 16px 0 0;
+      font-size: 13px;
+      color: #7f92ab;
+    }}
+    .oauth-account span {{
+      color: #dce9ff;
+      font-weight: 500;
+    }}
+    .oauth-error-detail {{
+      margin: 14px 0 0;
+      padding: 12px 14px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 79, 87, 0.35);
+      background: rgba(255, 79, 87, 0.1);
+      font-size: 13px;
+      line-height: 1.45;
+      color: #ffc8cc;
+      text-align: left;
+    }}
+    .oauth-button {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 26px;
+      min-width: 180px;
+      height: 42px;
+      padding: 0 22px;
+      border: 1px solid rgba(0, 212, 170, 0.55);
+      border-radius: 8px;
+      background: rgba(0, 212, 170, 0.14);
+      color: #00d4aa;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+    }}
+    .oauth-button:hover {{
+      background: rgba(0, 212, 170, 0.24);
+      border-color: #00d4aa;
+      color: #e8fff9;
+    }}
+    .oauth-footer {{
+      margin: 18px 0 0;
+      font-size: 12px;
+      color: #5f728f;
+    }}
+    @keyframes oauth-pop {{
+      from {{ opacity: 0; transform: scale(0.72); }}
+      to {{ opacity: 1; transform: scale(1); }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="oauth-shell">
+    <p class="oauth-brand">AXIOM</p>
+    <div class="oauth-card">
+      <div class="{icon_class}" aria-hidden="true">{icon_glyph}</div>
+      <h1 class="oauth-title">{heading}</h1>
+      <p class="oauth-subtext">{subtext}</p>
+      {account_block}
+      {error_block}
+      <button type="button" class="oauth-button" id="oauth-close">Return to AXIOM</button>
+      <p class="oauth-footer">You can safely close this window</p>
+    </div>
+  </div>
   <script>
     (function() {{
-      var msg = {encoded};
-      try {{
-        if (window.opener && !window.opener.closed) {{
-          window.opener.postMessage(msg, window.location.origin);
-        }}
-      }} catch (error) {{}}
-      window.setTimeout(function() {{ window.close(); }}, 500);
+      var msg = {encoded_message};
+      var autoCloseMs = {auto_close_ms};
+      function notifyParent() {{
+        try {{
+          if (window.opener && !window.opener.closed) {{
+            window.opener.postMessage(msg, window.location.origin);
+          }}
+        }} catch (error) {{}}
+      }}
+      function closeWindow() {{
+        window.close();
+      }}
+      notifyParent();
+      document.getElementById("oauth-close").addEventListener("click", closeWindow);
+      if (autoCloseMs > 0) {{
+        window.setTimeout(closeWindow, autoCloseMs);
+      }}
     }})();
   </script>
 </body>
 </html>"""
-        return HTMLResponse(content=html)
+        return HTMLResponse(content=page_html)
+
+    _OAuthCallbackResult = TypeVar("_OAuthCallbackResult", bound=dict[str, Any])
+
+    def _execute_connector_oauth_callback(
+        vendor: str,
+        connect: Callable[[], _OAuthCallbackResult],
+    ) -> HTMLResponse:
+        try:
+            result = connect()
+            account_label = str(result.get("account_label") or "").strip() or None
+            return _connector_oauth_callback_html(
+                vendor,
+                ok=True,
+                detail=f"{_connector_vendor_label(vendor)} has been connected to your Company Brain.",
+                account_label=account_label,
+                payload=result,
+            )
+        except HTTPException as exc:
+            detail = str(exc.detail)
+            return _connector_oauth_callback_html(vendor, ok=False, detail=detail)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("%s OAuth callback failed", vendor)
+            return _connector_oauth_callback_html(
+                vendor,
+                ok=False,
+                detail=str(exc) or "Authorization failed",
+            )
 
     def _require_connector_configured(config: ConnectorConfig, label: str) -> None:
         if not _connector_configured(config):
@@ -1192,71 +1408,74 @@ def create_app(
         return {"authorize_url": GitHubOAuth(config).authorize_url(state), "state": state}
 
     @app.get("/api/internal/connectors/github/callback")
-    def get_github_callback(code: str, state: str) -> dict[str, Any]:
-        require_github_enabled()
-        config = github_config()
-        _consume_connector_oauth_state(config, state)
-        oauth_state = GitHubOAuth(config).exchange_code(code)
-        with session_local() as session:
-            config_row = session.get(ConnectorConfigRow, config.id)
-            if config_row is None:
-                config_row = ConnectorConfigRow(
-                    id=config.id,
+    def get_github_callback(request: Request, code: str, state: str) -> HTMLResponse:
+        def _connect() -> dict[str, Any]:
+            require_github_enabled()
+            config = _connector_config_with_resolved_redirect(github_config(), request)
+            _consume_connector_oauth_state(config, state)
+            oauth_state = GitHubOAuth(config).exchange_code(code)
+            with session_local() as session:
+                config_row = session.get(ConnectorConfigRow, config.id)
+                if config_row is None:
+                    config_row = ConnectorConfigRow(
+                        id=config.id,
+                        vendor="github",
+                        oauth_client_id=config.oauth_client_id,
+                        oauth_client_secret=_put_connector_secret(
+                            session,
+                            "github",
+                            "oauth_client_secret",
+                            config.oauth_client_secret or "",
+                        )
+                        if config.oauth_client_secret
+                        else None,
+                        redirect_uri=config.redirect_uri,
+                        scopes=config.scopes,
+                        webhook_secret=_put_connector_secret(
+                            session,
+                            "github",
+                            "webhook_secret",
+                            config.webhook_secret or "",
+                        )
+                        if config.webhook_secret
+                        else None,
+                        workspace_id=config.workspace_id,
+                        install_state="connected",
+                    )
+                    session.add(config_row)
+                else:
+                    config_row.install_state = "connected"
+                    session.add(config_row)
+                row = ConnectorStateRow(
+                    id=oauth_state.id,
+                    connector_id=config.id,
                     vendor="github",
-                    oauth_client_id=config.oauth_client_id,
-                    oauth_client_secret=_put_connector_secret(
+                    access_token=_put_connector_token(
                         session,
                         "github",
-                        "oauth_client_secret",
-                        config.oauth_client_secret or "",
+                        oauth_state.id,
+                        "access_token",
+                        oauth_state.access_token,
                     )
-                    if config.oauth_client_secret
-                    else None,
-                    redirect_uri=config.redirect_uri,
-                    scopes=config.scopes,
-                    webhook_secret=_put_connector_secret(
+                    or "",
+                    refresh_token=_put_connector_token(
                         session,
                         "github",
-                        "webhook_secret",
-                        config.webhook_secret or "",
-                    )
-                    if config.webhook_secret
-                    else None,
-                    workspace_id=config.workspace_id,
-                    install_state="connected",
+                        oauth_state.id,
+                        "refresh_token",
+                        oauth_state.refresh_token,
+                    ),
+                    token_expires_at=None,
+                    account_id=oauth_state.account_id,
+                    account_label=oauth_state.account_label or "GitHub",
+                    installed_by=oauth_state.installed_by,
+                    status="connected",
                 )
-                session.add(config_row)
-            else:
-                config_row.install_state = "connected"
-                session.add(config_row)
-            row = ConnectorStateRow(
-                id=oauth_state.id,
-                connector_id=config.id,
-                vendor="github",
-                access_token=_put_connector_token(
-                    session,
-                    "github",
-                    oauth_state.id,
-                    "access_token",
-                    oauth_state.access_token,
-                )
-                or "",
-                refresh_token=_put_connector_token(
-                    session,
-                    "github",
-                    oauth_state.id,
-                    "refresh_token",
-                    oauth_state.refresh_token,
-                ),
-                token_expires_at=None,
-                account_id=oauth_state.account_id,
-                account_label=oauth_state.account_label or "GitHub",
-                installed_by=oauth_state.installed_by,
-                status="connected",
-            )
-            session.add(row)
-            session.commit()
-        return {"status": "connected", "account_label": oauth_state.account_label or "GitHub"}
+                session.add(row)
+                session.commit()
+            return {"status": "connected", "account_label": oauth_state.account_label or "GitHub"}
+
+        return _execute_connector_oauth_callback("github", _connect)
 
     @app.post("/api/internal/connectors/github/sync")
     async def post_github_sync() -> dict[str, Any]:
@@ -1392,74 +1611,77 @@ def create_app(
         return {"authorize_url": LinearOAuth(config).authorize_url(state), "state": state}
 
     @app.get("/api/internal/connectors/linear/callback")
-    def get_linear_callback(code: str, state: str) -> dict[str, Any]:
-        require_linear_enabled()
-        config = linear_config()
-        _consume_connector_oauth_state(config, state)
-        oauth_state = LinearOAuth(config).exchange_code(code)
-        with session_local() as session:
-            config_row = session.get(ConnectorConfigRow, config.id)
-            if config_row is None:
-                config_row = ConnectorConfigRow(
-                    id=config.id,
+    def get_linear_callback(request: Request, code: str, state: str) -> HTMLResponse:
+        def _connect() -> dict[str, Any]:
+            require_linear_enabled()
+            config = _connector_config_with_resolved_redirect(linear_config(), request)
+            _consume_connector_oauth_state(config, state)
+            oauth_state = LinearOAuth(config).exchange_code(code)
+            with session_local() as session:
+                config_row = session.get(ConnectorConfigRow, config.id)
+                if config_row is None:
+                    config_row = ConnectorConfigRow(
+                        id=config.id,
+                        vendor="linear",
+                        oauth_client_id=config.oauth_client_id,
+                        oauth_client_secret=_put_connector_secret(
+                            session,
+                            "linear",
+                            "oauth_client_secret",
+                            config.oauth_client_secret or "",
+                        )
+                        if config.oauth_client_secret
+                        else None,
+                        redirect_uri=config.redirect_uri,
+                        scopes=config.scopes,
+                        webhook_secret=_put_connector_secret(
+                            session,
+                            "linear",
+                            "webhook_secret",
+                            config.webhook_secret or "",
+                        )
+                        if config.webhook_secret
+                        else None,
+                        workspace_id=config.workspace_id,
+                        install_state="connected",
+                    )
+                    session.add(config_row)
+                else:
+                    config_row.install_state = "connected"
+                    session.add(config_row)
+                row = ConnectorStateRow(
+                    id=oauth_state.id,
+                    connector_id=config.id,
                     vendor="linear",
-                    oauth_client_id=config.oauth_client_id,
-                    oauth_client_secret=_put_connector_secret(
+                    access_token=_put_connector_token(
                         session,
                         "linear",
-                        "oauth_client_secret",
-                        config.oauth_client_secret or "",
+                        oauth_state.id,
+                        "access_token",
+                        oauth_state.access_token,
                     )
-                    if config.oauth_client_secret
-                    else None,
-                    redirect_uri=config.redirect_uri,
-                    scopes=config.scopes,
-                    webhook_secret=_put_connector_secret(
+                    or "",
+                    refresh_token=_put_connector_token(
                         session,
                         "linear",
-                        "webhook_secret",
-                        config.webhook_secret or "",
-                    )
-                    if config.webhook_secret
-                    else None,
-                    workspace_id=config.workspace_id,
-                    install_state="connected",
+                        oauth_state.id,
+                        "refresh_token",
+                        oauth_state.refresh_token,
+                    ),
+                    token_expires_at=oauth_state.token_expires_at,
+                    account_id=oauth_state.account_id,
+                    account_label=oauth_state.account_label or "Linear Workspace",
+                    installed_by=oauth_state.installed_by,
+                    status="connected",
                 )
-                session.add(config_row)
-            else:
-                config_row.install_state = "connected"
-                session.add(config_row)
-            row = ConnectorStateRow(
-                id=oauth_state.id,
-                connector_id=config.id,
-                vendor="linear",
-                access_token=_put_connector_token(
-                    session,
-                    "linear",
-                    oauth_state.id,
-                    "access_token",
-                    oauth_state.access_token,
-                )
-                or "",
-                refresh_token=_put_connector_token(
-                    session,
-                    "linear",
-                    oauth_state.id,
-                    "refresh_token",
-                    oauth_state.refresh_token,
-                ),
-                token_expires_at=oauth_state.token_expires_at,
-                account_id=oauth_state.account_id,
-                account_label=oauth_state.account_label or "Linear Workspace",
-                installed_by=oauth_state.installed_by,
-                status="connected",
-            )
-            session.add(row)
-            session.commit()
-        return {
-            "status": "connected",
-            "account_label": oauth_state.account_label or "Linear Workspace",
-        }
+                session.add(row)
+                session.commit()
+            return {
+                "status": "connected",
+                "account_label": oauth_state.account_label or "Linear Workspace",
+            }
+
+        return _execute_connector_oauth_callback("linear", _connect)
 
     @app.post("/api/internal/connectors/linear/sync")
     async def post_linear_sync() -> dict[str, Any]:
@@ -1610,74 +1832,77 @@ def create_app(
         return {"authorize_url": SlackOAuth(config).authorize_url(state), "state": state}
 
     @app.get("/api/internal/connectors/slack/callback")
-    def get_slack_callback(code: str, state: str) -> dict[str, Any]:
-        require_slack_enabled()
-        config = slack_config()
-        _consume_connector_oauth_state(config, state)
-        oauth_state = SlackOAuth(config).exchange_code(code)
-        with session_local() as session:
-            config_row = session.get(ConnectorConfigRow, config.id)
-            if config_row is None:
-                config_row = ConnectorConfigRow(
-                    id=config.id,
+    def get_slack_callback(request: Request, code: str, state: str) -> HTMLResponse:
+        def _connect() -> dict[str, Any]:
+            require_slack_enabled()
+            config = _connector_config_with_resolved_redirect(slack_config(), request)
+            _consume_connector_oauth_state(config, state)
+            oauth_state = SlackOAuth(config).exchange_code(code)
+            with session_local() as session:
+                config_row = session.get(ConnectorConfigRow, config.id)
+                if config_row is None:
+                    config_row = ConnectorConfigRow(
+                        id=config.id,
+                        vendor="slack",
+                        oauth_client_id=config.oauth_client_id,
+                        oauth_client_secret=_put_connector_secret(
+                            session,
+                            "slack",
+                            "oauth_client_secret",
+                            config.oauth_client_secret or "",
+                        )
+                        if config.oauth_client_secret
+                        else None,
+                        redirect_uri=config.redirect_uri,
+                        scopes=config.scopes,
+                        webhook_secret=_put_connector_secret(
+                            session,
+                            "slack",
+                            "webhook_secret",
+                            config.webhook_secret or "",
+                        )
+                        if config.webhook_secret
+                        else None,
+                        workspace_id=config.workspace_id,
+                        install_state="connected",
+                    )
+                    session.add(config_row)
+                else:
+                    config_row.install_state = "connected"
+                    session.add(config_row)
+                row = ConnectorStateRow(
+                    id=oauth_state.id,
+                    connector_id=config.id,
                     vendor="slack",
-                    oauth_client_id=config.oauth_client_id,
-                    oauth_client_secret=_put_connector_secret(
+                    access_token=_put_connector_token(
                         session,
                         "slack",
-                        "oauth_client_secret",
-                        config.oauth_client_secret or "",
+                        oauth_state.id,
+                        "access_token",
+                        oauth_state.access_token,
                     )
-                    if config.oauth_client_secret
-                    else None,
-                    redirect_uri=config.redirect_uri,
-                    scopes=config.scopes,
-                    webhook_secret=_put_connector_secret(
+                    or "",
+                    refresh_token=_put_connector_token(
                         session,
                         "slack",
-                        "webhook_secret",
-                        config.webhook_secret or "",
-                    )
-                    if config.webhook_secret
-                    else None,
-                    workspace_id=config.workspace_id,
-                    install_state="connected",
+                        oauth_state.id,
+                        "refresh_token",
+                        oauth_state.refresh_token,
+                    ),
+                    token_expires_at=oauth_state.token_expires_at,
+                    account_id=oauth_state.account_id,
+                    account_label=oauth_state.account_label or "Slack Workspace",
+                    installed_by=oauth_state.installed_by,
+                    status="connected",
                 )
-                session.add(config_row)
-            else:
-                config_row.install_state = "connected"
-                session.add(config_row)
-            row = ConnectorStateRow(
-                id=oauth_state.id,
-                connector_id=config.id,
-                vendor="slack",
-                access_token=_put_connector_token(
-                    session,
-                    "slack",
-                    oauth_state.id,
-                    "access_token",
-                    oauth_state.access_token,
-                )
-                or "",
-                refresh_token=_put_connector_token(
-                    session,
-                    "slack",
-                    oauth_state.id,
-                    "refresh_token",
-                    oauth_state.refresh_token,
-                ),
-                token_expires_at=oauth_state.token_expires_at,
-                account_id=oauth_state.account_id,
-                account_label=oauth_state.account_label or "Slack Workspace",
-                installed_by=oauth_state.installed_by,
-                status="connected",
-            )
-            session.add(row)
-            session.commit()
-        return {
-            "status": "connected",
-            "account_label": oauth_state.account_label or "Slack Workspace",
-        }
+                session.add(row)
+                session.commit()
+            return {
+                "status": "connected",
+                "account_label": oauth_state.account_label or "Slack Workspace",
+            }
+
+        return _execute_connector_oauth_callback("slack", _connect)
 
     @app.post("/api/internal/connectors/slack/sync")
     async def post_slack_sync() -> dict[str, Any]:
@@ -1831,7 +2056,7 @@ def create_app(
 
     @app.get("/api/internal/connectors/notion/callback")
     def get_notion_callback(request: Request, code: str, state: str) -> HTMLResponse:
-        try:
+        def _connect() -> dict[str, Any]:
             require_notion_enabled()
             config = _connector_config_with_resolved_redirect(notion_config(), request)
             _consume_connector_oauth_state(config, state)
@@ -1887,19 +2112,13 @@ def create_app(
                 )
                 session.add(row)
                 session.commit()
-            result = {
+            return {
                 "status": "connected",
                 "account_label": oauth_state.account_label or "Notion Workspace",
                 "watch_mode": "polling",
             }
-            detail = f"Notion connected as {result['account_label']}"
-            return _connector_oauth_callback_html("notion", ok=True, detail=detail, payload=result)
-        except HTTPException as exc:
-            detail = str(exc.detail)
-            return _connector_oauth_callback_html("notion", ok=False, detail=detail)
-        except Exception as exc:  # noqa: BLE001
-            log.exception("Notion OAuth callback failed")
-            return _connector_oauth_callback_html("notion", ok=False, detail=str(exc) or "Notion authorization failed")
+
+        return _execute_connector_oauth_callback("notion", _connect)
 
     @app.post("/api/internal/connectors/notion/sync")
     async def post_notion_sync() -> dict[str, Any]:
@@ -2029,63 +2248,66 @@ def create_app(
         return {"authorize_url": GmailOAuth(config).authorize_url(state), "state": state}
 
     @app.get("/api/internal/connectors/gmail/callback")
-    def get_gmail_callback(code: str, state: str) -> dict[str, Any]:
-        require_gmail_enabled()
-        config = gmail_config()
-        _consume_connector_oauth_state(config, state)
-        oauth_state = GmailOAuth(config).exchange_code(code)
-        with session_local() as session:
-            config_row = session.get(ConnectorConfigRow, config.id)
-            if config_row is None:
-                config_row = ConnectorConfigRow(
-                    id=config.id,
+    def get_gmail_callback(request: Request, code: str, state: str) -> HTMLResponse:
+        def _connect() -> dict[str, Any]:
+            require_gmail_enabled()
+            config = _connector_config_with_resolved_redirect(gmail_config(), request)
+            _consume_connector_oauth_state(config, state)
+            oauth_state = GmailOAuth(config).exchange_code(code)
+            with session_local() as session:
+                config_row = session.get(ConnectorConfigRow, config.id)
+                if config_row is None:
+                    config_row = ConnectorConfigRow(
+                        id=config.id,
+                        vendor="gmail",
+                        oauth_client_id=config.oauth_client_id,
+                        oauth_client_secret=_put_connector_secret(
+                            session,
+                            "gmail",
+                            "oauth_client_secret",
+                            config.oauth_client_secret or "",
+                        )
+                        if config.oauth_client_secret
+                        else None,
+                        redirect_uri=config.redirect_uri,
+                        scopes=config.scopes,
+                        workspace_id=config.workspace_id,
+                        install_state="connected",
+                    )
+                    session.add(config_row)
+                else:
+                    config_row.install_state = "connected"
+                    session.add(config_row)
+                row = ConnectorStateRow(
+                    id=oauth_state.id,
+                    connector_id=config.id,
                     vendor="gmail",
-                    oauth_client_id=config.oauth_client_id,
-                    oauth_client_secret=_put_connector_secret(
+                    access_token=_put_connector_token(
                         session,
                         "gmail",
-                        "oauth_client_secret",
-                        config.oauth_client_secret or "",
+                        oauth_state.id,
+                        "access_token",
+                        oauth_state.access_token,
                     )
-                    if config.oauth_client_secret
-                    else None,
-                    redirect_uri=config.redirect_uri,
-                    scopes=config.scopes,
-                    workspace_id=config.workspace_id,
-                    install_state="connected",
+                    or "",
+                    refresh_token=_put_connector_token(
+                        session,
+                        "gmail",
+                        oauth_state.id,
+                        "refresh_token",
+                        oauth_state.refresh_token,
+                    ),
+                    token_expires_at=oauth_state.token_expires_at,
+                    account_id=oauth_state.account_id,
+                    account_label=oauth_state.account_label or "Gmail",
+                    installed_by=oauth_state.installed_by,
+                    status="connected",
                 )
-                session.add(config_row)
-            else:
-                config_row.install_state = "connected"
-                session.add(config_row)
-            row = ConnectorStateRow(
-                id=oauth_state.id,
-                connector_id=config.id,
-                vendor="gmail",
-                access_token=_put_connector_token(
-                    session,
-                    "gmail",
-                    oauth_state.id,
-                    "access_token",
-                    oauth_state.access_token,
-                )
-                or "",
-                refresh_token=_put_connector_token(
-                    session,
-                    "gmail",
-                    oauth_state.id,
-                    "refresh_token",
-                    oauth_state.refresh_token,
-                ),
-                token_expires_at=oauth_state.token_expires_at,
-                account_id=oauth_state.account_id,
-                account_label=oauth_state.account_label or "Gmail",
-                installed_by=oauth_state.installed_by,
-                status="connected",
-            )
-            session.add(row)
-            session.commit()
-        return {"status": "connected", "account_label": oauth_state.account_label or "Gmail"}
+                session.add(row)
+                session.commit()
+            return {"status": "connected", "account_label": oauth_state.account_label or "Gmail"}
+
+        return _execute_connector_oauth_callback("gmail", _connect)
 
     @app.post("/api/internal/connectors/gmail/sync")
     async def post_gmail_sync() -> dict[str, Any]:
