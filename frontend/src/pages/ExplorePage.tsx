@@ -298,15 +298,18 @@ function DataTable({ columns, rows }: { columns: TableColumn[]; rows: TableRow[]
   );
 }
 
-function DetailPanel({ entity, connected, graphIndex }: { entity: Entity | null; connected: Entity[]; graphIndex: GraphIndex }) {
+function DetailPanel({
+  entity,
+  connected,
+  graphIndex,
+  onClose,
+}: {
+  entity: Entity;
+  connected: Entity[];
+  graphIndex: GraphIndex;
+  onClose: () => void;
+}) {
   const [activeTab, setActiveTab] = useState<"details" | "relationships" | "activity">("details");
-  if (!entity) {
-    return (
-      <aside className="explore-side">
-        <section className="explore-panel"><p className="explore-muted">Select an entity to inspect details.</p></section>
-      </aside>
-    );
-  }
   const status = statusFor(entity);
   const score = confidence(entity);
   const degree = degreeFor(entity, graphIndex);
@@ -315,8 +318,13 @@ function DetailPanel({ entity, connected, graphIndex }: { entity: Entity | null;
     ...connected.slice(0, 4).map((item) => `Connected to ${titleForEntity(item)}`),
   ];
   return (
-    <aside className="explore-side">
-      <section className="explore-panel detail-panel">
+    <>
+      <button type="button" className="explore-drawer-backdrop" aria-label="Close entity details" onClick={onClose} />
+      <aside className="explore-drawer explore-side" role="dialog" aria-modal="true" aria-label="Entity details">
+        <button type="button" className="explore-drawer-close" aria-label="Close entity details" onClick={onClose}>
+          ×
+        </button>
+        <section className="explore-panel detail-panel">
         <div className="explore-side-tabs">
           <button type="button" className={activeTab === "details" ? "is-active" : ""} onClick={() => setActiveTab("details")}>Entity Details</button>
           <button type="button" className={activeTab === "relationships" ? "is-active" : ""} onClick={() => setActiveTab("relationships")}>Relationships</button>
@@ -381,7 +389,8 @@ function DetailPanel({ entity, connected, graphIndex }: { entity: Entity | null;
         </div>
         <button type="button" className="explore-wide-button" onClick={() => setActiveTab("activity")}>View Full Timeline <Icon name="arrow" /></button>
       </section>
-    </aside>
+      </aside>
+    </>
   );
 }
 
@@ -444,8 +453,11 @@ export function ExplorePage() {
     return rows;
   }, [activeFilter, entities, query, section]);
   const sorted = useMemo(() => sortEntities(filtered, graphIndex), [filtered, graphIndex]);
-  const selected = useMemo(() => sorted.find((entity) => entity.id === selectedId) ?? sorted[0] ?? null, [selectedId, sorted]);
   const entitiesById = useMemo(() => new Map(entities.map((entity) => [entity.id, entity])), [entities]);
+  const selected = useMemo(
+    () => (selectedId ? entitiesById.get(selectedId) ?? null : null),
+    [selectedId, entitiesById],
+  );
   const connected = useMemo(() => connectedEntities(selected, entitiesById, graphIndex), [selected, entitiesById, graphIndex]);
 
   const todayCount = useMemo(() => {
@@ -457,7 +469,7 @@ export function ExplorePage() {
   const columns = tableColumns(section);
   const totalPages = Math.max(1, Math.ceil(sorted.length / 10));
   const pageRows = sorted.slice((page - 1) * 10, page * 10);
-  const rows = buildRows(pageRows, graphIndex, selected?.id ?? null, (entity) => setSelectedId(entity.id));
+  const rows = buildRows(pageRows, graphIndex, selectedId, (entity) => setSelectedId(entity.id));
   const sectionCount = sorted.length;
   const clusterRows = Object.values(data?.clusterHealth ?? {}).filter((item) => typeof item.ingest_rate_per_min === "number");
   const eventsPerMin = clusterRows.reduce((sum, item) => sum + item.ingest_rate_per_min, 0);
@@ -524,8 +536,16 @@ export function ExplorePage() {
           </section>
           <SuggestedSearches section={section} onPick={setQuery} />
         </div>
-        <DetailPanel entity={selected} connected={connected} graphIndex={graphIndex} />
       </main>
+      {selected ? (
+        <DetailPanel
+          key={selected.id}
+          entity={selected}
+          connected={connected}
+          graphIndex={graphIndex}
+          onClose={() => setSelectedId(null)}
+        />
+      ) : null}
     </div>
   );
 }
