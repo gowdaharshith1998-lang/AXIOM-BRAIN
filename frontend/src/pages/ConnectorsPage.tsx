@@ -35,7 +35,7 @@ const vendors = [
   { id: "gmail", label: "Gmail" },
 ];
 
-export function ConnectorsPage() {
+export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
   const [statuses, setStatuses] = useState<ConnectorStatus[]>([]);
   const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
   const [drawerVendor, setDrawerVendor] = useState<string | null>(null);
@@ -236,8 +236,8 @@ export function ConnectorsPage() {
     }
   }
 
-  return (
-    <div className="settings-stage">
+  const content = (
+    <>
       <section className="settings-panel">
         <h3 className="settings-panel-title">Connectors</h3>
         <div className="settings-panel-body space-y-3">
@@ -247,10 +247,7 @@ export function ConnectorsPage() {
             const configured = status?.configured !== false;
             const watchMode = status?.watch_mode === "polling" ? "Polling" : null;
             return (
-              <div
-                key={vendor.id}
-                className="grid grid-cols-[110px_120px_minmax(160px,1fr)_minmax(180px,240px)_auto] items-center gap-3 border-b border-[#173657] py-3 text-[13px]"
-              >
+              <div key={vendor.id} className="settings-connector-row">
                 <div className="text-[15px] font-semibold text-[#e8f2ff]">{vendor.label}</div>
                 <div>
                   <span className={connected ? "settings-status-good" : "settings-status-muted"}>
@@ -268,13 +265,13 @@ export function ConnectorsPage() {
                     </div>
                   ) : null}
                 </div>
-                <div className="grid grid-cols-4 gap-2 text-[12px] text-[#a9bed8]">
+                <div className="settings-connector-metrics">
                   <span>{status?.entities_ingested ?? 0} entities</span>
                   <span>{status?.events_24h ?? 0} events</span>
                   <span>{status?.writes_blocked_week ?? 0} blocked</span>
                   <span>{status?.last_sync_at || "never"}</span>
                 </div>
-                <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                <div className="settings-connector-actions">
                   {connected ? (
                     <>
                       <button
@@ -395,8 +392,10 @@ export function ConnectorsPage() {
           </form>
         </div>
       ) : null}
-    </div>
+    </>
   );
+
+  return embedded ? content : <div className="settings-stage">{content}</div>;
 }
 
 function emptySetupForm(vendor: string): SetupForm {

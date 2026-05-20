@@ -258,8 +258,9 @@ export function SettingsPage() {
         ))}
       </nav>
 
+      <div className="settings-content">
       {tab === "general" && (
-        <div className="grid grid-cols-[428px_460px_475px] gap-[14px]">
+        <div className="settings-grid">
           <Panel title="Company Settings" subtitle="Manage your company and workspace preferences.">
             <div className="space-y-3">
               <Field label="Company Name" value={String(settings.company_name ?? "Axiom Analytics Inc.")} onChange={(value) => write("company_name", value)} />
@@ -290,7 +291,7 @@ export function SettingsPage() {
             />
             <Row label="Show confidence rings" value={<SettingToggle checked={showConfidenceRings} onChange={(value) => write("show_confidence_rings", value)} />} />
           </Panel>
-          <div className="space-y-[14px]">
+          <div className="settings-stack">
             <Panel title="System Summary" subtitle="Overview of your system environment and health.">
               <Row label="Version" value="0.1.0" />
               <Row label="Environment" value={environment} />
@@ -313,13 +314,13 @@ export function SettingsPage() {
       )}
 
       {tab === "access" && (
-        <div className="grid grid-cols-[1040px_346px] gap-[14px]">
-          <div className="space-y-[14px]">
+        <div className="settings-grid">
+          <div className="settings-stack">
             <Panel title="Members" subtitle="Manage users, roles, and access across your Company Brain.">
               <DataTable headers={["Name", "Email", "Role", "Team", "Status"]} rows={memberRows} />
               <Row label="Multi-user" value={<SettingToggle checked={multiUserEnabled} onChange={(value) => write("multi_user_enabled", value)} />} />
             </Panel>
-            <div className="grid grid-cols-2 gap-[14px]">
+            <div className="settings-grid">
               <Panel title="Teams">
                 <div className="space-y-2 text-[13px] text-[#9fb5d0]">
                   {memberRows.length > 1 ? (
@@ -378,7 +379,7 @@ export function SettingsPage() {
       )}
 
       {tab === "notifications" && (
-        <div className="grid grid-cols-[320px_734px_320px] gap-[14px]">
+        <div className="settings-grid">
           <Panel title="Alert Channels">
             <div className="space-y-2">
               <Row
@@ -437,7 +438,7 @@ export function SettingsPage() {
               <Row label="Escalation minutes" value={<SettingSelect value={`${escalationMinutes}m`} options={["5m", "15m", "30m", "60m"]} onChange={(value) => write("escalation_minutes", Number.parseInt(value, 10))} />} />
             </div>
           </Panel>
-          <div className="space-y-[14px]">
+          <div className="settings-stack">
             <Panel title="Escalation Policy">Tiered escalation by channel and severity.</Panel>
             <Panel title="Notification Recipients">
               {alertRecipients.length > 0 ? (
@@ -451,9 +452,9 @@ export function SettingsPage() {
       )}
 
       {tab === "security" && (
-        <div className="grid grid-cols-[870px_450px] gap-[14px]">
-          <div className="space-y-[14px]">
-            <div className="grid grid-cols-2 gap-[14px]">
+        <div className="settings-grid">
+          <div className="settings-stack">
+            <div className="settings-grid">
               <Panel title="Authentication">
                 <div className="space-y-2">
                   <Row label="SSO" value={<SettingToggle checked={securitySettings.ssoEnabled} onChange={(value) => write("sso_enabled", value)} />} />
@@ -467,7 +468,7 @@ export function SettingsPage() {
                 </div>
               </Panel>
             </div>
-            <div className="grid grid-cols-2 gap-[14px]">
+            <div className="settings-grid">
               <Panel title="Data Protection">Encryption and redaction controls <span className="text-[#9fb5d0]">Enabled</span></Panel>
               <Panel title="Audit Controls">Merkle Ledger Status: <span className="text-[#9fb5d0]">Active</span></Panel>
             </div>
@@ -475,7 +476,7 @@ export function SettingsPage() {
               <Row label="Require approvals" value={<SettingToggle checked={parseSettingBoolean(settings, "risk_approvals_required", false)} onChange={(value) => write("risk_approvals_required", value)} />} />
             </Panel>
           </div>
-          <div className="space-y-[14px]">
+          <div className="settings-stack">
             <Panel title="Security Health">Score: {securitySettings.securityHealthScore}/100</Panel>
             <Panel title="Recent Security Events">Latest security events <span className="text-[#9fb5d0]">{mcpStats?.recent_actions?.slice(0, 3).length ?? 0}</span></Panel>
           </div>
@@ -483,7 +484,7 @@ export function SettingsPage() {
       )}
 
       {tab === "preferences" && (
-        <div className="grid grid-cols-[452px_448px_456px] gap-[14px]">
+        <div className="settings-grid">
           <Panel title="Appearance" subtitle="Customize how AXIOM looks and feels.">
             <Row label="Theme" value={<SettingSelect value={theme} options={["Dark (Neon)", "Dark (Slate)", "High Contrast"]} onChange={(value) => write("theme", value)} />} />
             <Row label="Graph Density" value={<SettingSelect value={graphDensity} options={["Sparse", "Optimal", "Dense"]} onChange={(value) => write("graph_density", value)} />} />
@@ -507,9 +508,9 @@ export function SettingsPage() {
       )}
 
       {tab === "api-mcp" && (
-        <div className="grid grid-cols-[1076px_332px] gap-[14px]">
-          <div className="space-y-[14px]">
-            <div className="grid grid-cols-[364px_698px] gap-[14px]">
+        <div className="settings-grid">
+          <div className="settings-stack">
+            <div className="settings-grid">
               <Panel title="MCP Server" subtitle="Your Company Brain is an executable tools file for AI agents.">
                 <Row label="Endpoint URL" value="stdio://axiom.cli mcp-serve" />
                 <Row label="Status" value="Operational" />
@@ -520,7 +521,7 @@ export function SettingsPage() {
                 <DataTable headers={["Tool", "Type", "Last Called", "Calls"]} rows={toolRows} />
               </Panel>
             </div>
-            <div className="grid grid-cols-[555px_507px] gap-[14px]">
+            <div className="settings-grid">
               <Panel title="API Key Vault" subtitle="Manage API keys for programmatic access.">
                 {vaultLocked ? <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-amber-100">Key vault unavailable.</div> : null}
                 {bootstrapError ? <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 p-3 text-red-100">{bootstrapError}</div> : null}
@@ -546,12 +547,14 @@ export function SettingsPage() {
               </Panel>
             </div>
           </div>
-          <div className="space-y-[14px]">
+          <div className="settings-stack">
             <Panel title="Usage & Rate Limits"><Row label="Tool Calls" value={mcpStats?.tools.reduce((sum, tool) => sum + tool.calls, 0) ?? 0} /></Panel>
             <Panel title="Operational Status"><Row label="Knowledge Graph" value={health === "ok" ? "Healthy" : "Degraded"} /></Panel>
           </div>
         </div>
       )}
+
+      </div>
 
       {connectTarget ? (
         <AddKeyDialog
