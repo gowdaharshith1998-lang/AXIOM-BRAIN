@@ -494,6 +494,12 @@ def create_app(
     ensure_approvals_schema(engine)
     ensure_connectors_schema(engine)
     cast(Table, Secret.__table__).create(bind=engine, checkfirst=True)
+    # SkillFile primitive tables — created here so a fresh DB (no migrations)
+    # still serves the SkillFile endpoints.
+    from axiom.schema.models import SkillFileRow, SkillFileVersionRow
+
+    cast(Table, SkillFileRow.__table__).create(bind=engine, checkfirst=True)
+    cast(Table, SkillFileVersionRow.__table__).create(bind=engine, checkfirst=True)
     session_local = sessionmaker(bind=engine, future=True)
     broadcaster = EventBroadcaster()
     policy_evaluator = get_policy_evaluator(session_local)
@@ -527,6 +533,16 @@ def create_app(
         app.state.mcp_tool_counts = dict.fromkeys(MCP_TOOL_NAMES, 0)
         app.state.mcp_last_called = dict.fromkeys(MCP_TOOL_NAMES)
         app.state.policy_evaluator = policy_evaluator
+        # Seed SkillFiles from skills/library/ on startup (idempotent).
+        try:
+            from axiom.skills.skill_file_store import seed_from_disk
+
+            with session_local() as seed_session:
+                seeded = seed_from_disk(seed_session)
+            if seeded:
+                log.info("seeded %d skill_file(s) from disk", seeded)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("skill_file seed failed: %s", exc)
         if SETTINGS_FILE.exists():
             try:
                 app.state.studio_settings = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
@@ -2561,6 +2577,99 @@ def create_app(
         )
         return payload
 
+    @app.get("/api/internal/agents/activity")
+    def list_agent_activity(limit: int = Query(50, ge=1, le=200)) -> dict[str, Any]:
+        """Unified runtime feed: skill runs + MCP tool calls + connector syncs.
+
+        Replaces the watchdog-receipts feed at /agents/activity. Surfaces zero
+        governance content; watchdog-derived tool calls are excluded. Returns a
+        single timeline sorted newest-first. Missing/empty sources degrade
+        silently so a partially-connected brain still renders.
+        """
+        from axiom.schema.models import Action, ConnectorStateRow, Skill, SkillRun
+
+        items: list[dict[str, Any]] = []
+
+        with session_local() as session:
+            # Source 1: skill runs (LLM-call skills produced by the skills runner).
+            try:
+                skill_runs = session.execute(
+                    select(SkillRun, Skill.name)
+                    .join(Skill, Skill.id == SkillRun.skill_id)
+                    .order_by(desc(SkillRun.run_at))
+                    .limit(limit)
+                ).all()
+                for run, skill_name in skill_runs:
+                    items.append(
+                        {
+                            "kind": "skill_run",
+                            "id": run.id,
+                            "title": f"Skill ran: {skill_name}",
+                            "status": run.status or "completed",
+                            "duration_ms": run.duration_ms,
+                            "agent_name": run.agent_name,
+                            "at": run.run_at.isoformat() if run.run_at else None,
+                        }
+                    )
+            except Exception as exc:  # noqa: BLE001
+                log.exception("activity: skill_run source failed: %s", exc)
+
+            # Source 2: MCP tool calls (the actions ledger); watchdog rows excluded.
+            try:
+                actions = (
+                    session.execute(
+                        select(Action).order_by(desc(Action.created_at)).limit(limit)
+                    )
+                    .scalars()
+                    .all()
+                )
+                for action in actions:
+                    tool = action.tool or "tool"
+                    if "watchdog" in tool.lower():
+                        continue
+                    items.append(
+                        {
+                            "kind": "mcp_tool_call",
+                            "id": action.id,
+                            "title": f"Tool call: {tool}",
+                            "status": "completed",
+                            "agent_name": action.agent_id,
+                            "at": action.created_at.isoformat() if action.created_at else None,
+                        }
+                    )
+            except Exception as exc:  # noqa: BLE001
+                log.exception("activity: mcp_tool_call source failed: %s", exc)
+
+            # Source 3: connector sync events.
+            try:
+                connector_rows = (
+                    session.execute(
+                        select(ConnectorStateRow)
+                        .where(ConnectorStateRow.last_sync_at.is_not(None))
+                        .order_by(desc(ConnectorStateRow.last_sync_at))
+                        .limit(limit)
+                    )
+                    .scalars()
+                    .all()
+                )
+                for row in connector_rows:
+                    items.append(
+                        {
+                            "kind": "connector_sync",
+                            "id": row.id,
+                            "title": f"Connector synced: {row.vendor}",
+                            "status": row.status or "synced",
+                            "agent_name": None,
+                            "at": row.last_sync_at.isoformat() if row.last_sync_at else None,
+                        }
+                    )
+            except Exception as exc:  # noqa: BLE001
+                log.exception("activity: connector_sync source failed: %s", exc)
+
+        # Newest first; rows without a timestamp sort to the end.
+        items.sort(key=lambda item: item.get("at") or "", reverse=True)
+        return {"items": items[:limit]}
+
     @app.get("/api/internal/mcp-stats")
     def get_mcp_stats() -> dict[str, Any]:
         now_ms = datetime_now_ms()
@@ -3148,6 +3257,116 @@ def create_app(
             _raise_skill_error(exc)
         await publish_skill_event("skill_archived", {"skill": payload}, skill_id)
         return payload
+
+    # ── SkillFile endpoints (executable workflow YAML) ────────────────────
+    # Distinct from /api/internal/skills above (the LLM-call skills). These
+    # serve the SkillFile primitive: editable YAML workflows + test runs.
+
+    @app.get("/api/internal/skill-files")
+    def list_skill_files_endpoint() -> dict[str, Any]:
+        from axiom.skills.skill_file_store import list_skill_files
+
+        with session_local() as session:
+            items = list_skill_files(session)
+        return {
+            "skill_files": [
+                {
+                    "name": sf.name,
+                    "description": sf.description,
+                    "current_version": sf.current_version,
+                    "validation_status": sf.validation_status,
+                    "updated_at": sf.updated_at,
+                }
+                for sf in items
+            ]
+        }
+
+    @app.get("/api/internal/skill-files/{name}")
+    def get_skill_file_endpoint(name: str) -> dict[str, Any]:
+        from axiom.skills.skill_file_store import get_skill_file
+
+        with session_local() as session:
+            sf = get_skill_file(session, name)
+        if sf is None:
+            raise HTTPException(status_code=404, detail=f"skill file not found: {name}")
+        return {
+            "name": sf.name,
+            "yaml_text": sf.yaml_text,
+            "description": sf.description,
+            "current_version": sf.current_version,
+            "validation_status": sf.validation_status,
+            "validation_errors": sf.validation_errors,
+            "updated_at": sf.updated_at,
+        }
+
+    @app.put("/api/internal/skill-files/{name}")
+    def save_skill_file_endpoint(
+        name: str, payload: Annotated[dict[str, Any], Body()]
+    ) -> dict[str, Any]:
+        from axiom.skills.skill_file_parser import SkillFileParseError
+        from axiom.skills.skill_file_store import save_skill_file
+
+        yaml_text = payload.get("yaml_text", "")
+        if not yaml_text:
+            raise HTTPException(status_code=400, detail="missing yaml_text in body")
+        with session_local() as session:
+            try:
+                result = save_skill_file(session, name=name, yaml_text=yaml_text)
+            except SkillFileParseError as exc:
+                # First-ever save of this name was invalid — nothing to promote.
+                return {
+                    "name": name,
+                    "version": 0,
+                    "validation_status": "invalid",
+                    "validation_errors": [str(exc)],
+                }
+        return {
+            "name": result.name,
+            "version": result.current_version,
+            "validation_status": result.validation_status,
+            "validation_errors": result.validation_errors,
+        }
+
+    @app.get("/api/internal/skill-files/{name}/versions")
+    def list_skill_file_versions_endpoint(name: str) -> dict[str, Any]:
+        from axiom.skills.skill_file_store import list_versions
+
+        with session_local() as session:
+            return {"versions": list_versions(session, name)}
+
+    @app.post("/api/internal/skill-files/{name}/run")
+    def run_skill_file_endpoint(
+        name: str, payload: Annotated[dict[str, Any], Body()]
+    ) -> dict[str, Any]:
+        from axiom.skills.skill_file_parser import (
+            SkillFileParseError,
+            parse_skill_file_yaml,
+        )
+        from axiom.skills.skill_file_runner import SkillFileRunner, run_to_dict
+        from axiom.skills.skill_file_store import get_skill_file
+
+        with session_local() as session:
+            sf_row = get_skill_file(session, name)
+        if sf_row is None:
+            raise HTTPException(status_code=404, detail=f"skill file not found: {name}")
+        if sf_row.validation_status != "valid":
+            raise HTTPException(
+                status_code=400,
+                detail="skill file is not valid; fix the YAML before running",
+            )
+        try:
+            skill_file = parse_skill_file_yaml(sf_row.yaml_text)
+        except SkillFileParseError as exc:
+            raise HTTPException(status_code=400, detail=f"parse error: {exc}") from exc
+
+        trigger = payload.get("trigger", {})
+        if not isinstance(trigger, dict):
+            raise HTTPException(
+                status_code=400, detail="trigger must be a JSON object"
+            )
+        runner = SkillFileRunner(session_factory=session_local)
+        result = runner.run(skill_file, trigger=trigger)
+        return run_to_dict(result)
 
     @app.get("/api/entities")
     def get_entities(type: str | None = None) -> list[dict[str, Any]]:  # noqa: A002

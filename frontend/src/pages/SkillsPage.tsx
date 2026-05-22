@@ -176,6 +176,14 @@ function dedupeProcesses(rows: ProcessEntity[]): ProcessEntity[] {
   return unique;
 }
 
+type SkillFileSummary = {
+  name: string;
+  description: string;
+  current_version: number;
+  validation_status: string;
+  updated_at: string;
+};
+
 export function SkillsPage() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [runs, setRuns] = useState<Record<string, SkillRun[]>>({});
@@ -203,6 +211,7 @@ export function SkillsPage() {
   const [registerLoading, setRegisterLoading] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [compileError, setCompileError] = useState<string | null>(null);
+  const [skillFiles, setSkillFiles] = useState<SkillFileSummary[]>([]);
 
   const mdPreview = useMemo(() => parseSkillMdPreview(skillMdContent), [skillMdContent]);
 
@@ -215,6 +224,18 @@ export function SkillsPage() {
 
   useEffect(() => {
     load().catch((err: unknown) => setError(err instanceof Error ? err.message : "Unable to load skills"));
+  }, []);
+
+  useEffect(() => {
+    // The SkillFiles list is supplementary to the primary skills table; defer
+    // it to a macrotask so it never interleaves with other mount-time loads.
+    const timer = setTimeout(() => {
+      fetch("/api/internal/skill-files")
+        .then((response) => (response.ok ? response.json() : { skill_files: [] }))
+        .then((data: { skill_files?: SkillFileSummary[] }) => setSkillFiles(data.skill_files ?? []))
+        .catch(() => setSkillFiles([]));
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   function upsertRun(run: SkillRun) {
@@ -416,6 +437,39 @@ export function SkillsPage() {
       <main className="agents-content">
         {error ? <EmptyState>Unable to load skills: {error}</EmptyState> : null}
         {toast ? <div className="agents-empty" role="status">{toast}</div> : null}
+        {skillFiles.length > 0 ? (
+          <section className="agents-panel">
+            <div className="agents-panel-head">
+              <h2>Workflow SkillFiles <span>{skillFiles.length}</span></h2>
+            </div>
+            <p className="mb-3 text-sm text-white/55">
+              Executable YAML workflows that codify how your company handles recurring
+              decisions — editable by the team, no engineer needed.
+            </p>
+            <div className="flex flex-col gap-2">
+              {skillFiles.map((file) => (
+                <a
+                  key={file.name}
+                  href={`/skills/${file.name}`}
+                  className="block rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 transition-colors hover:border-white/20 hover:bg-white/[0.06]"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-mono text-sm text-cyan-300">{file.name}</span>
+                    <span className="flex items-center gap-3 text-xs">
+                      <span className="text-white/40">v{file.current_version}</span>
+                      <span className={file.validation_status === "valid" ? "text-emerald-400" : "text-red-400"}>
+                        {file.validation_status === "valid" ? "✓ valid" : "⚠ invalid"}
+                      </span>
+                    </span>
+                  </div>
+                  {file.description ? (
+                    <p className="mt-1 text-sm text-white/65">{file.description}</p>
+                  ) : null}
+                </a>
+              ))}
+            </div>
+          </section>
+        ) : null}
         <section className="agents-panel">
           <div className="agents-panel-head">
             <h2>Skills <span>{filteredSkills.length}</span></h2>

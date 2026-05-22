@@ -397,3 +397,49 @@ Index("ix_edges_src_rel", Edge.source_id, Edge.relationship)
 Index("ix_edges_tgt_rel", Edge.target_id, Edge.relationship)
 Index("ix_entities_type_created", Entity.type, Entity.created_at)
 Index("ix_metrics_snapshots_snapshot_date_desc", MetricsSnapshot.snapshot_date.desc())
+
+
+class SkillFileRow(Base):
+    """An executable YAML workflow file (the SkillFile primitive).
+
+    Distinct from ``Skill`` (the LLM-call skill). ``yaml_text`` is the current
+    promoted source; ``current_version`` points at the latest valid version in
+    ``skill_file_versions``.
+    """
+
+    __tablename__ = "skill_files"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(256), nullable=False, unique=True, index=True)
+    yaml_text: Mapped[str] = mapped_column(String, nullable=False)
+    current_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class SkillFileVersionRow(Base):
+    """Append-only version history for a SkillFile. Invalid saves are recorded
+    here for audit but never promoted to ``skill_files.current_version``.
+    """
+
+    __tablename__ = "skill_file_versions"
+    __table_args__ = (
+        Index(
+            "ix_skill_file_versions_unique",
+            "skill_file_id",
+            "version",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    skill_file_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("skill_files.id"), nullable=False, index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    yaml_text: Mapped[str] = mapped_column(String, nullable=False)
+    saved_at: Mapped[str] = mapped_column(String, nullable=False)
+    saved_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    validation_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    validation_errors: Mapped[str | None] = mapped_column(String, nullable=True)

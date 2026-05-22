@@ -9,21 +9,24 @@ import { ConnectorLoadingIndicator } from "@/components/ConnectorLoadingIndicato
 import { ConnectorStatusBar } from "@/components/ConnectorStatusBar";
 import { EdgeLegend } from "@/components/EdgeLegend";
 import { EntityInspector } from "@/components/EntityInspector";
-import { PendingApprovalsBadge } from "@/components/PendingApprovalsBadge";
+// HIDDEN-V2: PendingApprovalsBadge removed for YC company-brain positioning. uncomment to restore.
+// import { PendingApprovalsBadge } from "@/components/PendingApprovalsBadge";
 import { QueryBar } from "@/components/QueryBar";
 import { StatusFooter } from "@/components/StatusFooter";
 import { BrainSocket } from "@/lib/websocket";
 import { AgentsPage } from "@/pages/AgentsPage";
 import { ActivityPage } from "@/pages/agents/ActivityPage";
-import { ApprovalsPage } from "@/pages/agents/ApprovalsPage";
-import { RuntimePage } from "@/pages/agents/RuntimePage";
-import { SchedulesPage } from "@/pages/agents/SchedulesPage";
-import { TriggersPage } from "@/pages/agents/TriggersPage";
+// HIDDEN-V2: schedules/triggers/runtime/approvals pages removed for YC company-brain positioning. uncomment to restore.
+// import { ApprovalsPage } from "@/pages/agents/ApprovalsPage";
+// import { RuntimePage } from "@/pages/agents/RuntimePage";
+// import { SchedulesPage } from "@/pages/agents/SchedulesPage";
+// import { TriggersPage } from "@/pages/agents/TriggersPage";
 import { ConnectorsPage } from "@/pages/ConnectorsPage";
 import { ExplorePage } from "@/pages/ExplorePage";
 import { InsightsPage } from "@/pages/InsightsPage";
 import { PassportsPage } from "@/pages/PassportsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { SkillFileDetailPage } from "@/pages/SkillFileDetailPage";
 import { SkillsPage } from "@/pages/SkillsPage";
 import { useBrainStore } from "@/state/brain.store";
 
@@ -42,11 +45,8 @@ const agentNavItems = [
   ["/insights", "Insights"],
   ["/agents", "Agents"],
   ["/skills", "Skills"],
-  ["/agents/schedules", "Schedules"],
-  ["/agents/triggers", "Triggers"],
-  ["/agents/runtime", "Runtime"],
+  // HIDDEN-V2: schedules/triggers/runtime/approvals removed for YC company-brain positioning. uncomment to restore.
   ["/agents/activity", "Activity"],
-  ["/agents/approvals", "Approvals"],
   ["/settings", "Settings"],
 ] as const;
 
@@ -57,12 +57,8 @@ function NavIcon({ label }: { label: string }) {
   if (label === "Skills") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 3 4 7v10l8 4 8-4V7l-8-4Zm0 8 8-4M12 11 4 7m8 4v10" /><path d="M8.5 13.5 12 15l3.5-1.5" /></svg>;
   if (label === "Explore") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="8"/><path d="m15 9-2 5-5 2 2-5 5-2Z"/></svg>;
   if (label === "Insights") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 19V8m5 11V5m5 14v-8m6 8H3"/></svg>;
-  if (label === "Governance") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m12 3 7 3v5c0 4.2-2.7 7.3-7 9-4.3-1.7-7-4.8-7-9V6l7-3Z"/></svg>;
-  if (label === "Schedules") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M7 3v4m10-4v4M5 7h14M5 7v13h14V7M8 11h3m2 0h3m-8 4h3m2 0h3" /></svg>;
-  if (label === "Triggers") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m13 2-8 12h6l-1 8 9-13h-6l1-7Z" /></svg>;
-  if (label === "Runtime") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 2v4m0 12v4M4.9 4.9l2.8 2.8m8.6 8.6 2.8 2.8M2 12h4m12 0h4M4.9 19.1l2.8-2.8m8.6-8.6 2.8-2.8" /><circle cx="12" cy="12" r="4" /></svg>;
+  // HIDDEN-V2: NavIcon branches for removed/absent labels (Governance/Schedules/Triggers/Runtime/Approvals) deleted; unmapped labels fall through to the default icon below.
   if (label === "Activity") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 12h4l2-6 4 12 2-6h4" /></svg>;
-  if (label === "Approvals") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 3 4 7v5c0 4 3 7 8 9 5-2 8-5 8-9V7l-8-4Z" /><path d="M9 12l2 2 4-5" /></svg>;
   return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="3.5"/><path d="m19 12 2-1-1-3-2-.3-.7-1.8 1.2-1.7-2.3-2.3-1.7 1.2-1.8-.7L12 1 9 2l-.3 2-1.8.7-1.7-1.2L2.9 5.8l1.2 1.7L3.4 9.3 1.5 9.6v3l1.9.3.7 1.8-1.2 1.7 2.3 2.3 1.7-1.2 1.8.7.3 2h3l.3-2 1.8-.7 1.7 1.2 2.3-2.3-1.2-1.7.7-1.8 2-.3Z"/></svg>;
 }
 
@@ -173,7 +169,7 @@ function StudioShell() {
           )}
           <div className="ml-auto mt-[-4px] flex items-center gap-2">
             <ConnectorLoadingIndicator />
-            <PendingApprovalsBadge />
+            {/* HIDDEN-V2: PendingApprovalsBadge removed for YC company-brain positioning. */}
             <div className="flex h-[38px] items-center gap-2 rounded-lg border border-[#1d3452] bg-[#071328] px-4 text-[16px] text-[#14e0a7]">
               <span className={`h-2.5 w-2.5 rounded-full ${connectionStatus === "live" ? "bg-[#16f0a9]" : "bg-[#5f728f]"}`} />
               LIVE
@@ -253,12 +249,10 @@ export function App() {
           <Route path="/settings/passports" element={<PassportsPage />} />
           <Route path="/settings/connectors" element={<ConnectorsPage />} />
           <Route path="/agents" element={<AgentsPage />} />
-          <Route path="/agents/schedules" element={<SchedulesPage />} />
-          <Route path="/agents/triggers" element={<TriggersPage />} />
-          <Route path="/agents/runtime" element={<RuntimePage />} />
+          {/* HIDDEN-V2: schedules/triggers/runtime/approvals routes removed for YC company-brain positioning. Direct hits fall through to the * redirect. uncomment to restore. */}
           <Route path="/agents/activity" element={<ActivityPage />} />
-          <Route path="/agents/approvals" element={<ApprovalsPage />} />
           <Route path="/skills" element={<SkillsPage />} />
+          <Route path="/skills/:name" element={<SkillFileDetailPage />} />
           <Route path="/explore/*" element={<ExplorePage />} />
           <Route path="/insights" element={<InsightsPage />} />
           <Route path="*" element={<Navigate to="/graph" replace />} />

@@ -1,0 +1,23 @@
+name: handle_refund_request
+description: How our company processes refund requests
+version: 1
+when_triggered_by:
+  - intent: refund
+    source: [slack, gmail, linear]
+steps:
+  - id: check_amount
+    type: if_then
+    condition: trigger.payload.amount > 500
+    then:
+      - id: require_vp_approval
+        type: require_approval
+        role: vp_support
+        timeout_seconds: 1800
+  - id: fetch_customer
+    type: fetch_entity
+    query: "customer:{trigger.payload.customer_id}"
+    bind_to: customer
+  - id: log_decision
+    type: log_decision
+    cluster: billing
+    note: "Refund approved for {customer.name}: ${trigger.payload.amount}"
