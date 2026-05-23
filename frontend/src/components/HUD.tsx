@@ -60,7 +60,7 @@ export function HUD() {
     ["Entities", entities.size],
     ["Edges", edges.size],
     ["Agents", 0],
-    ["Receipts", 0],
+    // HIDDEN-V2: "Receipts" row removed for YC company-brain positioning.
     ["Low-confidence", "--"],
     ["Cross-cluster", crossCluster],
   ] as const;

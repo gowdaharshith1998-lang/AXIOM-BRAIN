@@ -4,12 +4,13 @@ import { AskPanel } from "@/components/AskPanel";
 
 type QueryMode = "search" | "ask";
 
+// HIDDEN-V2: quick prompts reframed for YC company-brain positioning (dropped policy / trace-decision phrasing).
 const prompts = [
-  "What impacted Q2 revenue?",
-  "Show risks to launch",
-  "Which policy applies?",
-  "Trace decision D-4821",
-  "Summarize incident 1021",
+  "What's blocking Q3 launch?",
+  "Who owns the billing pipeline?",
+  "Summarize last week's PRs",
+  "What's the latest on Acme Corp?",
+  "Show me incidents from this week",
 ];
 
 export function QueryBar() {

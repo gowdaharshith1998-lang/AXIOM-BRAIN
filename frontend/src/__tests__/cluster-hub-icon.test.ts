@@ -15,7 +15,8 @@ describe("ClusterHubIcon", () => {
     expect(sprite.userData.kind).toBe("cluster-hub-icon");
   });
 
-  it("maps growth to an ASCII trend label", () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] maps growth to an ASCII trend label", () => {
     expect(iconTextForCluster("governance")).toBe("GV");
   });
 });

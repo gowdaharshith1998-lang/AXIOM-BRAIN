@@ -1,7 +1,7 @@
+// HIDDEN-V2: "Governance" legend chip removed for YC company-brain positioning. uncomment to restore.
 const rows = [
   ["#00E5D8", "Knowledge"],
   ["#2B7FFF", "Execution"],
-  ["#8B5CF6", "Governance"],
   ["#4DD3B8", "External"],
 ] as const;
 

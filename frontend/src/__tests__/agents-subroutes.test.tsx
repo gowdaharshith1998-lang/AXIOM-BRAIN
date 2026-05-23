@@ -108,7 +108,8 @@ describe("Agents sub-routes", () => {
     expect(await screen.findByText("No active runtime signals yet.")).toBeInTheDocument();
   });
 
-  it("activity_page_renders_receipt_log", async () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] activity_page_renders_receipt_log", async () => {
     agentsApi.listRecentReceipts.mockResolvedValue([
       { receipt_id: "r1", action_id: "act_1", agent_name: "researcher", intent: "read", target_entity_id: "e1", decision: "allow", policy_id: "AEGIS-1", created_at: "2026-05-10T10:15:00Z" },
     ]);
@@ -118,7 +119,8 @@ describe("Agents sub-routes", () => {
     expect(screen.getByText("allow")).toBeInTheDocument();
   });
 
-  it("activity_page_groups_by_hour", async () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] activity_page_groups_by_hour", async () => {
     agentsApi.listRecentReceipts.mockResolvedValue([
       { receipt_id: "r1", action_id: "act_1", agent_name: "a", intent: "read", target_entity_id: "e1", decision: "allow", policy_id: "AEGIS-1", created_at: "2026-05-10T10:15:00Z" },
       { receipt_id: "r2", action_id: "act_2", agent_name: "b", intent: "write", target_entity_id: "e2", decision: "deny", policy_id: "AEGIS-2", created_at: "2026-05-10T10:45:00Z" },

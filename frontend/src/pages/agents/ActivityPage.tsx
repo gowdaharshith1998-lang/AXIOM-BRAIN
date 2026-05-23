@@ -1,74 +1,92 @@
-import { useEffect, useMemo, useState } from "react";
+// HIDDEN-V2: replaced the watchdog-receipts feed with a unified runtime feed
+// (skill runs + MCP tool calls + connector syncs) for YC company-brain positioning.
+import { useEffect, useState } from "react";
 
-import { listRecentReceipts, type ReceiptRow } from "@/lib/agentsClient";
-import { AgentsSubPageShell, EmptyState, formatTime, hourBucket } from "@/pages/agents/shared";
+type ActivityItem = {
+  kind: "skill_run" | "mcp_tool_call" | "connector_sync";
+  id: string;
+  title: string;
+  status: string;
+  agent_name?: string;
+  duration_ms?: number;
+  at: string | null;
+};
 
-function countByDecision(receipts: ReceiptRow[]): Array<[string, number]> {
-  const counts = new Map<string, number>();
-  for (const receipt of receipts) counts.set(receipt.decision, (counts.get(receipt.decision) ?? 0) + 1);
-  return Array.from(counts.entries()).sort(([left], [right]) => left.localeCompare(right));
-}
+const KIND_LABEL: Record<ActivityItem["kind"], string> = {
+  skill_run: "Skill",
+  mcp_tool_call: "Tool",
+  connector_sync: "Connector",
+};
 
-function groupedByHour(receipts: ReceiptRow[]): Array<[string, ReceiptRow[]]> {
-  const groups = new Map<string, ReceiptRow[]>();
-  for (const receipt of receipts) {
-    const key = hourBucket(receipt.created_at ?? receipt.timestamp);
-    groups.set(key, [...(groups.get(key) ?? []), receipt]);
-  }
-  return Array.from(groups.entries()).sort(([left], [right]) => right.localeCompare(left));
-}
+const KIND_COLOR: Record<ActivityItem["kind"], string> = {
+  skill_run: "text-cyan-400 border-cyan-500/30 bg-cyan-500/10",
+  mcp_tool_call: "text-blue-400 border-blue-500/30 bg-blue-500/10",
+  connector_sync: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10",
+};
 
 export function ActivityPage() {
-  const [receipts, setReceipts] = useState<ReceiptRow[]>([]);
+  const [items, setItems] = useState<ActivityItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const decisionCounts = useMemo(() => countByDecision(receipts), [receipts]);
-  const hourGroups = useMemo(() => groupedByHour(receipts), [receipts]);
 
   useEffect(() => {
-    listRecentReceipts(50)
-      .then(setReceipts)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Unable to load activity"));
+    fetch("/api/internal/agents/activity?limit=100")
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        setItems(data.items ?? []);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(String(err));
+        setLoading(false);
+      });
   }, []);
 
   return (
-    <AgentsSubPageShell title="Activity" subtitle="Recent receipt and agent action log from backend receipts.">
-      {error ? <EmptyState>Unable to load activity: {error}</EmptyState> : null}
-      <section className="agents-panel">
-        <div className="agents-panel-head">
-          <h2>Decision Distribution <span>{receipts.length}</span></h2>
-        </div>
-        {receipts.length ? (
-          <div className="agents-drawer-summary">
-            {decisionCounts.map(([decision, count]) => <span key={decision}>{decision}: {count}</span>)}
+    <div className="p-6">
+      <h1 className="text-2xl font-semibold tracking-tight">Activity</h1>
+      <p className="mt-1 text-sm text-white/60">
+        Live runtime feed: skill runs, MCP tool calls, and connector syncs.
+      </p>
+      <div className="mt-6 space-y-2">
+        {loading && <div className="text-white/50">Loading…</div>}
+        {error && (
+          <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+            Failed to load activity: {error}
           </div>
-        ) : <EmptyState>No recent receipt activity.</EmptyState>}
-      </section>
-      <section className="agents-panel">
-        <div className="agents-panel-head">
-          <h2>Receipt Log</h2>
-        </div>
-        {hourGroups.map(([hour, rows]) => (
-          <div className="agents-table" key={hour}>
-            <div className="agents-panel-head">
-              <h2>{hour} <span>{rows.length} {rows.length === 1 ? "receipt" : "receipts"}</span></h2>
-            </div>
-            <div className="agents-table-head">
-              <span>Action</span>
-              <span>Agent</span>
-              <span>Decision</span>
-              <span>Time</span>
-            </div>
-            {rows.map((receipt) => (
-              <div className="agents-table-row" key={receipt.receipt_id}>
-                <span>{receipt.action_id}</span>
-                <span>{receipt.agent_name}</span>
-                <span>{receipt.decision}</span>
-                <span>{formatTime(receipt.created_at ?? receipt.timestamp)}</span>
+        )}
+        {!loading && !error && items.length === 0 && (
+          <div className="rounded-md border border-white/10 bg-white/5 p-4 text-sm text-white/60">
+            No activity yet. Connect a source or run a skill to see the brain working.
+          </div>
+        )}
+        {items.map((item) => (
+          <div
+            key={`${item.kind}:${item.id}`}
+            className="flex items-center gap-4 rounded-md border border-white/10 bg-white/[0.02] p-3"
+          >
+            <span
+              className={`inline-flex h-6 items-center rounded border px-2 font-mono text-xs ${KIND_COLOR[item.kind]}`}
+            >
+              {KIND_LABEL[item.kind]}
+            </span>
+            <div className="flex-1">
+              <div className="text-sm text-white/90">{item.title}</div>
+              <div className="text-xs text-white/50">
+                {item.agent_name ? `${item.agent_name} · ` : ""}
+                {item.status}
+                {item.duration_ms ? ` · ${item.duration_ms}ms` : ""}
               </div>
-            ))}
+            </div>
+            <div className="font-mono text-xs text-white/40">
+              {item.at ? new Date(item.at).toLocaleString() : "—"}
+            </div>
           </div>
         ))}
-      </section>
-    </AgentsSubPageShell>
+      </div>
+    </div>
   );
 }

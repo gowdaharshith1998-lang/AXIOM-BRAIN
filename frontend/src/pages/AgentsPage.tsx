@@ -193,7 +193,7 @@ export function AgentsPage() {
       <header className="agents-topbar">
         <div className="agents-title-block">
           <h1>Agents</h1>
-          <p>Registry, passports, receipts, and skill activity from live backend records.</p>
+          <p>Registry and runtime activity of agents acting on the brain.</p>
         </div>
         <button type="button" className="agents-primary" onClick={() => { setRegisterError(null); setModalOpen(true); }}>
           <Icon name="plus" /> Register Agent
@@ -214,7 +214,7 @@ export function AgentsPage() {
               <span>Name</span>
               <span>Class</span>
               <span>Owner</span>
-              <span>Passport</span>
+              {/* HIDDEN-V2: "Passport" column removed for YC company-brain positioning. */}
               <span>Total Actions</span>
               <span>Last Seen</span>
               <span>Actions</span>
@@ -224,7 +224,7 @@ export function AgentsPage() {
                 <span>{agent.agent_name}</span>
                 <span>{agent.agent_class}</span>
                 <span>{agent.owner_email ?? "Not recorded"}</span>
-                <span><Pill tone={agent.passport_status === "active" ? "green" : "amber"}>{agent.passport_status}</Pill></span>
+                {/* HIDDEN-V2: Passport status cell removed for YC company-brain positioning. */}
                 <span>{agent.total_actions.toLocaleString()}</span>
                 <span>{formatTime(agent.last_seen)}</span>
                 <span><button type="button" className="agents-link-button" onClick={() => setSelected(agent)}>Open</button></span>
@@ -271,6 +271,7 @@ export function AgentsPage() {
           <button type="button" className="agents-secondary" disabled={!selected.passport_id} onClick={revokeSelectedPassport}>
             <Icon name="shield" /> Revoke Passport
           </button>
+          {/* HIDDEN-V2: "Recent Receipts" panel removed for YC company-brain positioning. uncomment to restore.
           <h3>Recent Receipts</h3>
           {receipts.length ? receipts.slice(0, 8).map((receipt) => (
             <div className="agents-drawer-row" key={receipt.receipt_id}>
@@ -279,6 +280,7 @@ export function AgentsPage() {
               <b>{receipt.decision}</b>
             </div>
           )) : <EmptyState>No recent receipts for this agent.</EmptyState>}
+          */}
           <h3>Recent Skills Run</h3>
           {selectedRuns.length ? selectedRuns.map((run) => (
             <div className="agents-drawer-row" key={run.id}>

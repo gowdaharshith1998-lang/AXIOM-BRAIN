@@ -5,7 +5,8 @@ import { superClusterIdForEntity } from "@/lib/cluster-reframe";
 import type { BrainEvent } from "@/lib/websocket";
 import { useBrainStore, type Edge, type Entity } from "@/state/brain.store";
 
-const tabs = ["Overview", "Connections", "Lineage", "Activity"];
+// HIDDEN-V2: "Activity" (receipt feed) tab removed for YC company-brain positioning. uncomment to restore.
+const tabs = ["Overview", "Connections", "Lineage"];
 
 type InspectorReceipt = {
   id?: string;
@@ -310,6 +311,7 @@ function EntityView({
                 </div>
               </div>
             </Section>
+            {/* HIDDEN-V2: "Trust & Governance" section (Policy Status, Signed Receipt, Merkle Root, Data Source, Active Policies) removed for YC company-brain positioning. Data-fetching hooks above are kept intact. uncomment to restore.
             <Section title="Trust & Governance">
               <Fact label="Policy Status" value={policyStatus} />
               <Fact label="Signed Receipt" value={signatureStatus} />
@@ -340,6 +342,7 @@ function EntityView({
                 </div>
               </div>
             </Section>
+            */}
             <Section title="Connected Entities">
               <div className="space-y-2">
                 {connected.map((item) => (

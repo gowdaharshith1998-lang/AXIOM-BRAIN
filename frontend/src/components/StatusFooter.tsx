@@ -1,6 +1,7 @@
 import { useBrainStore } from "@/state/brain.store";
 
-const tabs = ["Graph", "Flow", "Governance", "Timeline", "Search", "Receipts", "Agent Console"];
+// HIDDEN-V2: "Governance" + "Receipts" tabs removed for YC company-brain positioning. uncomment to restore.
+const tabs = ["Graph", "Flow", "Timeline", "Search", "Agent Console"];
 
 export function StatusFooter() {
   const fps = useBrainStore((s) => s.fps);
@@ -11,10 +12,8 @@ export function StatusFooter() {
   const activate = (tab: string) => {
     if (tab === "Graph") navigate("/graph");
     if (tab === "Flow") navigate("/explore");
-    if (tab === "Governance") navigate("/governance");
     if (tab === "Timeline") navigate("/insights?tab=trends");
     if (tab === "Search") window.dispatchEvent(new Event("axiom:open-palette"));
-    if (tab === "Receipts") navigate("/governance?tab=receipts");
     if (tab === "Agent Console") navigate("/agents");
   };
   return (

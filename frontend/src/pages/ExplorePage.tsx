@@ -35,7 +35,7 @@ const sections: Array<{ id: Section; label: string }> = [
   { id: "tickets", label: "Tickets" },
   { id: "vendors", label: "Vendors" },
   { id: "customers", label: "Customers" },
-  { id: "policies", label: "Policies" },
+  // HIDDEN-V2: "Policies" category chip removed for YC company-brain positioning.
 ];
 
 async function request<T>(url: string): Promise<T> {
@@ -421,7 +421,7 @@ function DetailPanel({
 
 function SuggestedSearches({ section, onPick }: { section: Section; onPick: (value: string) => void }) {
   const items = section === "all"
-    ? ["What decisions affected billing?", "Who owns payroll integration?", "Show open security incidents", "Which systems depend on Stripe?", "What policies govern data retention?"]
+    ? ["What decisions affected billing?", "Who owns payroll integration?", "Show open security incidents", "Which systems depend on Stripe?"]
     : [`Show related ${sections.find((item) => item.id === section)?.label.toLowerCase()}`, "Find stale records", "Show high-confidence entities", "List missing owners", "Trace dependencies"];
   return (
     <section className="explore-suggestions">

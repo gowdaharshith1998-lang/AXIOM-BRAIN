@@ -7,7 +7,8 @@ import { useBrainStore } from "@/state/brain.store";
 describe("HUD", () => {
   afterEach(() => cleanup());
 
-  it("renders six stats", () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] renders six stats", () => {
     useBrainStore.setState({
       entities: new Map([
         [

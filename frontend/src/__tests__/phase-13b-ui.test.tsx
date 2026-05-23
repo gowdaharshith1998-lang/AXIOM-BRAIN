@@ -440,7 +440,8 @@ describe("Phase 13.B UI", () => {
     await waitFor(() => expect(skillsApi.registerSkill).toHaveBeenCalledWith(expect.objectContaining({ name: "extract_company" })));
   });
 
-  it("agent drawer shows recent receipts and can revoke passport", async () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] agent drawer shows recent receipts and can revoke passport", async () => {
     render(<AgentsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Open" }));
     expect(await screen.findByText("advise")).toBeInTheDocument();

@@ -4022,7 +4022,8 @@ body {
 
 .agents-registry-table .agents-table-head,
 .agents-registry-table .agents-table-row {
-  grid-template-columns: 1fr .8fr 1.2fr .8fr .7fr 1fr .55fr;
+  /* HIDDEN-V2: Passport column removed for YC company-brain positioning (7 tracks -> 6). */
+  grid-template-columns: 1fr .8fr 1.2fr .7fr 1fr .55fr;
 }
 
 .skills-table .agents-table-head,

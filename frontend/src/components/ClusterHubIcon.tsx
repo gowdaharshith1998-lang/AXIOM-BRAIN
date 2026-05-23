@@ -6,11 +6,12 @@ const ICONS: Record<ClusterId, string> = {
   company_knowledge: "CK",
   execution_context: "EX",
   customers: "CU",
-  policies: "PO",
-  receipts: "RC",
+  // HIDDEN-V2: PO/RC/GV badge codes reframed for YC company-brain positioning; cluster_id keys unchanged.
+  policies: "KN",
+  receipts: "··",
   agents: "AG",
   incidents: "IN",
-  governance: "GV",
+  governance: "AT",
   people_teams: "::",
   billing: "$",
 };

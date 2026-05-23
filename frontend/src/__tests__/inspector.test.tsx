@@ -96,42 +96,49 @@ describe("inspector metadata", () => {
     expect(prettyMetadata({ nested: { id: "c1" } })).toBe('{\n  "nested": {\n    "id": "c1"\n  }\n}');
   });
 
-  it("renders selected entity overview", () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] renders selected entity overview", () => {
     renderSelectedInspector();
     expect(screen.getAllByText((content) => content.includes("e1")).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Overview").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Trust & Governance")).toBeInTheDocument();
   });
 
-  it("inspector_merkle_root_renders_real_receipt_hash", async () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] inspector_merkle_root_renders_real_receipt_hash", async () => {
     renderSelectedInspector();
     expect(await screen.findByText("abc123def4567890")).toBeInTheDocument();
   });
 
-  it("inspector_merkle_root_shows_empty_state_no_receipts", async () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] inspector_merkle_root_shows_empty_state_no_receipts", async () => {
     installInspectorFetch({ "/api/internal/receipts?target_entity_id=e1&limit=20": { receipts: [], total_count: 0, merkle_head: null } });
     renderSelectedInspector();
     await waitFor(() => expect(screen.getAllByText("No receipts yet.").length).toBeGreaterThanOrEqual(1));
   });
 
-  it("inspector_policy_status_renders_last_decision", async () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] inspector_policy_status_renders_last_decision", async () => {
     renderSelectedInspector();
     expect(await screen.findByText("Deny")).toBeInTheDocument();
   });
 
-  it("inspector_policy_status_empty_state", async () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] inspector_policy_status_empty_state", async () => {
     installInspectorFetch({ "/api/internal/receipts?target_entity_id=e1&limit=20": { receipts: [], total_count: 0, merkle_head: null } });
     renderSelectedInspector();
     expect(await screen.findByText("No policy decisions yet.")).toBeInTheDocument();
   });
 
-  it("inspector_signed_receipt_calls_verify_endpoint", async () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] inspector_signed_receipt_calls_verify_endpoint", async () => {
     renderSelectedInspector();
     expect(await screen.findByText("verified")).toBeInTheDocument();
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/internal/receipts/receipt_1"));
   });
 
-  it("inspector_data_sources_renders_real_source_name", async () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] inspector_data_sources_renders_real_source_name", async () => {
     renderSelectedInspector();
     expect(await screen.findByText((content) => content.includes("Linear"))).toBeInTheDocument();
   });
@@ -150,14 +157,16 @@ describe("inspector metadata", () => {
     expect(screen.getByText("edge_in")).toBeInTheDocument();
   });
 
-  it("inspector_activity_tab_renders_receipt_list", async () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] inspector_activity_tab_renders_receipt_list", async () => {
     renderSelectedInspector();
     fireEvent.click(screen.getByRole("button", { name: "Activity" }));
     expect(await screen.findByText("act_1")).toBeInTheDocument();
     expect(screen.getByText((content) => content.includes("watchdog"))).toBeInTheDocument();
   });
 
-  it("entity_inspector_active_policies_section_renders", async () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] entity_inspector_active_policies_section_renders", async () => {
     installInspectorFetch({
       "/api/internal/policies/active?entity_id=e1": {
         rules: [
@@ -176,7 +185,8 @@ describe("inspector metadata", () => {
     expect(screen.getByText("watchdog.R1.billing_change_without_decision")).toBeInTheDocument();
   });
 
-  it("entity_inspector_active_policies_updates_on_watchdog_alert", async () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] entity_inspector_active_policies_updates_on_watchdog_alert", async () => {
     const activePayload = { rules: [] as Array<Record<string, unknown>> };
     installInspectorFetch({ "/api/internal/policies/active?entity_id=e1": activePayload });
     renderSelectedInspector();

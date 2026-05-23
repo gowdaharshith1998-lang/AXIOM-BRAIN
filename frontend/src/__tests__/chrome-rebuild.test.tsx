@@ -40,7 +40,8 @@ describe("phase 5.12 visual chrome", () => {
     expect(screen.getByText("Initializing")).toBeInTheDocument();
   });
 
-  it("query prompt chips dispatch traversal events", () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] query prompt chips dispatch traversal events", () => {
     const spy = vi.fn();
     const searchSpy = vi.fn();
     window.addEventListener("axiom:traverse-clusters", spy);
@@ -89,7 +90,8 @@ describe("phase 5.12 visual chrome", () => {
     window.removeEventListener("axiom:palette-query", searchSpy);
   });
 
-  it("renders the edge legend categories", () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] renders the edge legend categories", () => {
     render(<EdgeLegend />);
     expect(screen.getByText("Knowledge")).toBeInTheDocument();
     expect(screen.getByText("Execution")).toBeInTheDocument();
@@ -105,7 +107,8 @@ describe("phase 5.12 visual chrome", () => {
     expect(screen.getByText("Graph")).toHaveClass("text-[#00E5D8]");
   });
 
-  it("slides entity inspector open for a selected entity", () => {
+  // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
+  it.skip("[HIDDEN-V2] slides entity inspector open for a selected entity", () => {
     useBrainStore.setState({
       selectedId: "a",
       entities: new Map([["a", { id: "a", type: "policy", data: { title: "Data Policy" }, source_id: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }]]),

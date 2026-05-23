@@ -34,8 +34,9 @@ export const CLUSTER_LABELS: Record<ClusterId, string> = {
   company_knowledge: "Company Knowledge",
   execution_context: "Execution Context",
   customers: "Customers",
-  policies: "Policies",
-  receipts: "Receipts",
+  // HIDDEN-V2: "Policies"->"Knowledge"; "Receipts" merged into "Audit Trail" for YC company-brain positioning. cluster_id keys unchanged.
+  policies: "Knowledge",
+  receipts: "Audit Trail",
   agents: "Agents",
   incidents: "Incidents",
   governance: "Audit Trail",

@@ -537,14 +537,7 @@ function TrendsTab({ data }: { data: RealData }) {
         points: data.charts.edgeDaily,
         numericValue: data.edges.length,
       },
-      {
-        title: "Real Agent Actions",
-        value: formatNumber(data.agentActions.length),
-        detail: "Demo actions excluded",
-        accent: "purple",
-        points: data.charts.actionDaily,
-        numericValue: data.agentActions.length,
-      },
+      // HIDDEN-V2: "Real Agent Actions" trends card removed for YC company-brain positioning.
       {
         title: "Most Connected Entity",
         value: topDegree ? titleForEntity(topDegree.entity) : "N/A",
@@ -561,14 +554,7 @@ function TrendsTab({ data }: { data: RealData }) {
         numericValue: activeAgents,
         compactDetail: true,
       },
-      {
-        title: "Real Receipts",
-        value: formatNumber(data.receipts.length),
-        detail: "Demo receipts excluded",
-        accent: "green",
-        points: data.charts.receiptDaily,
-        numericValue: data.receipts.length,
-      },
+      // HIDDEN-V2: "Real Receipts" trends card removed for YC company-brain positioning.
       {
         title: "Real Insights",
         value: formatNumber(data.insights.length),
@@ -577,14 +563,7 @@ function TrendsTab({ data }: { data: RealData }) {
         points: data.charts.insightDaily,
         numericValue: data.insights.length,
       },
-      {
-        title: "Success Rate",
-        value: formatPercent(receiptSuccessRate(data.receipts), 1),
-        detail: "From real receipts",
-        accent: "purple",
-        numericValue: receiptSuccessRate(data.receipts) ?? 0,
-        compactDetail: true,
-      },
+      // HIDDEN-V2: "Success Rate" (receipt-derived) trends card removed for YC company-brain positioning.
     ],
     [activeAgents, data, topDegree],
   );
@@ -660,9 +639,8 @@ function TrendsTab({ data }: { data: RealData }) {
           <div className="ins-legend">
             <span className="ins-blue">Entities: {formatNumber(data.entities.length)}</span>
             <span className="ins-cyan">Relationships: {formatNumber(data.edges.length)}</span>
-            <span className="ins-purple">Real agent actions: {formatNumber(data.agentActions.length)}</span>
+            {/* HIDDEN-V2: "Real agent actions" + "Real receipts" legend entries removed for YC company-brain positioning. */}
             <span className="ins-amber">Real insights: {formatNumber(data.insights.length)}</span>
-            <span className="ins-green">Real receipts: {formatNumber(data.receipts.length)}</span>
           </div>
         </div>
       </Panel>
@@ -686,7 +664,7 @@ function RiskTab({ data }: { data: RealData }) {
       <div className="ins-grid ins-risk-kpis">
         <KpiCard title="Derived Risk Exposure" value={formatPercent(riskExposure, 1)} detail="Computed from real risk signals only" icon="shield" accent="red" points={data.charts.insightDaily} iconBackground />
         <KpiCard title="Critical Insights" value={formatNumber(criticalInsights.length)} detail="Non-demo critical insight events" icon="warning" accent="red" points={data.charts.insightDaily} iconBackground />
-        <KpiCard title="Denied Decisions" value={formatNumber(deniedReceipts.length + deniedActions.length)} detail="Real receipts and actions" icon="policy" accent="amber" points={data.charts.receiptDaily} iconBackground />
+        {/* HIDDEN-V2: "Denied Decisions" KPI card removed for YC company-brain positioning. */}
         <KpiCard title="Low-Confidence Entities" value={formatNumber(lowConfidence.length)} detail="Composite importance below 0.4" icon="target" accent="amber" points={data.charts.entityDaily} iconBackground />
       </div>
 
@@ -732,6 +710,7 @@ function RiskTab({ data }: { data: RealData }) {
           <Panel title="Real Critical / Warning Insights" className="ins-risk-panel">
             {data.insights.length ? <InsightRows insights={data.insights} /> : <EmptyState className="ins-risk-empty">No real insight risks.</EmptyState>}
           </Panel>
+          {/* HIDDEN-V2: "Denied Policy Decisions" panel removed for YC company-brain positioning. uncomment to restore.
           <Panel title="Denied Policy Decisions" className="ins-risk-panel">
             {deniedReceipts.length || deniedActions.length ? (
               <div className="ins-compact-rows ins-risk-compact-rows">
@@ -742,6 +721,7 @@ function RiskTab({ data }: { data: RealData }) {
               <EmptyState className="ins-risk-empty">No real denied decisions.</EmptyState>
             )}
           </Panel>
+          */}
         </div>
       </div>
 
@@ -856,7 +836,7 @@ function AiImpactTab({ data }: { data: RealData }) {
       <div className="ins-grid ins-impact-kpis">
         <KpiCard title="Time Saved" value="N/A" detail="No real time-saved API exists" icon="bolt" accent="blue" />
         <KpiCard title="Decision Cycle Reduction" value="N/A" detail="No before/after timing data exists" icon="target" accent="green" />
-        <KpiCard title="Execution Success Rate" value={formatPercent(successRate, 1)} detail="Allowed real receipts / all real receipts" icon="shield" accent="purple" points={data.charts.receiptDaily} />
+        {/* HIDDEN-V2: "Execution Success Rate" (receipt-derived) KPI card removed for YC company-brain positioning. */}
         <KpiCard title="Business Value / ROI" value="N/A" detail="No real ROI API exists" icon="target" accent="amber" />
       </div>
       <div className="ins-grid ins-impact-main">
@@ -887,7 +867,7 @@ function AiImpactTab({ data }: { data: RealData }) {
       <section className="ins-impact-banner">
         <Icon name="brain" />
         <div><strong>Real data only</strong><span>{formatNumber(data.entities.length)} entities</span><span>{formatNumber(data.edges.length)} relationships</span><span>{formatNumber(toolCalls)} MCP calls</span><span>{formatNumber(data.insights.length)} real insights</span></div>
-        <b>{formatPercent(successRate, 1)} <small>receipt success rate</small></b>
+        {/* HIDDEN-V2: "receipt success rate" stat removed for YC company-brain positioning. */}
       </section>
     </>
   );
