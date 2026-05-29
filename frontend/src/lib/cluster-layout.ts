@@ -39,7 +39,7 @@ export const CLUSTER_LABELS: Record<ClusterId, string> = {
   receipts: "Audit Trail",
   agents: "Agents",
   incidents: "Incidents",
-  governance: "Audit Trail",
+  governance: "Governance",
   people_teams: "People & Teams",
   billing: "Billing",
 };

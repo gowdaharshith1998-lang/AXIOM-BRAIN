@@ -62,12 +62,13 @@ function installInspectorFetch(overrides: Record<string, unknown> = {}) {
   );
 }
 
-function renderSelectedInspector(data: Record<string, unknown> = {}) {
+  function renderSelectedInspector(data: Record<string, unknown> = {}) {
   useBrainStore.setState({
     entities: new Map([["e1", { ...entity, data: { title: "A", ...data } }]]),
     edges: new Map(),
     selectedId: "e1",
     selectedClusterId: null,
+    datasetHasLineage: true,
   });
   return render(<EntityInspector />);
 }
@@ -75,7 +76,7 @@ function renderSelectedInspector(data: Record<string, unknown> = {}) {
 describe("inspector metadata", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    useBrainStore.setState({ entities: new Map(), edges: new Map(), selectedId: null, selectedClusterId: null });
+    useBrainStore.setState({ entities: new Map(), edges: new Map(), selectedId: null, selectedClusterId: null, datasetHasLineage: false });
     installInspectorFetch();
   });
 

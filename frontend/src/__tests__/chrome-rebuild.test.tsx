@@ -1,7 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { BrainHealthCard } from "@/components/BrainHealthCard";
 import { EdgeLegend } from "@/components/EdgeLegend";
 import { EntityInspector } from "@/components/EntityInspector";
 import { NavRail } from "@/components/NavRail";
@@ -24,21 +23,8 @@ describe("phase 5.12 visual chrome", () => {
     expect(screen.getByText("LIVE")).toBeInTheDocument();
   });
 
-  it("renders brain health card rows from store-backed metrics", () => {
-    useBrainStore.setState({
-      entities: new Map([["a", { id: "a", type: "document", data: { composite_importance: 0.9 }, source_id: null, created_at: "t", updated_at: "t" }]]),
-      edges: new Map([["e", { id: "e", source_id: "a", target_id: "b", relationship: "mentions", data: {}, created_at: "t" }]]),
-      clusterHealth: {},
-    });
-    render(<BrainHealthCard />);
-    expect(screen.getByText("Brain Health")).toBeInTheDocument();
-    expect(screen.getByText("Entities")).toBeInTheDocument();
-    expect(screen.getByText("Relationships")).toBeInTheDocument();
-    expect(screen.getByText("Classified")).toBeInTheDocument();
-    expect(screen.getByText("Health")).toBeInTheDocument();
-    expect(screen.queryByText("2.48M")).not.toBeInTheDocument();
-    expect(screen.getByText("Initializing")).toBeInTheDocument();
-  });
+  // HIDDEN-V2: BrainHealthCard removed — health overlay no longer shown on graph home.
+  it.skip("[HIDDEN-V2] renders brain health card rows from store-backed metrics", () => {});
 
   // HIDDEN-V2: asserts governance UI removed for YC company-brain positioning. unskip when re-surfacing.
   it.skip("[HIDDEN-V2] query prompt chips dispatch traversal events", () => {

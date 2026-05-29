@@ -1,13 +1,15 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
+import { integrationPath } from "@/lib/source-vendor";
 import {
   CONNECTOR_VENDORS,
   useConnectorsStore,
   type ConnectorStatus,
 } from "@/state/connectors.store";
 
-function formatLastSync(value: string | null | undefined): string {
-  if (!value) return "never";
+function formatLastSync(value: string | null | undefined): string | null {
+  if (!value) return null;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   const diffMs = Date.now() - parsed.getTime();
@@ -18,26 +20,50 @@ function formatLastSync(value: string | null | undefined): string {
 }
 
 function ConnectorChip({ row }: { row: ConnectorStatus | undefined }) {
-  const label = CONNECTOR_VENDORS.find((v) => v.id === row?.vendor)?.label ?? row?.vendor ?? "—";
+  const vendor = CONNECTOR_VENDORS.find((v) => v.id === row?.vendor);
+  const label = vendor?.label ?? row?.vendor ?? "—";
   const connected = row?.status === "connected";
+  const lastSync = formatLastSync(row?.last_sync_at);
+  const needsConnect = !lastSync;
+  const vendorId = vendor?.id ?? row?.vendor;
+
+  const chipClass = needsConnect
+    ? "border-[#1a2f4a]/70 bg-[#06101f]/40 text-[#8ba8cb]"
+    : "border-[#1a2f4a] bg-[#06101f]/80 text-[#dce8ff]";
+
+  const content = (
+    <>
+      <span
+        className={`h-2 w-2 shrink-0 rounded-full ${connected && lastSync ? "bg-[#16f0a9] shadow-[0_0_8px_#16f0a9]" : "bg-[#5f728f]"}`}
+        aria-hidden
+      />
+      <span className={`truncate text-[11px] font-medium ${needsConnect ? "text-[#8ba8cb]" : "text-[#dce8ff]"}`}>{label}</span>
+      {lastSync ? <span className="shrink-0 text-[10px] text-[#7fa2c8]">{lastSync}</span> : null}
+      {needsConnect && vendorId ? (
+        <span className="shrink-0 text-[10px] text-[#7fa2c8]">Connect</span>
+      ) : null}
+    </>
+  );
+
+  if (needsConnect && vendorId) {
+    return (
+      <Link
+        to={integrationPath(vendorId as (typeof CONNECTOR_VENDORS)[number]["id"])}
+        className={`flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-1 transition hover:border-[#2f8cff]/60 hover:bg-[#0b1a2e] ${chipClass}`}
+        title={`Connect ${label}`}
+        aria-label={`Connect ${label}`}
+      >
+        {content}
+      </Link>
+    );
+  }
 
   return (
     <div
-      className="flex min-w-0 items-center gap-2 rounded-md border border-[#1a2f4a] bg-[#06101f]/80 px-2.5 py-1"
-      title={
-        connected
-          ? `${label}: last sync ${formatLastSync(row?.last_sync_at)}`
-          : `${label}: disconnected`
-      }
+      className={`flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-1 ${chipClass}`}
+      title={connected ? `${label}: last sync ${lastSync}` : `${label}: disconnected`}
     >
-      <span
-        className={`h-2 w-2 shrink-0 rounded-full ${connected ? "bg-[#16f0a9] shadow-[0_0_8px_#16f0a9]" : "bg-[#5f728f]"}`}
-        aria-hidden
-      />
-      <span className="truncate text-[11px] font-medium text-[#dce8ff]">{label}</span>
-      {connected ? (
-        <span className="shrink-0 text-[10px] text-[#7fa2c8]">{formatLastSync(row?.last_sync_at)}</span>
-      ) : null}
+      {content}
     </div>
   );
 }

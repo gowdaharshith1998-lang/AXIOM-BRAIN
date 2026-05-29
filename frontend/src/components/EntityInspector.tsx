@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { CLUSTER_LABELS, isClusterId, type ClusterId } from "@/lib/cluster-layout";
 import { superClusterIdForEntity } from "@/lib/cluster-reframe";
+import { vendorFromSourceId } from "@/lib/source-vendor";
 import type { BrainEvent } from "@/lib/websocket";
 import { useBrainStore, type Edge, type Entity } from "@/state/brain.store";
 
 // HIDDEN-V2: "Activity" (receipt feed) tab removed for YC company-brain positioning. uncomment to restore.
-const tabs = ["Overview", "Connections", "Lineage"];
+const BASE_TABS = ["Overview", "Connections", "Lineage"] as const;
 
 type InspectorReceipt = {
   id?: string;
@@ -74,6 +75,40 @@ function stringField(entity: Entity, keys: string[], fallback = "Unassigned"): s
   return fallback;
 }
 
+function optionalStringField(entity: Entity, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = entity.data?.[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return null;
+}
+
+function githubRepoSettingsUrl(entity: Entity): string | null {
+  for (const key of ["html_url", "repo_url", "url", "repository_url"]) {
+    const value = entity.data?.[key];
+    if (typeof value === "string" && value.includes("github.com")) {
+      return `${value.replace(/\/+$/, "")}/settings`;
+    }
+  }
+  const fullName = entity.data?.full_name ?? entity.data?.repo;
+  if (typeof fullName === "string" && fullName.includes("/")) {
+    return `https://github.com/${fullName.replace(/^\/+|\/+$/g, "")}/settings`;
+  }
+  return null;
+}
+
+function formatSyncedAt(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function confidence(entity: Entity): number {
   const direct = entity.composite_importance;
   const nested = entity.data?.composite_importance;
@@ -106,7 +141,14 @@ export function EntityInspector() {
   const entities = useBrainStore((s) => s.entities);
   const edges = useBrainStore((s) => s.edges);
   const select = useBrainStore((s) => s.select);
-  const [activeTab, setActiveTab] = useState("Overview");
+  const datasetHasLineage = useBrainStore((s) => s.datasetHasLineage);
+  const setDatasetHasLineage = useBrainStore((s) => s.setDatasetHasLineage);
+  const [activeTab, setActiveTab] = useState<string>("Overview");
+  const tabs: string[] = datasetHasLineage ? [...BASE_TABS] : BASE_TABS.filter((tab) => tab !== "Lineage");
+
+  useEffect(() => {
+    if (!tabs.includes(activeTab)) setActiveTab("Overview");
+  }, [activeTab, tabs]);
 
   const selectedEntity = selectedId ? entities.get(selectedId) : null;
   const cluster = isClusterId(selectedClusterId) ? selectedClusterId : selectedEntity ? superClusterIdForEntity(selectedEntity) : null;
@@ -139,7 +181,15 @@ export function EntityInspector() {
       }`}
     >
       {selectedEntity ? (
-        <EntityView entity={selectedEntity} connected={connected} onSelect={select} activeTab={activeTab} setActiveTab={setActiveTab} />
+        <EntityView
+          entity={selectedEntity}
+          connected={connected}
+          onSelect={select}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          tabs={tabs}
+          onLineageDetected={() => setDatasetHasLineage(true)}
+        />
       ) : cluster ? (
         <ClusterView cluster={cluster} entities={clusterEntities} onSelect={select} />
       ) : null}
@@ -153,12 +203,16 @@ function EntityView({
   onSelect,
   activeTab,
   setActiveTab,
+  tabs,
+  onLineageDetected,
 }: {
   entity: Entity;
   connected: Entity[];
   onSelect: (id: string | null) => void;
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  tabs: string[];
+  onLineageDetected: () => void;
 }) {
   const conf = confidence(entity);
   const [receipts, setReceipts] = useState<InspectorReceipt[]>([]);
@@ -231,7 +285,10 @@ function EntityView({
 
       try {
         const lineagePayload = await requestJson<EntityLineage>(`/api/entities/${encodeURIComponent(entity.id)}/lineage?depth=2`);
-        if (!cancelled) setLineage(lineagePayload);
+        if (!cancelled) {
+          setLineage(lineagePayload);
+          if ((lineagePayload.nodes?.length ?? 0) > 0) onLineageDetected();
+        }
       } catch {
         if (!cancelled) setLineage({ nodes: [], edges: [] });
       }
@@ -255,7 +312,12 @@ function EntityView({
       cancelled = true;
       window.removeEventListener("axiom:brain-event", onBrainEvent);
     };
-  }, [entity.id, entity.source_id]);
+  }, [entity.id, entity.source_id, onLineageDetected]);
+
+  const owner = optionalStringField(entity, ["owner", "owner_name", "team"]);
+  const vendor = vendorFromSourceId(entity.source_id);
+  const githubSettingsUrl = vendor === "github" ? githubRepoSettingsUrl(entity) : null;
+  const description = optionalStringField(entity, ["description", "summary", "body"]);
 
   return (
     <div className="flex h-full flex-col">
@@ -275,7 +337,23 @@ function EntityView({
         <div className="break-all text-xs leading-5 text-[#E8F0FF]/45">
           {entity.id}
           <br />
-          owner: {stringField(entity, ["owner", "owner_name", "team"])}
+          {owner ? (
+            <>owner: {owner}</>
+          ) : vendor === "github" ? (
+            <>
+              Ownership not set in GitHub.
+              {githubSettingsUrl ? (
+                <>
+                  {" "}
+                  <a href={githubSettingsUrl} target="_blank" rel="noreferrer" className="text-[#00E5D8] hover:underline">
+                    Link to repo settings
+                  </a>
+                </>
+              ) : null}
+            </>
+          ) : (
+            <>owner: Unassigned</>
+          )}
         </div>
       </div>
       <div className="flex border-b border-white/10 px-4">
@@ -294,9 +372,21 @@ function EntityView({
         {activeTab === "Overview" ? (
           <div className="space-y-6">
             <Section title="Overview">
-              <p className="text-sm leading-6 text-[#E8F0FF]/68">{stringField(entity, ["description", "summary", "body"], "No description provided by source data.")}</p>
+              <p className="text-sm leading-6 text-[#E8F0FF]/68">
+                {description ?? `Source returned no description. Last synced: ${formatSyncedAt(entity.updated_at)}`}
+              </p>
               <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
-                <Fact label="Owner" value={stringField(entity, ["owner", "owner_name"])} />
+                <Fact
+                  label="Owner"
+                  value={
+                    owner ??
+                    (vendor === "github"
+                      ? githubSettingsUrl
+                        ? "Not set in GitHub"
+                        : "Not set in GitHub"
+                      : "Unassigned")
+                  }
+                />
                 <Fact label="Team" value={stringField(entity, ["team", "department"])} />
                 <Fact label="Criticality" value={criticality(entity)} />
                 <Fact label="Updated" value={new Date(entity.updated_at).toLocaleDateString()} />
@@ -384,7 +474,9 @@ function ConnectionsTab({ edges }: { edges: EntityEdges }) {
             <div className="mt-2 break-all text-xs text-[#E8F0FF]/45">{edge.source_id} {"->"} {edge.target_id}</div>
           </div>
         ))}
-        {rows.length === 0 ? <div className="text-sm text-[#E8F0FF]/45">No recorded edges for this entity.</div> : null}
+        {rows.length === 0 ? (
+          <div className="text-sm text-[#E8F0FF]/45">Connections not yet computed. Re-sync to refresh.</div>
+        ) : null}
       </div>
     </Section>
   );

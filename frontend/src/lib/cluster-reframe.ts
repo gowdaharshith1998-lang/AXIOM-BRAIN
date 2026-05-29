@@ -19,17 +19,31 @@ export function isSuperClusterId(value: unknown): value is SuperClusterId {
   return typeof value === "string" && (SUPER_CLUSTER_IDS as readonly string[]).includes(value);
 }
 
-export function superClusterIdForBackendCluster(clusterId?: string | null): SuperClusterId | null {
+export function superClusterIdForBackendCluster(
+  clusterId?: string | null,
+): SuperClusterId | null {
+  if (!clusterId) return null;
   switch (clusterId) {
+    // Knowledge sources
+    case "knowledge":
     case "decisions_policy":
-    case "customer_support":
     case "growth_product":
+      return "policies"; // labelled "Knowledge" in CLUSTER_LABELS
+    // Comms + general company knowledge
+    case "comms":
+    case "customer_support":
       return "company_knowledge";
+    // Engineering / ops
     case "engineering_code":
     case "incidents_ops":
       return "execution_context";
+    // People
+    case "people":
     case "people_teams":
       return "people_teams";
+    // Customers (slack sales/customer channels)
+    case "customers":
+      return "customers";
     case "billing_payments":
       return "billing";
     default:
@@ -47,5 +61,9 @@ export function superClusterIdForEntity(entity: Entity | undefined): SuperCluste
   if (entity.type === "receipt") return "receipts";
   if (entity.type === "governance" || entity.type === "merkle_proof") return "governance";
 
-  return superClusterIdForBackendCluster(entity.cluster_id);
+  const fallback = superClusterIdForBackendCluster(entity.cluster_id);
+  if (fallback) return fallback;
+  // Final fallback: any unclassified entity bucketed as company knowledge
+  // so it stays visible in the inspector instead of vanishing.
+  return "company_knowledge";
 }

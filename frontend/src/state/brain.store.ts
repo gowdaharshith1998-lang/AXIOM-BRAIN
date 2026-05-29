@@ -104,8 +104,10 @@ type BrainState = {
   receipts: LedgerReceipt[];
   insights: WardenInsight[];
   watchdogAlerts: WatchdogAlert[];
+  datasetHasLineage: boolean;
 
   bootstrap: (entities: Entity[], edges: Edge[]) => void;
+  setDatasetHasLineage: (value: boolean) => void;
   applyEvent: (event: BrainEvent) => void;
   setFps: (fps: number) => void;
   select: (id: string | null) => void;
@@ -182,6 +184,9 @@ export const useBrainStore = create<BrainState>((set) => ({
   receipts: [],
   insights: [],
   watchdogAlerts: [],
+  datasetHasLineage: false,
+
+  setDatasetHasLineage: (value) => set({ datasetHasLineage: value }),
 
   bootstrap: (entities, edges) =>
     set((state) => {

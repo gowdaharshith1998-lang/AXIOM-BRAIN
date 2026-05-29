@@ -1,18 +1,9 @@
 import { useEffect } from "react";
-import { BrowserRouter, NavLink, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, NavLink, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 
-import { Brain } from "@/components/Brain";
-import { BrainHealthCard } from "@/components/BrainHealthCard";
-import { CommandPalette } from "@/components/CommandPalette";
 import { ConnectorBootstrap } from "@/components/ConnectorBootstrap";
 import { ConnectorLoadingIndicator } from "@/components/ConnectorLoadingIndicator";
-import { ConnectorStatusBar } from "@/components/ConnectorStatusBar";
-import { EdgeLegend } from "@/components/EdgeLegend";
-import { EntityInspector } from "@/components/EntityInspector";
 // HIDDEN-V2: PendingApprovalsBadge removed for YC company-brain positioning. uncomment to restore.
-// import { PendingApprovalsBadge } from "@/components/PendingApprovalsBadge";
-import { QueryBar } from "@/components/QueryBar";
-import { StatusFooter } from "@/components/StatusFooter";
 import { BrainSocket } from "@/lib/websocket";
 import { AgentsPage } from "@/pages/AgentsPage";
 import { ActivityPage } from "@/pages/agents/ActivityPage";
@@ -23,6 +14,7 @@ import { ActivityPage } from "@/pages/agents/ActivityPage";
 // import { TriggersPage } from "@/pages/agents/TriggersPage";
 import { ConnectorsPage } from "@/pages/ConnectorsPage";
 import { ExplorePage } from "@/pages/ExplorePage";
+import { GraphPage } from "@/pages/GraphPage";
 import { InsightsPage } from "@/pages/InsightsPage";
 import { PassportsPage } from "@/pages/PassportsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
@@ -31,18 +23,14 @@ import { SkillsPage } from "@/pages/SkillsPage";
 import { useBrainStore } from "@/state/brain.store";
 
 const navItems = [
-  ["/graph", "Graph"],
-  ["/explore", "Explore"],
-  ["/insights", "Insights"],
+  ["/graph", "Home"],
   ["/agents", "Agents"],
   ["/skills", "Skills"],
   ["/settings", "Settings"],
 ] as const;
 
 const agentNavItems = [
-  ["/graph", "Graph"],
-  ["/explore", "Explore"],
-  ["/insights", "Insights"],
+  ["/graph", "Home"],
   ["/agents", "Agents"],
   ["/skills", "Skills"],
   // HIDDEN-V2: schedules/triggers/runtime/approvals removed for YC company-brain positioning. uncomment to restore.
@@ -52,12 +40,10 @@ const agentNavItems = [
 
 function NavIcon({ label }: { label: string }) {
   const common = "h-5 w-5 text-current";
-  if (label === "Graph") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M6 6h.01M18 6h.01M6 18h.01M18 18h.01M7 6h10M6 7v10M18 7v10M7 18h10" /></svg>;
+  if (label === "Home" || label === "Graph") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z" /></svg>;
   if (label === "Agents") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M16 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4ZM8 13a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm8 1c-3.3 0-6 1.6-6 3.5V20h12v-2.5c0-1.9-2.7-3.5-6-3.5ZM8 14c-2.8 0-5 1.2-5 2.8V19h5" /></svg>;
   if (label === "Skills") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 3 4 7v10l8 4 8-4V7l-8-4Zm0 8 8-4M12 11 4 7m8 4v10" /><path d="M8.5 13.5 12 15l3.5-1.5" /></svg>;
-  if (label === "Explore") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="8"/><path d="m15 9-2 5-5 2 2-5 5-2Z"/></svg>;
-  if (label === "Insights") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 19V8m5 11V5m5 14v-8m6 8H3"/></svg>;
-  // HIDDEN-V2: NavIcon branches for removed/absent labels (Governance/Schedules/Triggers/Runtime/Approvals) deleted; unmapped labels fall through to the default icon below.
+  // HIDDEN-V2: NavIcon branches for removed/absent labels (Explore/Insights/Governance/Schedules/Triggers/Runtime/Approvals) deleted; unmapped labels fall through to the default icon below.
   if (label === "Activity") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 12h4l2-6 4 12 2-6h4" /></svg>;
   return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="3.5"/><path d="m19 12 2-1-1-3-2-.3-.7-1.8 1.2-1.7-2.3-2.3-1.7 1.2-1.8-.7L12 1 9 2l-.3 2-1.8.7-1.7-1.2L2.9 5.8l1.2 1.7L3.4 9.3 1.5 9.6v3l1.9.3.7 1.8-1.2 1.7 2.3 2.3 1.7-1.2 1.8.7.3 2h3l.3-2 1.8-.7 1.7 1.2 2.3-2.3-1.2-1.7.7-1.8 2-.3Z"/></svg>;
 }
@@ -197,21 +183,10 @@ function StudioShell() {
   );
 }
 
-function GraphPage() {
-  return (
-    <>
-      <ConnectorStatusBar />
-      <BrainHealthCard />
-      <div className="absolute inset-0">
-        <Brain />
-      </div>
-      <QueryBar />
-      <EdgeLegend />
-      <EntityInspector />
-      <StatusFooter />
-      <CommandPalette />
-    </>
-  );
+function SettingsIntegrationsRedirect() {
+  const { source } = useParams();
+  const vendor = source ?? "github";
+  return <Navigate to={`/settings?tab=integrations&source=${encodeURIComponent(vendor)}`} replace />;
 }
 
 function WsStatusBridge() {
@@ -245,6 +220,7 @@ export function App() {
       <Routes>
         <Route element={<StudioShell />}>
           <Route path="/graph" element={<GraphPage />} />
+          <Route path="/settings/integrations/:source" element={<SettingsIntegrationsRedirect />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/settings/passports" element={<PassportsPage />} />
           <Route path="/settings/connectors" element={<ConnectorsPage />} />

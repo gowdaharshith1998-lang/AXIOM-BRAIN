@@ -3,8 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "@/App";
 
-vi.mock("@/components/Brain", () => ({ Brain: () => <div>brain</div> }));
-vi.mock("@/components/BrainHealthCard", () => ({ BrainHealthCard: () => <div /> }));
+vi.mock("@/pages/GraphPage", () => ({ GraphPage: () => <div>graph-home</div> }));
 vi.mock("@/components/QueryBar", () => ({ QueryBar: () => <div /> }));
 vi.mock("@/components/EdgeLegend", () => ({ EdgeLegend: () => <div /> }));
 vi.mock("@/components/EntityInspector", () => ({ EntityInspector: () => <div /> }));
