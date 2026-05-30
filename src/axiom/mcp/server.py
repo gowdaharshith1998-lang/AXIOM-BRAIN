@@ -18,6 +18,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from axiom.api.search import _score_title
 from axiom.govern.agent_registry import ensure_agent_registry_schema
 from axiom.govern.approvals import create_approval_request, ensure_approvals_schema
 from axiom.govern.demo_flag import is_demo_target
