@@ -77,6 +77,7 @@ async function parseJsonSafe(text: string): Promise<unknown> {
 
 async function vaultRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
+    credentials: "include",
     ...init,
     headers: {
       ...(init?.body ? JSON_HEADERS : {}),

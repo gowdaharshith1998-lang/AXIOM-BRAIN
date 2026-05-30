@@ -61,6 +61,7 @@ export type RegisterSkillBody = {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
+    credentials: "include",
     ...init,
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
@@ -121,7 +122,9 @@ export async function uploadSkillMd(content: string): Promise<Skill> {
 }
 
 export async function downloadSkillMd(skillId: string): Promise<string> {
-  const response = await fetch(`/api/internal/skills/${encodeURIComponent(skillId)}/md`);
+  const response = await fetch(`/api/internal/skills/${encodeURIComponent(skillId)}/md`, {
+    credentials: "include",
+  });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.text();
 }

@@ -40,10 +40,11 @@ import { ParticleFlowController, createDotTexture } from "@/lib/particle-flow";
 import { hashStringToFloat, hubEmissiveIntensityAt, shimmerScale } from "@/lib/spoke-shimmer";
 import { hasWebGPU, preferredRendererKind } from "@/lib/webgpu-detect";
 import { BrainSocket, type BrainEvent } from "@/lib/websocket";
+import { wsUrl } from "@/lib/wsUrl";
 import { useBrainStore, type ClusterHealthSnapshot, type Edge, type Entity } from "@/state/brain.store";
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+  const res = await fetch(url, { credentials: "include" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as T;
 }
@@ -286,10 +287,9 @@ export function Brain() {
   }, [bootstrap, setClusterHealth]);
 
   useEffect(() => {
-    const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
-    // Bypass Vite WS proxy in dev; production will be single-origin via reverse proxy (Phase 11).
-    const wsHost = window.location.hostname;
-    const url = `${wsScheme}://${wsHost}:8000/ws/brain`;
+    // Single-origin WS URL derived from window.location so the app works behind
+    // a reverse proxy / TLS terminator without a hardcoded backend port.
+    const url = wsUrl("/ws/brain");
     const ws = new BrainSocket(url);
     setConnectionStatus("syncing");
     const off = ws.on((event) => {

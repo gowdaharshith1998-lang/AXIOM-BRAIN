@@ -22,7 +22,8 @@ export type MCPStats = {
 };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  // credentials: "include" sends the same-origin HttpOnly session cookie.
+  const response = await fetch(url, { credentials: "include", ...init });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return (await response.json()) as T;
 }

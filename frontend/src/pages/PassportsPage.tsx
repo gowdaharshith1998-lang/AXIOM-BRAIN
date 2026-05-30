@@ -8,6 +8,7 @@ import {
   type IssuePassportBody,
   type Passport,
 } from "@/lib/passportsClient";
+import { wsUrl } from "@/lib/wsUrl";
 
 type FormState = Record<keyof IssuePassportBody, string>;
 
@@ -55,7 +56,7 @@ export function PassportsPage() {
   }, []);
 
   useEffect(() => {
-    const url = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:8000/ws/brain`;
+    const url = wsUrl("/ws/brain");
     const ws = new WebSocket(url);
     ws.onmessage = (message) => {
       try {
@@ -172,6 +173,7 @@ export function PassportsPage() {
                   <input
                     className="h-[38px] w-full rounded-md border border-[#223b5c] bg-[#071225] px-3 text-[#e6f0ff] outline-none"
                     value={form[key as keyof FormState]}
+                    aria-label={key}
                     type={key === "ttl_hours" ? "number" : "text"}
                     onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))}
                   />

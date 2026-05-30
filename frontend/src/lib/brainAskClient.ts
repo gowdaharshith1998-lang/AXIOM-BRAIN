@@ -47,6 +47,7 @@ export async function askBrain(
 ): Promise<AskResponse> {
   const response = await fetch("/api/brain/ask", {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
     signal: init?.signal,
