@@ -98,23 +98,6 @@ function titleForEntity(entity: Entity): string {
   return entity.id;
 }
 
-function syntheticEntity(cluster: ClusterId, index: number): Entity {
-  return {
-    id: `synthetic-${cluster}-${index}`,
-    type: cluster === "agents" ? "agent" : cluster === "receipts" ? "receipt" : cluster === "governance" ? "governance" : "entity",
-    cluster_id: cluster,
-    source_id: null,
-    created_at: new Date(0).toISOString(),
-    updated_at: new Date(0).toISOString(),
-    composite_importance: 0.35 + index * 0.02,
-    data: {
-      title: `${cluster.replace(/_/g, " ")} signal ${index + 1}`,
-      description: "Visual placeholder synthesized from aggregate cluster metadata.",
-      synthetic: true,
-    },
-  };
-}
-
 function visualEntities(realEntities: Iterable<Entity>): Entity[] {
   const byCluster = new Map<ClusterId, Entity[]>();
   for (const cluster of VISUAL_CLUSTER_IDS) byCluster.set(cluster, []);
@@ -128,9 +111,6 @@ function visualEntities(realEntities: Iterable<Entity>): Entity[] {
     const cap = VISUAL_CAPS[cluster];
     const selected = sortedVisibleEntities(byCluster.get(cluster) ?? [], cap);
     out.push(...selected);
-    for (let i = selected.length; i < Math.min(MIN_VISIBLE_PER_CLUSTER, cap); i++) {
-      out.push(syntheticEntity(cluster, i));
-    }
   }
   return out;
 }
