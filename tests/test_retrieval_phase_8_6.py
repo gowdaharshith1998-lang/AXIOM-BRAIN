@@ -139,6 +139,41 @@ def test_embed_rewrites_when_hash_changes(session_factory: sessionmaker[Session]
     assert len(provider.calls) == 2
 
 
+class _ModelProvider:
+    """Embedding provider whose model name is configurable (Phase 2 EMB-003)."""
+
+    def __init__(self, model: str) -> None:
+        self.model = model
+        self.calls: list[list[str]] = []
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(texts)
+        return [[0.0, 0.0, 1.0] for _ in texts]
+
+
+def test_embed_recomputes_on_model_change(session_factory: sessionmaker[Session]) -> None:
+    # Phase 2 (EMB-003): switching the embedding model must invalidate the
+    # cached vector even when the content hash is unchanged, so stale
+    # hash-provider vectors are re-embedded with the upgraded model.
+    _seed(session_factory)
+    hash_provider = _ModelProvider("axiom-hash-embedding-v1")
+    upgraded = _ModelProvider("text-embedding-3-small")
+    with session_factory() as session:
+        entity = session.get(Entity, "e1")
+        assert entity is not None
+        embed_entities_batch(session, [entity], provider=hash_provider)
+        first = session.get(EntityEmbedding, "e1")
+        assert first is not None
+        assert first.model == "axiom-hash-embedding-v1"
+
+        # Same entity/content, different model => must NOT skip; must recompute.
+        embed_entities_batch(session, [entity], provider=upgraded)
+        row = session.get(EntityEmbedding, "e1")
+        assert row is not None
+        assert row.model == "text-embedding-3-small"
+    assert len(upgraded.calls) == 1
+
+
 def test_bootstrap_embeds_all_when_empty(session_factory: sessionmaker[Session]) -> None:
     _seed(session_factory)
     with session_factory() as session:
