@@ -267,6 +267,9 @@ class ConnectorEventRow(Base):
     __table_args__ = (
         Index("ix_connector_events_vendor_received", "vendor", "received_at"),
         Index("ix_connector_events_external", "vendor", "external_id"),
+        UniqueConstraint(
+            "vendor", "external_id", name="uq_connector_event_vendor_external"
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -275,7 +278,9 @@ class ConnectorEventRow(Base):
         String(32), ForeignKey("connector_states.id"), nullable=True, index=True
     )
     event_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    external_id: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    external_id: Mapped[str | None] = mapped_column(
+        String(512), nullable=True, default=None, index=True
+    )
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     signature_ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

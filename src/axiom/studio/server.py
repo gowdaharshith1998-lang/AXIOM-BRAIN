@@ -22,7 +22,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Res
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import Table, create_engine, desc, func, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.api.search import EntitySearchResult, search_entities
 from axiom.connectors.sync_runner import (
@@ -420,6 +420,69 @@ def _receipt_row(receipt: Receipt) -> dict[str, Any]:
         "demo": receipt.demo_flag,
         "timestamp": _iso(receipt.created_at),
     }
+
+
+def _persist_connector_event(
+    session: Session,
+    *,
+    vendor: str,
+    connector_state_id: str | None,
+    event_type: str,
+    external_id: str | None,
+    payload: Any,
+    signature_ok: bool,
+    received_at: datetime,
+    event_timestamp: datetime | None,
+) -> bool:
+    """Persist one connector webhook event, de-duplicating retries (P1-4 / DEDUP).
+
+    The webhook may be re-delivered by the vendor; the UniqueConstraint on
+    (vendor, external_id) is the hard DB-level guarantee. This helper also
+    short-circuits a known duplicate (already committed, or already queued in
+    the same batch) so a retry is a benign skip rather than an IntegrityError
+    that aborts the batch. A missing external id is stored as NULL (SQLite
+    treats NULLs as distinct in a UNIQUE index) so null-id events never collide.
+
+    Returns True if a new row was queued, False if it was a benign duplicate.
+    """
+    normalized_external_id = external_id or None
+    # De-duplicate webhook retries on (vendor, external_id). A NULL external id
+    # is never treated as a duplicate (NULLs are distinct in the UNIQUE index).
+    # The UniqueConstraint on the model is the hard DB-level guarantee; this
+    # function additionally short-circuits known duplicates so a retry is a
+    # benign skip instead of an IntegrityError that aborts the batch.
+    if normalized_external_id is not None:
+        # 1) Already committed (e.g. a retry in a separate request).
+        existing = session.execute(
+            select(ConnectorEventRow.id).where(
+                ConnectorEventRow.vendor == vendor,
+                ConnectorEventRow.external_id == normalized_external_id,
+            )
+        ).first()
+        if existing is not None:
+            return False
+        # 2) Already queued earlier in this same (uncommitted) batch. Scanning
+        #    session.new avoids forcing an early flush, which would reorder DB
+        #    writes relative to the surrounding brain-apply step.
+        for pending in session.new:
+            if (
+                isinstance(pending, ConnectorEventRow)
+                and pending.vendor == vendor
+                and pending.external_id == normalized_external_id
+            ):
+                return False
+    row = ConnectorEventRow(
+        vendor=vendor,
+        connector_state_id=connector_state_id,
+        event_type=event_type,
+        external_id=normalized_external_id,
+        payload=payload,
+        signature_ok=signature_ok,
+        received_at=received_at,
+        event_timestamp=event_timestamp,
+    )
+    session.add(row)
+    return True
 
 
 def _policy_rule_row(rule: PolicyRule) -> dict[str, Any]:
@@ -1600,17 +1663,16 @@ def create_app(
         events = handler.parse(parsed_request)
         with session_local() as session:
             for event in events:
-                session.add(
-                    ConnectorEventRow(
-                        vendor="github",
-                        connector_state_id=None,
-                        event_type=event.event_type,
-                        external_id=event.external_id,
-                        payload=event.payload,
-                        signature_ok=signature_ok,
-                        received_at=datetime.utcnow(),
-                        event_timestamp=event.timestamp,
-                    )
+                _persist_connector_event(
+                    session,
+                    vendor="github",
+                    connector_state_id=None,
+                    event_type=event.event_type,
+                    external_id=event.external_id,
+                    payload=event.payload,
+                    signature_ok=signature_ok,
+                    received_at=datetime.utcnow(),
+                    event_timestamp=event.timestamp,
                 )
             session.commit()
             ingested = await _apply_signed_webhook_events_to_brain(
@@ -1783,17 +1845,16 @@ def create_app(
         events = handler.parse(parsed_request)
         with session_local() as session:
             for event in events:
-                session.add(
-                    ConnectorEventRow(
-                        vendor="linear",
-                        connector_state_id=None,
-                        event_type=event.event_type,
-                        external_id=event.external_id,
-                        payload=event.payload,
-                        signature_ok=signature_ok,
-                        received_at=datetime.utcnow(),
-                        event_timestamp=event.timestamp,
-                    )
+                _persist_connector_event(
+                    session,
+                    vendor="linear",
+                    connector_state_id=None,
+                    event_type=event.event_type,
+                    external_id=event.external_id,
+                    payload=event.payload,
+                    signature_ok=signature_ok,
+                    received_at=datetime.utcnow(),
+                    event_timestamp=event.timestamp,
                 )
             session.commit()
             ingested = await _apply_signed_webhook_events_to_brain(
@@ -1971,17 +2032,16 @@ def create_app(
         events = handler.parse(parsed_request)
         with session_local() as session:
             for event in events:
-                session.add(
-                    ConnectorEventRow(
-                        vendor="slack",
-                        connector_state_id=None,
-                        event_type=event.event_type,
-                        external_id=event.external_id,
-                        payload=event.payload,
-                        signature_ok=signature_ok,
-                        received_at=datetime.utcnow(),
-                        event_timestamp=event.timestamp,
-                    )
+                _persist_connector_event(
+                    session,
+                    vendor="slack",
+                    connector_state_id=None,
+                    event_type=event.event_type,
+                    external_id=event.external_id,
+                    payload=event.payload,
+                    signature_ok=signature_ok,
+                    received_at=datetime.utcnow(),
+                    event_timestamp=event.timestamp,
                 )
             session.commit()
             ingested = await _apply_signed_webhook_events_to_brain(
@@ -2146,17 +2206,16 @@ def create_app(
                 raise HTTPException(status_code=404, detail="Notion connector not installed")
             events = NotionPoller(state=_connector_token_state(session, state)).poll_once()
             for event in events:
-                session.add(
-                    ConnectorEventRow(
-                        vendor="notion",
-                        connector_state_id=state.id,
-                        event_type=event.event_type,
-                        external_id=event.external_id,
-                        payload=event.payload,
-                        signature_ok=True,
-                        received_at=datetime.utcnow(),
-                        event_timestamp=event.timestamp,
-                    )
+                _persist_connector_event(
+                    session,
+                    vendor="notion",
+                    connector_state_id=state.id,
+                    event_type=event.event_type,
+                    external_id=event.external_id,
+                    payload=event.payload,
+                    signature_ok=True,
+                    received_at=datetime.utcnow(),
+                    event_timestamp=event.timestamp,
                 )
             state.last_sync_at = datetime.utcnow()
             session.add(state)
@@ -2313,17 +2372,16 @@ def create_app(
         events = handler.parse(parsed_request)
         with session_local() as session:
             for event in events:
-                session.add(
-                    ConnectorEventRow(
-                        vendor="gmail",
-                        connector_state_id=None,
-                        event_type=event.event_type,
-                        external_id=event.external_id,
-                        payload=event.payload,
-                        signature_ok=signature_ok,
-                        received_at=datetime.utcnow(),
-                        event_timestamp=event.timestamp,
-                    )
+                _persist_connector_event(
+                    session,
+                    vendor="gmail",
+                    connector_state_id=None,
+                    event_type=event.event_type,
+                    external_id=event.external_id,
+                    payload=event.payload,
+                    signature_ok=signature_ok,
+                    received_at=datetime.utcnow(),
+                    event_timestamp=event.timestamp,
                 )
             session.commit()
             ingested = await _apply_signed_webhook_events_to_brain(
