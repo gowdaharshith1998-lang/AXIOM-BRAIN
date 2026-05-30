@@ -62,7 +62,7 @@ def _receipt_payload(index: int = 1) -> ReceiptInsert:
         policy_id="policy.test",
         guidance=None,
         suggested_alternative=None,
-        signing_scheme="demo",
+        signing_scheme="ed25519",
         signature="fake-signature",
     )
 

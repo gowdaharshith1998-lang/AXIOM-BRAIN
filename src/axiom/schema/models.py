@@ -173,7 +173,7 @@ class AgentPassport(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     revocation_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     issuer_signature: Mapped[str] = mapped_column(String, nullable=False)
-    signing_scheme: Mapped[str] = mapped_column(String, nullable=False, default="demo")
+    signing_scheme: Mapped[str] = mapped_column(String, nullable=False, default="ed25519")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 

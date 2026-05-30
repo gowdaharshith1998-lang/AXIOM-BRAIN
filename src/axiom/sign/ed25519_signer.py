@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,14 @@ from typing import Any
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+
+
+class SigningKeyError(RuntimeError):
+    """Raised when no signing key can be loaded and auto-generation is refused."""
+
+
+def _is_production() -> bool:
+    return os.environ.get("AXIOM_ENV", "").strip().lower() == "production"
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +98,17 @@ def load_or_create_keypair() -> KeyPair:
     if _KEYPAIR_CACHE is not None and _KEYPAIR_CACHE.private_key_path == private_path:
         return _KEYPAIR_CACHE
     if not private_path.exists():
+        # GOV-KEY-003: never silently auto-generate an unencrypted signing key in
+        # production. A missing key there is a hard, fail-closed configuration
+        # error — operators must provision the key out of band (see deferred
+        # vault-load below). Outside production (incl. the test suite) we keep the
+        # developer-friendly auto-generation behavior.
+        if _is_production():
+            raise SigningKeyError(
+                f"no Ed25519 signing key found at {private_path} and auto-generation is "
+                "refused in production (AXIOM_ENV=production); provision the signing key "
+                "out of band before starting"
+            )
         return generate_keypair()
     private_key = serialization.load_pem_private_key(private_path.read_bytes(), password=None)
     if not isinstance(private_key, Ed25519PrivateKey):

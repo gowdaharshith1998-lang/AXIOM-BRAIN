@@ -20,7 +20,7 @@ SYSTEM_PASSPORT_ID = "demo_passport"
 SYSTEM_PASSPORT_TOKEN = "demo_passport"
 VERIFY_CACHE_TTL_SECONDS = 60.0
 VALID_AGENT_CLASSES = {"internal", "external_mcp", "skill_runner"}
-VALID_SIGNING_SCHEMES = {"demo", "ed25519", "hybrid"}
+VALID_SIGNING_SCHEMES = {"ed25519"}
 
 _VERIFY_CACHE: dict[str, tuple[float, AgentPassport]] = {}
 
@@ -252,7 +252,7 @@ def _validate_passport(row: AgentPassport) -> None:
     now = datetime.utcnow()
     if row.signing_scheme not in VALID_SIGNING_SCHEMES:
         raise PassportError("unsupported passport signing scheme")
-    if row.signing_scheme in {"demo", "ed25519", "hybrid"} and not _verify_passport_signature(row):
+    if not _verify_passport_signature(row):
         raise PassportError("passport signature verification failed")
     if row.not_before is not None and now < row.not_before:
         raise PassportError("passport not yet valid")

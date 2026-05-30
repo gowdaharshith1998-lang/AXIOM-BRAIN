@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from axiom.govern.receipts import canonical_payload, compute_receipt_hash
+from axiom.govern.receipts import compute_receipt_hash, signing_payload
 from axiom.schema.models import Receipt
 from axiom.sign.ed25519_signer import load_or_create_keypair, verify
 
@@ -23,7 +23,7 @@ def verify_receipt_signature(receipt: Receipt, pubkey: bytes | str) -> dict[str,
         return {"verified": False, "reason": "signature is not valid base64"}
     if len(signature) != 64:
         return {"verified": False, "reason": "signature is not 64 bytes"}
-    if not verify(canonical_payload(receipt), signature, pubkey):
+    if not verify(signing_payload(receipt), signature, pubkey):
         return {"verified": False, "reason": "signature verification failed"}
     return {"verified": True, "reason": "verified"}
 

@@ -131,6 +131,24 @@ def canonical_payload(receipt: Receipt) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+def signing_payload(receipt: Receipt) -> bytes:
+    """Canonical bytes that the Ed25519 signature commits to.
+
+    GOV-SIG-004 / GOV-CHAIN-005: unlike ``canonical_payload`` (which drops
+    ``prev_hash`` and is kept only for backwards-compatible deterministic
+    hashing), the signature MUST cover ``prev_hash`` so a signed receipt cannot
+    be relocated to a different position in the chain and still verify. We sign
+    over everything except the signature itself and ``this_hash`` (which is
+    derived after signing); ``prev_hash`` is explicitly retained.
+    """
+    payload = receipt_to_dict(receipt)
+    for key in ("signature", "sig", "this_hash"):
+        payload.pop(key, None)
+    if payload.get("passport_id") is None:
+        payload.pop("passport_id", None)
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
 def compute_receipt_hash(receipt: Receipt) -> str:
     canonical = json.dumps(
         canonical_receipt_payload(receipt),
@@ -192,7 +210,7 @@ def chain_insert_receipt(
                 demo_flag=payload.demo_flag,
                 created_at=created_at,
             )
-            receipt.signature = b64encode(sign(canonical_payload(receipt))).decode("ascii")
+            receipt.signature = b64encode(sign(signing_payload(receipt))).decode("ascii")
             receipt.this_hash = compute_receipt_hash(receipt)
             session.add(receipt)
             upsert_agent_observation(
