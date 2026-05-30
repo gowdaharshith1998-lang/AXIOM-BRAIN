@@ -16,7 +16,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated, Any, NoReturn, cast
 
-from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query, Request, WebSocket
+from fastapi import (
+    BackgroundTasks,
+    Body,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -644,28 +653,36 @@ def create_app(
         async def cluster_health_loop() -> None:
             nonlocal last_seq, last_seq_at
             while True:
-                with session_local() as session:
-                    snapshot = cluster_health_monitor.snapshot(session)
-                    record_cluster_check_runs(session, snapshot)
-                for cluster_id, item in snapshot.items():
-                    status = item.status.value
-                    if previous_health.get(cluster_id) not in {None, status}:
-                        await broadcaster.publish(
-                            {
-                                "type": "cluster_health_changed",
-                                "source_id": None,
-                                "persisted_id": cluster_id,
-                                "payload": item.to_json(),
-                                "timestamp": datetime_now_ms(),
-                            }
-                        )
-                    previous_health[cluster_id] = status
-                now = asyncio.get_running_loop().time()
-                elapsed = max(now - last_seq_at, 1e-6)
-                seq_delta = max(0, broadcaster.current_seq - last_seq)
-                app.state.events_per_min = (seq_delta / elapsed) * 60.0
-                last_seq = broadcaster.current_seq
-                last_seq_at = now
+                # Guard the per-iteration body so a transient error (bad
+                # snapshot, broadcast failure, DB hiccup) logs and the loop
+                # survives instead of silently dying (P1-13).
+                try:
+                    with session_local() as session:
+                        snapshot = cluster_health_monitor.snapshot(session)
+                        record_cluster_check_runs(session, snapshot)
+                    for cluster_id, item in snapshot.items():
+                        status = item.status.value
+                        if previous_health.get(cluster_id) not in {None, status}:
+                            await broadcaster.publish(
+                                {
+                                    "type": "cluster_health_changed",
+                                    "source_id": None,
+                                    "persisted_id": cluster_id,
+                                    "payload": item.to_json(),
+                                    "timestamp": datetime_now_ms(),
+                                }
+                            )
+                        previous_health[cluster_id] = status
+                    now = asyncio.get_running_loop().time()
+                    elapsed = max(now - last_seq_at, 1e-6)
+                    seq_delta = max(0, broadcaster.current_seq - last_seq)
+                    app.state.events_per_min = (seq_delta / elapsed) * 60.0
+                    last_seq = broadcaster.current_seq
+                    last_seq_at = now
+                except asyncio.CancelledError:
+                    raise
+                except Exception:  # noqa: BLE001
+                    log.exception("cluster_health_loop iteration failed; will retry")
                 await asyncio.sleep(15)
 
         async def snapshot_loop() -> None:
@@ -3935,7 +3952,17 @@ def create_app(
                 return
         await ws.accept(subprotocol=websocket_auth_subprotocol(ws))
         async for envelope in broadcaster.subscribe(since=since):
-            await ws.send_text(json.dumps(envelope))
+            try:
+                await ws.send_text(json.dumps(envelope))
+            except WebSocketDisconnect:
+                # Client went away: stop the send loop cleanly (P1-13).
+                break
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                # A single bad/unserializable envelope must not tear down the
+                # socket loop silently; log and keep serving.
+                log.exception("ws/brain send failed; dropping envelope")
 
     @app.post("/api/internal/agent-navigation")
     async def publish_agent_navigation(

@@ -19,6 +19,13 @@ from axiom.schema.models import Edge, Entity, EntityEmbedding
 SearchMode = Literal["hybrid", "lexical", "semantic", "graph", "ppr"]
 METHODS: tuple[str, ...] = ("lexical", "semantic", "graph")
 
+# Upper bound on how many entity rows any single query will pull from the DB
+# and score in Python (DB-003). The lexical/graph candidate scan and the
+# semantic embedding scan are otherwise unbounded ``select(Entity)`` queries
+# over the whole table, which does not scale. Existing datasets are tiny, so
+# this cap is a safety ceiling and does not change current behavior.
+MAX_CANDIDATES = 2000
+
 
 class MethodBreakdown(TypedDict):
     rank: int
@@ -103,6 +110,7 @@ def semantic_search(
         stmt = stmt.where(Entity.type.in_(entity_types))
     if cluster_id is not None:
         stmt = stmt.where(Entity.cluster_id == cluster_id)
+    stmt = stmt.limit(MAX_CANDIDATES)
     ranked: list[tuple[Entity, float]] = []
     for entity, embedding in session.execute(stmt).all():
         score = cosine_similarity(query_vector, vector_from_blob(embedding.embedding))
@@ -330,6 +338,7 @@ def _filtered_entities(
         stmt = stmt.where(Entity.type.in_(entity_types))
     if cluster_id is not None:
         stmt = stmt.where(Entity.cluster_id == cluster_id)
+    stmt = stmt.limit(MAX_CANDIDATES)
     return list(session.execute(stmt).scalars().all())
 
 
