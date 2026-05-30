@@ -95,18 +95,39 @@ class DemoPolicyEvaluator:
         return PolicyDecision("allow", "policy checks passed", "AEGIS-1")
 
 
+def _is_production() -> bool:
+    return os.environ.get("AXIOM_ENV", "").strip().lower() == "production"
+
+
 def get_policy_evaluator(
     session_factory: Callable[[], Session] | None = None,
 ) -> RealPolicyEvaluator | DemoPolicyEvaluator:
+    """Resolve the active policy evaluator, fail-closed in production (P1-1).
+
+    In production a policy load failure or empty ruleset is fatal: the demo
+    evaluator emits ``decision="allow"`` receipts (deny_rate=0), so silently
+    falling back to it would govern nothing while looking like it does. Outside
+    production we keep the demo fallback so local/dev/test runs stay usable.
+    """
     try:
         rules = load_policies()
     except Exception as exc:  # noqa: BLE001
+        if _is_production():
+            raise SystemExit(
+                f"FATAL: policy load failed in production; refusing to start "
+                f"fail-open: {exc}"
+            ) from exc
         logger.warning(
             "could not load real policies; falling back to DemoPolicyEvaluator: %s",
             exc,
         )
         return DemoPolicyEvaluator(deny_rate=0)
     if not rules:
+        if _is_production():
+            raise SystemExit(
+                "FATAL: no policies loaded in production; refusing to start "
+                "fail-open (the demo evaluator allows everything)."
+            )
         logger.warning("no real policies loaded; falling back to DemoPolicyEvaluator")
         return DemoPolicyEvaluator(deny_rate=0)
     return RealPolicyEvaluator(rules, session_factory)

@@ -19,12 +19,32 @@ def _client(tmp_path: Path) -> TestClient:
     return TestClient(create_app(db_url=db_url, enable_organizer=False))
 
 
-def test_api_auth_is_disabled_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_api_auth_disabled_only_with_explicit_optout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Auth is fail-closed by default (P0-2); the only way to disable it for
+    # local dev is the explicit AXIOM_AUTH_DISABLED escape hatch.
     monkeypatch.delenv("AXIOM_API_TOKEN", raising=False)
     monkeypatch.delenv("AXIOM_AUTH_REQUIRED", raising=False)
+    monkeypatch.setenv("AXIOM_AUTH_DISABLED", "1")
 
     with _client(tmp_path) as client:
         assert client.get("/api/internal/settings").status_code == 200
+
+
+def test_api_auth_required_by_default_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression for P0-2 / GOV-AUTH-001: with no token, no AUTH_REQUIRED, and
+    # no AUTH_DISABLED opt-out, the control plane must default to *required*.
+    # Misconfigured (required but no token) => 503, never fail-open 200.
+    monkeypatch.delenv("AXIOM_API_TOKEN", raising=False)
+    monkeypatch.delenv("AXIOM_AUTH_REQUIRED", raising=False)
+    monkeypatch.delenv("AXIOM_AUTH_DISABLED", raising=False)
+    monkeypatch.delenv("AXIOM_ENV", raising=False)
+
+    with _client(tmp_path) as client:
+        assert client.get("/api/internal/settings").status_code == 503
 
 
 def test_api_auth_rejects_missing_or_wrong_token(

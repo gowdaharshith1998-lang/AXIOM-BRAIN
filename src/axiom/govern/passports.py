@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import time
 from base64 import b64decode, b64encode
@@ -40,6 +41,28 @@ def _new_ulid() -> str:
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _is_production() -> bool:
+    return os.environ.get("AXIOM_ENV", "").strip().lower() == "production"
+
+
+def _truthy_env(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def should_bootstrap_system_passport() -> bool:
+    """Whether the wildcard demo system passport may be minted.
+
+    Demo-only convenience: never in production, and only when explicitly
+    opted in via ``AXIOM_DEMO`` (or the legacy ``AXIOM_MCP_ALLOW_SYSTEM_PASSPORT``
+    flag that already gates the fallback at the MCP call sites). This closes the
+    P0-1 / AUTHZ-001 backdoor where ``demo_passport`` minted a 365-day */*/*
+    master credential unconditionally at boot.
+    """
+    if _is_production():
+        return False
+    return _truthy_env("AXIOM_DEMO") or _truthy_env("AXIOM_MCP_ALLOW_SYSTEM_PASSPORT")
 
 
 def _normalize_scope(values: list[str]) -> list[str]:
@@ -245,6 +268,10 @@ def verify_passport(
     session_factory: sessionmaker[Session],
     bearer_token: str,
 ) -> AgentPassport:
+    # P0-1 / GOV-PASS-002: the literal demo_passport master token is never
+    # honored in production, even if a row somehow exists in the database.
+    if bearer_token == SYSTEM_PASSPORT_TOKEN and _is_production():
+        raise PassportError("invalid_or_missing_passport")
     credential_hash = _token_hash(bearer_token)
     cached = _VERIFY_CACHE.get(credential_hash)
     now_monotonic = time.monotonic()

@@ -38,6 +38,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
 def cmd_serve(args: argparse.Namespace) -> None:
     import uvicorn
 
+    from axiom.studio.auth import auth_is_misconfigured, auth_required
     from axiom.studio.server import create_app
 
     app = create_app(
@@ -46,7 +47,16 @@ def cmd_serve(args: argparse.Namespace) -> None:
         live_rate=args.rate,
         live_pause_after=args.pause_after,
     )
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    host = args.host
+    # P0-3: if auth is required but no token is configured, never expose a
+    # non-loopback interface fail-open. (In production create_app already
+    # exits; this guards misconfigured non-production hosts.)
+    if auth_required() and auth_is_misconfigured() and host not in {"127.0.0.1", "localhost"}:
+        logging.getLogger("axiom.cli").warning(
+            "auth required but AXIOM_API_TOKEN unset; binding loopback (127.0.0.1) only"
+        )
+        host = "127.0.0.1"
+    uvicorn.run(app, host=host, port=args.port, log_level="info")
 
 
 def cmd_vault_init(args: argparse.Namespace) -> None:

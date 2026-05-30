@@ -34,3 +34,9 @@ output/
 .claude/
 .mcp.json
 CLAUDE.md
+
+# Production hardening (Phase 1 / P1-16 hygiene)
+/AXIOM-BRAIN/
+ruvector.db
+frontend/tsconfig.tsbuildinfo
+_*.txt

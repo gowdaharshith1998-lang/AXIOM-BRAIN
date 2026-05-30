@@ -9,6 +9,7 @@ from fastapi import Request, WebSocket
 
 API_TOKEN_ENV = "AXIOM_API_TOKEN"
 AUTH_REQUIRED_ENV = "AXIOM_AUTH_REQUIRED"
+AUTH_DISABLED_ENV = "AXIOM_AUTH_DISABLED"
 ALLOW_WS_QUERY_TOKEN_ENV = "AXIOM_ALLOW_WS_QUERY_TOKEN"
 WS_AUTH_SUBPROTOCOL = "axiom.auth"
 WS_AUTH_TOKEN_PREFIX = "axiom-token."
@@ -26,12 +27,29 @@ def configured_api_token() -> str | None:
     return token or None
 
 
+def _is_production() -> bool:
+    return os.environ.get("AXIOM_ENV", "").strip().lower() == "production"
+
+
 def auth_required() -> bool:
-    return (
-        configured_api_token() is not None
-        or _truthy(os.environ.get(AUTH_REQUIRED_ENV))
-        or os.environ.get("AXIOM_ENV", "").strip().lower() == "production"
-    )
+    """Fail-closed by default (P0-2 / GOV-AUTH-001).
+
+    Precedence, highest first:
+      1. production            → always required
+      2. AXIOM_API_TOKEN set   → required (enforce the configured token)
+      3. AXIOM_AUTH_REQUIRED   → required
+      4. AXIOM_AUTH_DISABLED   → disabled (local dev opt-out only; ignored in prod)
+      5. default               → required (closed)
+    """
+    if _is_production():
+        return True
+    if configured_api_token() is not None:
+        return True
+    if _truthy(os.environ.get(AUTH_REQUIRED_ENV)):
+        return True
+    if _truthy(os.environ.get(AUTH_DISABLED_ENV)):
+        return False
+    return True
 
 
 def auth_is_misconfigured() -> bool:

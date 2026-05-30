@@ -28,6 +28,7 @@ from axiom.govern.passports import (
     check_scope,
     ensure_passports_schema,
     ensure_system_passport,
+    should_bootstrap_system_passport,
     verify_passport,
 )
 from axiom.govern.policy_evaluator import (
@@ -200,7 +201,11 @@ class AxiomMCPService:
             ensure_skills_schema(bind)
             ensure_sources_schema(bind)
             ensure_approvals_schema(bind)
-        ensure_system_passport(session_factory)
+        # P0-1 / AUTHZ-001: only mint the wildcard demo system passport when
+        # explicitly running in demo mode (never in production). Production
+        # callers must present a real, scoped passport token.
+        if should_bootstrap_system_passport():
+            ensure_system_passport(session_factory)
         self._hydrate_action_history_from_receipts()
 
     @staticmethod

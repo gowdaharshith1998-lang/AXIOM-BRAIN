@@ -145,7 +145,7 @@ from axiom.govern.passports import (
     revoke_passport,
     toggle_kill_switch,
 )
-from axiom.govern.policy_evaluator import get_policy_evaluator
+from axiom.govern.policy_evaluator import DemoPolicyEvaluator, get_policy_evaluator
 from axiom.govern.receipts import (
     ensure_receipts_schema,
     receipt_to_dict,
@@ -471,6 +471,29 @@ def _production_mode() -> bool:
     return os.environ.get("AXIOM_ENV", "").strip().lower() == "production"
 
 
+def _fail_fast_on_bad_config() -> None:
+    """Refuse to start with an unsafe production configuration (P0-3).
+
+    - production without ``AXIOM_API_TOKEN`` would serve fail-open → exit.
+    - ``AXIOM_VAULT_KEY`` present but not a valid Fernet key → exit (every
+      stored secret would be unreadable and the vault silently locked).
+    """
+    from axiom.env import vault_status
+    from axiom.studio.auth import configured_api_token
+
+    if _production_mode() and configured_api_token() is None:
+        raise SystemExit(
+            "FATAL: AXIOM_ENV=production but AXIOM_API_TOKEN is not set. "
+            "Refusing to start fail-open. Set AXIOM_API_TOKEN (or unset AXIOM_ENV "
+            "for local dev)."
+        )
+    present, error = vault_status()
+    if present and error:
+        raise SystemExit(
+            f"FATAL: AXIOM_VAULT_KEY is present but is not a valid Fernet key: {error}"
+        )
+
+
 def create_app(
     *,
     db_url: str | None = None,
@@ -479,6 +502,7 @@ def create_app(
     live_pause_after: int | None = None,
     enable_organizer: bool = True,
 ) -> FastAPI:
+    _fail_fast_on_bad_config()
     db_url = db_url or os.environ.get("DATABASE_URL") or "sqlite:///./axiom.db"
     engine = create_engine(db_url, future=True)
     ensure_passports_schema(engine)
@@ -795,11 +819,15 @@ def create_app(
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
+        active_evaluator = getattr(app.state, "policy_evaluator", policy_evaluator)
+        policy_mode = "demo" if isinstance(active_evaluator, DemoPolicyEvaluator) else "real"
         return {
             "status": "ok",
             "current_seq": broadcaster.current_seq,
             "live": live_source is not None,
             "events_emitted": live_source.events_emitted if live_source is not None else 0,
+            "policy_mode": policy_mode,
+            "auth_required": auth_required(),
         }
 
     @app.get("/api/internal/settings")
