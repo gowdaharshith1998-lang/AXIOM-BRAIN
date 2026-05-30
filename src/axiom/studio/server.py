@@ -7,6 +7,7 @@ import hmac
 import json
 import logging
 import os
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TypeVar
 from contextlib import asynccontextmanager, suppress
@@ -566,6 +567,93 @@ def _fail_fast_on_bad_config() -> None:
         )
 
 
+# --- Minimal observability (OBS-02/03/04/05) ---------------------------------
+# prometheus-client is an optional runtime dep. If it is not importable the
+# /metrics endpoint degrades to a plain-text "unavailable" response rather than
+# crashing the import or the app.
+try:  # pragma: no cover - exercised indirectly
+    from prometheus_client import (
+        CONTENT_TYPE_LATEST,
+        REGISTRY as _PROM_REGISTRY,
+        Counter as _PromCounter,
+        Gauge as _PromGauge,
+        generate_latest as _prom_generate_latest,
+    )
+
+    _PROMETHEUS_AVAILABLE = True
+except Exception:  # noqa: BLE001 - any import failure must not break the app
+    _PROMETHEUS_AVAILABLE = False
+    CONTENT_TYPE_LATEST = "text/plain"  # type: ignore[assignment]
+
+
+def _get_or_create_prom(factory: Callable[[], Any], name: str) -> Any | None:
+    """Idempotently fetch/create a Prometheus metric.
+
+    create_app() may run more than once in the same process (tests, the
+    module-level ``app``). Re-registering a metric with the same name raises, so
+    reuse any already-registered collector.
+    """
+    if not _PROMETHEUS_AVAILABLE:
+        return None
+    existing = getattr(_PROM_REGISTRY, "_names_to_collectors", {}).get(name)
+    if existing is not None:
+        return existing
+    try:
+        return factory()
+    except ValueError:
+        return getattr(_PROM_REGISTRY, "_names_to_collectors", {}).get(name)
+
+
+# Process-wide metric objects (created once, reused across create_app calls).
+if _PROMETHEUS_AVAILABLE:
+    HTTP_REQUESTS_TOTAL = _get_or_create_prom(
+        lambda: _PromCounter(
+            "axiom_http_requests_total", "Total HTTP requests served"
+        ),
+        "axiom_http_requests_total",
+    )
+    LLM_TOKENS_TOTAL = _get_or_create_prom(
+        lambda: _PromCounter(
+            "axiom_llm_tokens_total",
+            "Total LLM tokens accounted (hook for instrumentation)",
+        ),
+        "axiom_llm_tokens_total",
+    )
+    BG_TASK_ALIVE = _get_or_create_prom(
+        lambda: _PromGauge(
+            "axiom_bg_task_alive",
+            "Background task liveness (1=alive, 0=done/absent)",
+            ["task"],
+        ),
+        "axiom_bg_task_alive",
+    )
+else:  # pragma: no cover - only when prometheus-client is absent
+    HTTP_REQUESTS_TOTAL = None
+    LLM_TOKENS_TOTAL = None
+    BG_TASK_ALIVE = None
+
+
+# Background-task attributes on ``app.state`` to inspect for readiness/metrics.
+_BG_TASK_ATTRS = (
+    "cluster_health_task",
+    "cluster_check_retention_task",
+    "agent_action_task",
+    "warden_task",
+    "snapshot_task",
+    "connector_sync_task",
+    "live_task",
+)
+
+
+def record_llm_tokens(count: int) -> None:
+    """Instrumentation hook: account ``count`` LLM tokens for /metrics.
+
+    Safe to call even when prometheus-client is unavailable.
+    """
+    if LLM_TOKENS_TOTAL is not None and count > 0:
+        LLM_TOKENS_TOTAL.inc(count)
+
+
 def create_app(
     *,
     db_url: str | None = None,
@@ -893,9 +981,85 @@ def create_app(
             )
         return await call_next(request)
 
+    @app.middleware("http")
+    async def request_id_and_metrics(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        # X-Request-ID (OBS): generate if absent, echo on response.
+        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+        request.state.request_id = request_id
+        if HTTP_REQUESTS_TOTAL is not None:
+            HTTP_REQUESTS_TOTAL.inc()
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
     app.include_router(vault_router)
     app.include_router(llm_keys_router)
     app.include_router(brain_ask_router)
+
+    @app.get("/livez")
+    def livez() -> dict[str, str]:
+        """Liveness probe: always 200 if the process is up (OBS-02)."""
+        return {"status": "ok"}
+
+    @app.get("/readyz")
+    def readyz() -> Response:
+        """Readiness probe (OBS-03): DB reachable, vault unlocked, tasks healthy."""
+        from sqlalchemy import text
+
+        failed: list[str] = []
+
+        # 1) Database reachable.
+        try:
+            with session_local() as session:
+                session.execute(text("SELECT 1"))
+        except Exception as exc:  # noqa: BLE001
+            failed.append(f"db: {exc}")
+
+        # 2) Vault unlocked.
+        if not getattr(app.state, "vault_unlocked", False):
+            failed.append("vault: locked")
+
+        # 3) Each background task must not have died with an exception.
+        for attr in _BG_TASK_ATTRS:
+            task = getattr(app.state, attr, None)
+            if task is None:
+                continue
+            done = getattr(task, "done", None)
+            if callable(done) and done():
+                if getattr(task, "cancelled", lambda: False)():
+                    continue
+                try:
+                    exc = task.exception()
+                except Exception:  # noqa: BLE001
+                    continue
+                if exc is not None:
+                    failed.append(f"task {attr}: {exc!r}")
+
+        status = "ok" if not failed else "unavailable"
+        body = {"status": status, "checks": {"failed": failed}}
+        return JSONResponse(body, status_code=200 if not failed else 503)
+
+    @app.get("/metrics")
+    def metrics() -> Response:
+        """Prometheus metrics (OBS-04). Degrades gracefully if unavailable."""
+        if not _PROMETHEUS_AVAILABLE:
+            return PlainTextResponse(
+                "metrics unavailable: prometheus-client is not installed",
+                status_code=200,
+            )
+        # Refresh the per-background-task liveness gauge.
+        if BG_TASK_ALIVE is not None:
+            for attr in _BG_TASK_ATTRS:
+                task = getattr(app.state, attr, None)
+                alive = 0.0
+                if task is not None:
+                    done = getattr(task, "done", None)
+                    alive = 0.0 if (callable(done) and done()) else 1.0
+                BG_TASK_ALIVE.labels(task=attr).set(alive)
+        return Response(_prom_generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -4039,3 +4203,12 @@ def create_app(
         app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
 
     return app
+
+
+# Module-level ASGI app for ``uvicorn axiom.studio.server:app`` (DEP-09).
+# Building at import time means importing this module under an unsafe
+# production configuration (AXIOM_ENV=production without AXIOM_API_TOKEN) will
+# raise SystemExit via create_app() -> _fail_fast_on_bad_config(), which is the
+# desired fail-fast behaviour for real deployments. Under tests conftest clears
+# AXIOM_ENV, so this is not production and the build succeeds.
+app = create_app()

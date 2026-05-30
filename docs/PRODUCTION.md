@@ -41,8 +41,32 @@ docker build -t axiom-brain .
 docker run --env-file .env -p 8000:8000 axiom-brain
 ```
 
+Or with Compose (named volume for the SQLite DB, healthcheck on `/readyz`):
+
+```bash
+AXIOM_API_TOKEN=<token> docker compose up --build
+```
+
+The image launches the module-level ASGI app directly:
+
+```bash
+uvicorn axiom.studio.server:app --host 0.0.0.0 --port 8000
+```
+
 The container serves the FastAPI API, `/ws/brain`, and the built React frontend
 from one origin.
+
+## Observability
+
+- `GET /livez` — liveness probe, always `200` while the process is up.
+- `GET /readyz` — readiness probe: runs `SELECT 1`, checks the vault is
+  unlocked, and checks no background task has died with an exception. Returns
+  `200` when healthy, `503` with a JSON `checks.failed[]` list otherwise.
+- `GET /metrics` — Prometheus exposition (request count, an LLM/token counter
+  hook, and a per-background-task liveness gauge). Degrades to a plain-text
+  "metrics unavailable" `200` if `prometheus-client` is not installed.
+- Every response carries an `X-Request-ID` header (generated if the request did
+  not supply one).
 
 ## Connector Secrets
 

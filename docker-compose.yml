@@ -1,0 +1,36 @@
+# Docker Compose for AXIOM Studio (DEP-01).
+# Bring secrets via an env_file (.env) or the host environment. AXIOM_ENV
+# defaults to production, so AXIOM_API_TOKEN MUST be set or the app fail-fasts.
+services:
+  axiom:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: axiom-studio:latest
+    ports:
+      - "8000:8000"
+    environment:
+      AXIOM_ENV: "${AXIOM_ENV:-production}"
+      AXIOM_API_TOKEN: "${AXIOM_API_TOKEN:?set AXIOM_API_TOKEN (refusing to start fail-open)}"
+      AXIOM_VAULT_KEY: "${AXIOM_VAULT_KEY:-}"
+      DATABASE_URL: "sqlite:////data/axiom.db"
+    # Optionally load secrets from a .env file alongside this compose file.
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - axiom-db:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz').status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  axiom-db:

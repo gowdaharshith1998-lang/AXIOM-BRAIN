@@ -19,6 +19,7 @@ dependencies = [
     "uuid-utils",
     "networkx>=3.0",
     "mcp==1.9.4",
+    "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]

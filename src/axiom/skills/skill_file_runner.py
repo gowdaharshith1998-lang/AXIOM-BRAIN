@@ -437,13 +437,12 @@ def _main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    from sqlalchemy import create_engine
-
     from axiom.schema.models import Base
     from axiom.skills.skill_file_parser import (
         SkillFileParseError,
         parse_skill_file_yaml,
     )
+    from axiom.storage.db import init_engine
 
     try:
         with open(args.path, encoding="utf-8") as handle:
@@ -464,7 +463,10 @@ def _main(argv: list[str] | None = None) -> int:
         print(json.dumps({"status": "failed", "error": f"invalid --trigger JSON: {exc}"}))
         return 1
 
-    engine = create_engine(args.database_url, future=True)
+    # Route the standalone-CLI engine through the single-source engine factory
+    # (P1-11) rather than building a rogue engine. This is the CLI entry point
+    # only; the test/serving path builds schema via create_app()/ensure_* helpers.
+    engine = init_engine(args.database_url)
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, future=True)
 
