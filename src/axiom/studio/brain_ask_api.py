@@ -21,6 +21,8 @@ from axiom.api.brain_ask import (
 from axiom.studio.rate_limit import (
     RateLimitExceededError,
     ask_limiter,
+    begin_llm_call,
+    end_llm_call,
     rate_limit_key,
 )
 
@@ -65,6 +67,7 @@ def post_brain_ask(body: AskIn, request: Request) -> dict[str, Any]:
             detail=exc.detail,
             headers={"Retry-After": str(exc.retry_after)},
         ) from exc
+    begin_llm_call(key, body.max_tokens)
     try:
         with _session_factory(request)() as session:
             result = ask_brain(
@@ -101,4 +104,6 @@ def post_brain_ask(body: AskIn, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=status, detail=exc.detail) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        end_llm_call()
     return result.to_dict()

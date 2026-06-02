@@ -7,6 +7,7 @@ import html
 import json
 import logging
 import os
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
@@ -30,7 +31,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import Table, create_engine, desc, func, select
+from sqlalchemy import Table, desc, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.api.search import EntitySearchResult, search_entities
@@ -71,6 +73,7 @@ from axiom.connectors.slack.oauth import SLACK_BOT_SCOPES, SlackOAuth
 from axiom.connectors.slack.webhook import SlackWebhookHandler
 from axiom.connectors.sync_runner import (
     connector_sync_loop,
+    connector_token_state,
     run_initial_sync,
     schedule_connector_sync_after_oauth,
     sync_all_connected_connectors,
@@ -190,6 +193,7 @@ from axiom.skills.skill_md import (
 )
 from axiom.sources.base import IngestEvent
 from axiom.sources.live_synthetic import LiveSyntheticSource
+from axiom.storage.db import build_engine, run_boot_migration
 from axiom.studio.auth import (
     auth_is_misconfigured,
     auth_required,
@@ -200,6 +204,15 @@ from axiom.studio.auth import (
 )
 from axiom.studio.brain_ask_api import router as brain_ask_router
 from axiom.studio.llm_keys_api import router as llm_keys_router
+from axiom.studio.rate_limit import (
+    RateLimitExceededError,
+    ask_limiter,
+    begin_llm_call,
+    end_llm_call,
+    llm_concurrency,
+    rate_limit_key,
+    register_token_observer,
+)
 from axiom.studio.sources import ensure_sources_schema, real_sources_snapshot
 from axiom.studio.vault_api import router as vault_router
 from axiom.vault.errors import SecretNotFound, VaultCorrupt, VaultLocked
@@ -410,40 +423,21 @@ def _persist_connector_event(
     """Persist one connector webhook event, de-duplicating retries (P1-4 / DEDUP).
 
     The webhook may be re-delivered by the vendor; the UniqueConstraint on
-    (vendor, external_id) is the hard DB-level guarantee. This helper also
-    short-circuits a known duplicate (already committed, or already queued in
-    the same batch) so a retry is a benign skip rather than an IntegrityError
-    that aborts the batch. A missing external id is stored as NULL (SQLite
-    treats NULLs as distinct in a UNIQUE index) so null-id events never collide.
+    (vendor, external_id) (migration 0004) is the hard DB-level guarantee. We
+    INSERT inside a ``session.begin_nested()`` SAVEPOINT and treat an
+    ``IntegrityError`` on the unique constraint as a *benign duplicate*: the
+    savepoint is rolled back (leaving the surrounding transaction intact) and the
+    function returns ``False``. This is both race-free (no check-then-insert TOCTOU
+    window) and free of the previous O(n^2) ``session.new`` rescan — it relies on
+    the database, which also catches in-batch duplicates flushed within the same
+    transaction.
 
-    Returns True if a new row was queued, False if it was a benign duplicate.
+    A missing external id is stored as NULL (SQLite treats NULLs as distinct in a
+    UNIQUE index) so null-id events never collide and are always persisted.
+
+    Returns True if a new row was persisted, False if it was a benign duplicate.
     """
     normalized_external_id = external_id or None
-    # De-duplicate webhook retries on (vendor, external_id). A NULL external id
-    # is never treated as a duplicate (NULLs are distinct in the UNIQUE index).
-    # The UniqueConstraint on the model is the hard DB-level guarantee; this
-    # function additionally short-circuits known duplicates so a retry is a
-    # benign skip instead of an IntegrityError that aborts the batch.
-    if normalized_external_id is not None:
-        # 1) Already committed (e.g. a retry in a separate request).
-        existing = session.execute(
-            select(ConnectorEventRow.id).where(
-                ConnectorEventRow.vendor == vendor,
-                ConnectorEventRow.external_id == normalized_external_id,
-            )
-        ).first()
-        if existing is not None:
-            return False
-        # 2) Already queued earlier in this same (uncommitted) batch. Scanning
-        #    session.new avoids forcing an early flush, which would reorder DB
-        #    writes relative to the surrounding brain-apply step.
-        for pending in session.new:
-            if (
-                isinstance(pending, ConnectorEventRow)
-                and pending.vendor == vendor
-                and pending.external_id == normalized_external_id
-            ):
-                return False
     row = ConnectorEventRow(
         vendor=vendor,
         connector_state_id=connector_state_id,
@@ -454,7 +448,19 @@ def _persist_connector_event(
         received_at=received_at,
         event_timestamp=event_timestamp,
     )
-    session.add(row)
+    if normalized_external_id is None:
+        # No external id -> never a duplicate; persist without a savepoint.
+        session.add(row)
+        return True
+    try:
+        with session.begin_nested():
+            session.add(row)
+            session.flush()
+    except IntegrityError:
+        # Re-delivery / in-batch duplicate: the (vendor, external_id) unique
+        # constraint rejected it. The SAVEPOINT rollback already detached the row;
+        # the outer transaction is untouched and still committable.
+        return False
     return True
 
 
@@ -497,6 +503,15 @@ MCP_TOOL_NAMES = [
     "axiom_register_skill",
     "axiom_archive_skill",
 ]
+
+
+# Pre-charged token estimate for one paid skill run (the skill template's LLM
+# call). Reconciled to actual usage once providers/llm_chat parses the response.
+_DEFAULT_SKILL_TOKEN_COST = 1024
+# Pre-charged token estimate for one embedding-backed search request (the
+# OpenAI embedding call on the user query). Embeddings are far cheaper than a
+# chat completion, so this charges a small fixed amount against the daily cap.
+_EMBEDDING_QUERY_TOKEN_COST = 64
 
 
 def _snapshots_enabled() -> bool:
@@ -548,6 +563,9 @@ try:  # pragma: no cover - exercised indirectly
         Gauge as _PromGauge,
     )
     from prometheus_client import (
+        Histogram as _PromHistogram,
+    )
+    from prometheus_client import (
         generate_latest as _prom_generate_latest,
     )
 
@@ -577,16 +595,48 @@ def _get_or_create_prom(factory: Callable[[], Any], name: str) -> Any | None:
 
 # Process-wide metric objects (created once, reused across create_app calls).
 if _PROMETHEUS_AVAILABLE:
+    # RED: a labelled request counter (method, path template, status) + a request
+    # latency histogram. Labels use the *route path template* (e.g.
+    # ``/api/entities/{entity_id}``), never the raw path, to bound cardinality.
     HTTP_REQUESTS_TOTAL = _get_or_create_prom(
-        lambda: _PromCounter("axiom_http_requests_total", "Total HTTP requests served"),
+        lambda: _PromCounter(
+            "axiom_http_requests_total",
+            "Total HTTP requests served",
+            ["method", "path", "status"],
+        ),
         "axiom_http_requests_total",
+    )
+    HTTP_REQUEST_LATENCY = _get_or_create_prom(
+        lambda: _PromHistogram(
+            "axiom_http_request_duration_seconds",
+            "HTTP request latency in seconds",
+            ["method", "path"],
+        ),
+        "axiom_http_request_duration_seconds",
+    )
+    # LLM: call counter + a token counter split by direction (input/output).
+    LLM_CALLS_TOTAL = _get_or_create_prom(
+        lambda: _PromCounter(
+            "axiom_llm_calls_total",
+            "Total LLM chat completions accounted",
+        ),
+        "axiom_llm_calls_total",
     )
     LLM_TOKENS_TOTAL = _get_or_create_prom(
         lambda: _PromCounter(
             "axiom_llm_tokens_total",
-            "Total LLM tokens accounted (hook for instrumentation)",
+            "Total LLM tokens accounted, by direction",
+            ["direction"],
         ),
         "axiom_llm_tokens_total",
+    )
+    RETRIEVAL_LATENCY = _get_or_create_prom(
+        lambda: _PromHistogram(
+            "axiom_retrieval_duration_seconds",
+            "hybrid_search retrieval latency in seconds",
+            ["mode"],
+        ),
+        "axiom_retrieval_duration_seconds",
     )
     BG_TASK_ALIVE = _get_or_create_prom(
         lambda: _PromGauge(
@@ -598,7 +648,10 @@ if _PROMETHEUS_AVAILABLE:
     )
 else:  # pragma: no cover - only when prometheus-client is absent
     HTTP_REQUESTS_TOTAL = None
+    HTTP_REQUEST_LATENCY = None
+    LLM_CALLS_TOTAL = None
     LLM_TOKENS_TOTAL = None
+    RETRIEVAL_LATENCY = None
     BG_TASK_ALIVE = None
 
 
@@ -614,13 +667,138 @@ _BG_TASK_ATTRS = (
 )
 
 
-def record_llm_tokens(count: int) -> None:
-    """Instrumentation hook: account ``count`` LLM tokens for /metrics.
+def _observe_llm_tokens(input_tokens: int, output_tokens: int) -> None:
+    """Token-observer sink registered with rate_limit (P0-6.5 / P1-12.3).
 
-    Safe to call even when prometheus-client is unavailable.
+    Increments the LLM call counter and the per-direction token counter from the
+    *actual* usage parsed in providers/llm_chat. Safe when prometheus is absent.
     """
-    if LLM_TOKENS_TOTAL is not None and count > 0:
-        LLM_TOKENS_TOTAL.inc(count)
+    if LLM_CALLS_TOTAL is not None:
+        LLM_CALLS_TOTAL.inc()
+    if LLM_TOKENS_TOTAL is not None:
+        if input_tokens > 0:
+            LLM_TOKENS_TOTAL.labels(direction="input").inc(input_tokens)
+        if output_tokens > 0:
+            LLM_TOKENS_TOTAL.labels(direction="output").inc(output_tokens)
+
+
+# Register the metrics sink once at import so any chat_complete call (including
+# from the MCP service in the same process) feeds the counters.
+register_token_observer(_observe_llm_tokens)
+
+
+def record_llm_tokens(count: int) -> None:
+    """Back-compat instrumentation hook: account ``count`` output LLM tokens.
+
+    Retained for callers that only have a single aggregate count. Safe to call
+    even when prometheus-client is unavailable.
+    """
+    if count > 0:
+        _observe_llm_tokens(0, count)
+
+
+def _route_path_template(request: Request) -> str:
+    """Return the matched route's path template, e.g. ``/api/entities/{id}``.
+
+    Using the template (not ``request.url.path``) is what keeps the metric label
+    cardinality bounded — every ``/api/entities/<uuid>`` collapses to one series.
+    Falls back to a literal ``"__unmatched__"`` for 404s so an unbounded stream of
+    bogus paths cannot explode the label space.
+    """
+    route = request.scope.get("route")
+    path_format = getattr(route, "path_format", None) or getattr(route, "path", None)
+    if isinstance(path_format, str) and path_format:
+        return path_format
+    return "__unmatched__"
+
+
+def _request_bearer_token(request: Request) -> str | None:
+    """Extract the bearer token from the Authorization header, if any."""
+    header = request.headers.get("authorization")
+    if not header:
+        return None
+    parts = header.split(None, 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1].strip() or None
+    return None
+
+
+def _serve_spa_enabled() -> bool:
+    """Whether the SPA should be mounted (P1-8). Off only when explicitly 0."""
+    return os.environ.get("AXIOM_SERVE_SPA", "").strip() != "0"
+
+
+def _resolve_frontend_dist() -> Path | None:
+    """Locate the built SPA directory (P1-8 / DEP-06).
+
+    Resolution order:
+      1. ``AXIOM_FRONTEND_DIST`` (absolute path) — the container path. This is the
+         robust answer because the source-relative lookup below is brittle once
+         the package is pip-installed into site-packages (the ``parents[3]`` walk
+         no longer lands on the repo root).
+      2. The legacy source-relative ``<repo>/frontend/dist`` fallback for local
+         ``uvicorn --factory`` dev runs from a checkout.
+
+    Returns the directory if it exists, else ``None``. Logs which path was chosen
+    at startup so a misconfigured deploy is diagnosable from the logs.
+    """
+    configured = os.environ.get("AXIOM_FRONTEND_DIST", "").strip()
+    if configured:
+        candidate = Path(configured)
+        if candidate.is_dir():
+            log.info("SPA dist resolved from AXIOM_FRONTEND_DIST: %s", candidate)
+            return candidate
+        log.warning(
+            "AXIOM_FRONTEND_DIST=%s does not exist; falling back to source-relative lookup",
+            configured,
+        )
+    fallback = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+    if fallback.is_dir():
+        log.info("SPA dist resolved from source-relative path: %s", fallback)
+        return fallback
+    log.warning("SPA dist not found (AXIOM_FRONTEND_DIST unset/invalid and %s missing)", fallback)
+    return None
+
+
+def _enforce_paid_rate_limit(request: Request, requested_tokens: int) -> str:
+    """Admit one paid-LLM request through the shared limiter (P0-6).
+
+    Returns the limiter key (so the caller can attribute token accounting), or
+    raises ``HTTPException(429)`` with a ``Retry-After`` header when over budget.
+    Applied to every paid LLM endpoint (Ask, skills/run, embedding search).
+    """
+    client_host = request.client.host if request.client else None
+    key = rate_limit_key(_request_bearer_token(request), client_host)
+    try:
+        ask_limiter.check(key, requested_tokens)
+    except RateLimitExceededError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=exc.detail,
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+    return key
+
+
+def _timed_hybrid_search(
+    session: Session,
+    query: str,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Run ``hybrid_search`` and record retrieval latency (P1-12.3).
+
+    Histogram is labelled by ``mode`` so the slow semantic/hybrid paths are
+    distinguishable from cheap lexical lookups. Degrades to a plain call when
+    prometheus is unavailable.
+    """
+    mode = str(kwargs.get("mode", "hybrid"))
+    if RETRIEVAL_LATENCY is None:
+        return hybrid_search(session, query, **kwargs)
+    start = time.perf_counter()
+    try:
+        return hybrid_search(session, query, **kwargs)
+    finally:
+        RETRIEVAL_LATENCY.labels(mode=mode).observe(time.perf_counter() - start)
 
 
 def create_app(
@@ -633,7 +811,15 @@ def create_app(
 ) -> FastAPI:
     _fail_fast_on_bad_config()
     db_url = db_url or os.environ.get("DATABASE_URL") or "sqlite:///./axiom.db"
-    engine = create_engine(db_url, future=True)
+    # P0-5/P1-11: build the engine through the central factory (applies SQLite
+    # WAL/busy_timeout/foreign_keys PRAGMAs + check_same_thread=False), then run
+    # the boot-time alembic migration BEFORE the ensure_*_schema helpers so
+    # Alembic is the single source of truth. The ensure_* calls remain as a
+    # safety net (do not remove). The migration gracefully no-ops/stamps when a
+    # create_all DB has tables but no alembic_version, keeping existing tests
+    # green (see run_boot_migration).
+    engine, _factory = build_engine(db_url)
+    run_boot_migration(db_url, engine=engine)
     ensure_passports_schema(engine)
     ensure_receipts_schema(engine)
     ensure_agent_registry_schema(engine)
@@ -958,9 +1144,22 @@ def create_app(
         # X-Request-ID (OBS): generate if absent, echo on response.
         request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
         request.state.request_id = request_id
-        if HTTP_REQUESTS_TOTAL is not None:
-            HTTP_REQUESTS_TOTAL.inc()
+        method = request.method
+        start = time.perf_counter()
         response = await call_next(request)
+        # RED metrics with a *route path template* label to bound cardinality.
+        # The matched route is on the scope only after routing has run.
+        if HTTP_REQUESTS_TOTAL is not None or HTTP_REQUEST_LATENCY is not None:
+            elapsed = time.perf_counter() - start
+            path_template = _route_path_template(request)
+            if HTTP_REQUESTS_TOTAL is not None:
+                HTTP_REQUESTS_TOTAL.labels(
+                    method=method,
+                    path=path_template,
+                    status=str(response.status_code),
+                ).inc()
+            if HTTP_REQUEST_LATENCY is not None:
+                HTTP_REQUEST_LATENCY.labels(method=method, path=path_template).observe(elapsed)
         response.headers["X-Request-ID"] = request_id
         return response
 
@@ -1006,6 +1205,13 @@ def create_app(
                     continue
                 if task_exc is not None:
                     failed.append(f"task {attr}: {task_exc!r}")
+
+        # 4) SPA must be mounted when serving is enabled (P1-8 / D.3). The dist
+        # path is otherwise a silent failure: the API serves but the UI 404s.
+        if getattr(app.state, "spa_serve_enabled", False) and not getattr(
+            app.state, "spa_mounted", False
+        ):
+            failed.append("spa: not mounted (set AXIOM_FRONTEND_DIST or AXIOM_SERVE_SPA=0)")
 
         status = "ok" if not failed else "unavailable"
         body = {"status": status, "checks": {"failed": failed}}
@@ -1548,20 +1754,10 @@ def create_app(
         key_name = f"state:{state_id}:{token_name}"
         return _put_connector_secret(session, vendor, key_name, plaintext)
 
-    def _get_connector_token(
-        session: Any,
-        row: ConnectorStateRow,
-        token_name: str,
-    ) -> str | None:
-        value = row.access_token if token_name == "access_token" else row.refresh_token
-        return _get_connector_secret(session, row.vendor, value)
-
-    def _connector_token_state(session: Any, row: ConnectorStateRow) -> SimpleNamespace:
-        return SimpleNamespace(
-            access_token=_get_connector_token(session, row, "access_token") or "",
-            refresh_token=_get_connector_token(session, row, "refresh_token"),
-            token_expires_at=row.token_expires_at,
-        )
+    # P1-13 / Phase-2 cleanup: the local _connector_token_state/_get_connector_token
+    # duplicate bypassed OAuth token refresh. The canonical sync_runner.
+    # connector_token_state (imported above) resolves vault refs AND refreshes
+    # expiring tokens before use; the Notion poller route now calls it directly.
 
     def _webhook_graph_payload(
         vendor: str, event: Any
@@ -1817,8 +2013,10 @@ def create_app(
             raise HTTPException(status_code=401, detail="invalid webhook signature")
         events = handler.parse(parsed_request)
         with session_local() as session:
-            for event in events:
-                _persist_connector_event(
+            new_events = [
+                event
+                for event in events
+                if _persist_connector_event(
                     session,
                     vendor="github",
                     connector_state_id=None,
@@ -1829,11 +2027,14 @@ def create_app(
                     received_at=datetime.utcnow(),
                     event_timestamp=event.timestamp,
                 )
+            ]
             session.commit()
+            # P1-4: only re-apply NEWLY-persisted events; a re-delivered duplicate
+            # must not double-write to the brain.
             ingested = await _apply_signed_webhook_events_to_brain(
                 session,
                 "github",
-                events,
+                new_events,
                 signature_ok,
             )
         for event in events:
@@ -1999,8 +2200,10 @@ def create_app(
             raise HTTPException(status_code=401, detail="invalid webhook signature")
         events = handler.parse(parsed_request)
         with session_local() as session:
-            for event in events:
-                _persist_connector_event(
+            new_events = [
+                event
+                for event in events
+                if _persist_connector_event(
                     session,
                     vendor="linear",
                     connector_state_id=None,
@@ -2011,11 +2214,13 @@ def create_app(
                     received_at=datetime.utcnow(),
                     event_timestamp=event.timestamp,
                 )
+            ]
             session.commit()
+            # P1-4: only re-apply NEWLY-persisted events (skip re-deliveries).
             ingested = await _apply_signed_webhook_events_to_brain(
                 session,
                 "linear",
-                events,
+                new_events,
                 signature_ok,
             )
         for event in events:
@@ -2186,8 +2391,10 @@ def create_app(
             raise HTTPException(status_code=401, detail="invalid webhook signature")
         events = handler.parse(parsed_request)
         with session_local() as session:
-            for event in events:
-                _persist_connector_event(
+            new_events = [
+                event
+                for event in events
+                if _persist_connector_event(
                     session,
                     vendor="slack",
                     connector_state_id=None,
@@ -2198,11 +2405,13 @@ def create_app(
                     received_at=datetime.utcnow(),
                     event_timestamp=event.timestamp,
                 )
+            ]
             session.commit()
+            # P1-4: only re-apply NEWLY-persisted events (skip re-deliveries).
             ingested = await _apply_signed_webhook_events_to_brain(
                 session,
                 "slack",
-                events,
+                new_events,
                 signature_ok,
             )
         for event in events:
@@ -2359,9 +2568,11 @@ def create_app(
             )
             if state is None:
                 raise HTTPException(status_code=404, detail="Notion connector not installed")
-            events = NotionPoller(state=_connector_token_state(session, state)).poll_once()
-            for event in events:
-                _persist_connector_event(
+            events = NotionPoller(state=connector_token_state(session, state)).poll_once()
+            new_events = [
+                event
+                for event in events
+                if _persist_connector_event(
                     session,
                     vendor="notion",
                     connector_state_id=state.id,
@@ -2372,10 +2583,20 @@ def create_app(
                     received_at=datetime.utcnow(),
                     event_timestamp=event.timestamp,
                 )
+            ]
             state.last_sync_at = datetime.utcnow()
             session.add(state)
             session.commit()
-        for event in events:
+            # P1-4: the poller previously persisted rows but never applied them to
+            # the brain (the asymmetry the audit flagged). Apply NEWLY-persisted
+            # (non-duplicate) events, mirroring the signed webhook routes.
+            ingested = await _apply_signed_webhook_events_to_brain(
+                session,
+                "notion",
+                new_events,
+                True,
+            )
+        for event in new_events:
             await broadcaster.publish(
                 {
                     "type": "connector_event_received",
@@ -2385,7 +2606,12 @@ def create_app(
                     "payload": {"vendor": "notion", "event_type": event.event_type},
                 }
             )
-        return {"status": "ok", "events": len(events), "watch_mode": "polling"}
+        return {
+            "status": "ok",
+            "events": len(new_events),
+            "ingested": ingested,
+            "watch_mode": "polling",
+        }
 
     @app.get("/api/internal/connectors/notion/status")
     def get_notion_status() -> dict[str, Any]:
@@ -2526,8 +2752,10 @@ def create_app(
             raise HTTPException(status_code=401, detail="invalid webhook signature")
         events = handler.parse(parsed_request)
         with session_local() as session:
-            for event in events:
-                _persist_connector_event(
+            new_events = [
+                event
+                for event in events
+                if _persist_connector_event(
                     session,
                     vendor="gmail",
                     connector_state_id=None,
@@ -2538,11 +2766,13 @@ def create_app(
                     received_at=datetime.utcnow(),
                     event_timestamp=event.timestamp,
                 )
+            ]
             session.commit()
+            # P1-4: only re-apply NEWLY-persisted events (skip re-deliveries).
             ingested = await _apply_signed_webhook_events_to_brain(
                 session,
                 "gmail",
-                events,
+                new_events,
                 signature_ok,
             )
         for event in events:
@@ -3464,25 +3694,43 @@ def create_app(
             _raise_skill_error(exc)
 
     @app.post("/api/internal/skills/{skill_id}/run")
-    def post_internal_skill_run(
+    async def post_internal_skill_run(
         skill_id: str,
         body: Annotated[SkillRunIn, Body()],
+        request: Request,
     ) -> dict[str, Any]:
-        def publish_sync(event_type: str, payload: dict[str, Any]) -> None:
-            import anyio
+        # P0-6: rate-limit + per-key concurrency cap around the paid LLM call.
+        # run_skill makes a real provider call; bound it the same way as Ask.
+        key = _enforce_paid_rate_limit(request, _DEFAULT_SKILL_TOKEN_COST)
 
+        import anyio
+
+        def publish_sync(event_type: str, payload: dict[str, Any]) -> None:
             anyio.from_thread.run(publish_skill_event, event_type, payload, skill_id)
 
+        def _run() -> dict[str, Any]:
+            begin_llm_call(key, _DEFAULT_SKILL_TOKEN_COST)
+            try:
+                return run_skill(
+                    skill_id,
+                    body.input_payload,
+                    body.agent_name,
+                    session_factory=session_local,
+                    event_callback=publish_sync,
+                    idempotency_key=body.idempotency_key,
+                    policy_evaluator=app.state.policy_evaluator,
+                )
+            finally:
+                end_llm_call()
+
+        # Run the blocking skill (paid LLM call) in an AnyIO worker thread under
+        # the per-key concurrency semaphore (P0-6). AnyIO's to_thread.run_sync is
+        # required (not asyncio.to_thread) so the publish_sync callback's
+        # anyio.from_thread.run portal is available inside the worker thread.
+        semaphore = llm_concurrency.semaphore_for(key)
         try:
-            return run_skill(
-                skill_id,
-                body.input_payload,
-                body.agent_name,
-                session_factory=session_local,
-                event_callback=publish_sync,
-                idempotency_key=body.idempotency_key,
-                policy_evaluator=app.state.policy_evaluator,
-            )
+            async with semaphore:
+                return await anyio.to_thread.run_sync(_run)
         except Exception as exc:  # noqa: BLE001
             _raise_skill_error(exc)
 
@@ -3655,14 +3903,22 @@ def create_app(
         q: str = Query("", min_length=0),
         limit: int = Query(8, ge=1, le=25),
     ) -> list[EntitySearchResult]:
+        # Lexical autocomplete: no embedding/LLM call, so no paid rate-limit here.
         with session_local() as session:
             return search_entities(session, q, limit=limit)
 
     @app.post("/api/internal/search")
-    def post_internal_search(body: Annotated[InternalSearchIn, Body()]) -> dict[str, Any]:
+    def post_internal_search(
+        body: Annotated[InternalSearchIn, Body()],
+        request: Request,
+    ) -> dict[str, Any]:
+        # P0-6: semantic/hybrid modes make a paid OpenAI embedding call on the
+        # query — rate-limit those (lexical/graph/ppr are free, so skip them).
+        if body.mode in {"semantic", "hybrid"}:
+            _enforce_paid_rate_limit(request, _EMBEDDING_QUERY_TOKEN_COST)
         try:
             with session_local() as session:
-                return hybrid_search(
+                return _timed_hybrid_search(
                     session,
                     body.query,
                     mode=body.mode,
@@ -4168,9 +4424,16 @@ def create_app(
             emitted += 1
         return {"emitted": emitted}
 
-    frontend_dist = Path(__file__).resolve().parents[3] / "frontend" / "dist"
-    if frontend_dist.exists():
-        app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
+    # P1-8: mount the built SPA at "/". The dist directory is resolved from
+    # AXIOM_FRONTEND_DIST (container) with a source-relative fallback (dev). Record
+    # whether it mounted so /readyz can flag a silent SPA-serving failure (D.3).
+    app.state.spa_serve_enabled = _serve_spa_enabled()
+    app.state.spa_mounted = False
+    if app.state.spa_serve_enabled:
+        frontend_dist = _resolve_frontend_dist()
+        if frontend_dist is not None:
+            app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
+            app.state.spa_mounted = True
 
     return app
 

@@ -413,12 +413,11 @@ def _main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--database-url", required=True, help="SQLAlchemy database URL")
     args = parser.parse_args(argv)
 
-    from axiom.schema.models import Base
     from axiom.skills.skill_file_parser import (
         SkillFileParseError,
         parse_skill_file_yaml,
     )
-    from axiom.storage.db import init_engine
+    from axiom.storage.db import build_engine, run_boot_migration
 
     try:
         with open(args.path, encoding="utf-8") as handle:
@@ -439,12 +438,12 @@ def _main(argv: list[str] | None = None) -> int:
         print(json.dumps({"status": "failed", "error": f"invalid --trigger JSON: {exc}"}))
         return 1
 
-    # Route the standalone-CLI engine through the single-source engine factory
-    # (P1-11) rather than building a rogue engine. This is the CLI entry point
-    # only; the test/serving path builds schema via create_app()/ensure_* helpers.
-    engine = init_engine(args.database_url)
-    Base.metadata.create_all(engine)
-    session_factory = sessionmaker(bind=engine, future=True)
+    # Route the standalone-CLI engine through the central factory (P0-5: SQLite
+    # PRAGMAs) and let Alembic own the schema (P1-11) instead of the competing
+    # Base.metadata.create_all. run_boot_migration upgrades a fresh DB to head
+    # and stamps a pre-existing create_all DB, gated by AXIOM_AUTO_MIGRATE.
+    engine, session_factory = build_engine(args.database_url)
+    run_boot_migration(args.database_url, engine=engine)
 
     runner = SkillFileRunner(session_factory=session_factory)
     result = runner.run(skill_file, trigger=trigger)

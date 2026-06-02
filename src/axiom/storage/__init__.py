@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from axiom.schema.dto import EdgeDTO, EntityDTO
 from axiom.storage import crud
-from axiom.storage.db import get_session, init_engine
+from axiom.storage.db import build_engine, get_session, init_engine
 
 Direction = Literal["outgoing", "incoming", "both"]
 
@@ -102,6 +102,7 @@ __all__ = [
     "Direction",
     "Session",
     "add_edge",
+    "build_engine",
     "create_entity",
     "crud",
     "delete_entity",

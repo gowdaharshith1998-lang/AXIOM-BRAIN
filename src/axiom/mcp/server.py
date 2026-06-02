@@ -59,6 +59,11 @@ from axiom.skills.runner import run_skill
 from axiom.skills.skill_md import serialize_skill_md
 from axiom.storage import crud
 from axiom.storage.db import init_engine
+from axiom.studio.rate_limit import (
+    RateLimitExceededError,
+    ask_limiter,
+    rate_limit_key,
+)
 from axiom.studio.sources import ensure_sources_schema, real_sources_snapshot
 
 Direction = Literal["outgoing", "incoming", "both"]
@@ -66,6 +71,10 @@ P = ParamSpec("P")
 R = TypeVar("R")
 ToolCallable = Callable[P, R]
 TITLE_KEYS = ("title", "name", "subject", "label")
+# Pre-charged token estimate for one embedding-backed MCP query (the OpenAI
+# embedding call on the user query in semantic/hybrid mode). Mirrors the HTTP
+# search route's small fixed charge against the shared daily token budget.
+_MCP_EMBEDDING_QUERY_TOKEN_COST = 64
 
 
 def _truthy_env(name: str) -> bool:
@@ -118,14 +127,6 @@ def _title_from_data(entity_id: str, data: dict[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return entity_id
-
-
-def _safe_fts_query(text: str) -> str:
-    words = [w for w in text.strip().split() if w]
-    if not words:
-        return ""
-    escaped = [f'"{w.replace('"', '""')}"*' for w in words[:6]]
-    return " AND ".join(escaped)
 
 
 class NavigationEventForwarder:
@@ -1087,10 +1088,21 @@ class AxiomMCPService:
         entity_types: list[str] | None = None,
         cluster_id: str | None = None,
         mode: SearchMode = "hybrid",
+        passport_token: str | None = None,
     ) -> dict[str, Any]:
         q = query.strip()
         if not q:
             return {"results": [], "count": 0}
+
+        # P0-6.3: semantic/hybrid modes make a paid OpenAI embedding call on the
+        # query. Enforce the same per-key daily token budget + per-minute rate
+        # limit as the HTTP Ask/search routes, failing closed with a clear error.
+        if mode in {"semantic", "hybrid"}:
+            limiter_key = rate_limit_key(passport_token, "mcp")
+            try:
+                ask_limiter.check(limiter_key, _MCP_EMBEDDING_QUERY_TOKEN_COST)
+            except RateLimitExceededError as exc:
+                raise ToolError(exc.detail) from exc
 
         safe_limit = min(max(max_results, 1), 50)
         with self._session_factory() as session:
@@ -1110,85 +1122,6 @@ class AxiomMCPService:
                 "query_match" if "lexical" in methods or "semantic" in methods else "graph_match"
             )
         return out
-
-        fts_query = _safe_fts_query(q)
-        seed_ids: list[str] = []
-        if fts_query:
-            try:
-                cur = self._fts_conn.cursor()
-                cur.execute(
-                    "SELECT entity_id FROM entities_fts WHERE entities_fts MATCH ? LIMIT ?",
-                    (fts_query, 600),
-                )
-                seed_ids = [str(row[0]) for row in cur.fetchall()]
-            except Exception:
-                seed_ids = []
-
-        if not seed_ids:
-            seed_ids = list(self._cache.entities.keys())[:600]
-
-        seeds: list[tuple[_EntityLite, float]] = []
-        for entity_id in seed_ids:
-            entity = self._cache.entities.get(entity_id)
-            if entity is None:
-                continue
-            if entity_types and entity.type not in entity_types:
-                continue
-            if cluster_id is not None and entity.cluster_id != cluster_id:
-                continue
-            score = _score_title(q, _title_from_data(entity.id, entity.data))
-            if score > 0:
-                seeds.append((entity, score))
-
-        seeds.sort(key=lambda item: (-item[1], -item[0].composite_importance, item[0].id))
-        seeds = seeds[:safe_limit]
-
-        candidate_map: dict[str, dict[str, Any]] = {}
-        nav_steps: list[tuple[str, str, str | None]] = []
-
-        for entity, match_score in seeds:
-            candidate_map[entity.id] = self._entity_result(entity, "query_match", match_score)
-
-            neighbors = self._cache.outgoing.get(entity.id, []) + self._cache.incoming.get(
-                entity.id, []
-            )
-            for neighbor_id, edge_id, _rel in neighbors:
-                neighbor = self._cache.entities.get(neighbor_id)
-                if neighbor is None:
-                    continue
-                if entity_types and neighbor.type not in entity_types:
-                    continue
-                if cluster_id is not None and neighbor.cluster_id != cluster_id:
-                    continue
-                nav_steps.append((entity.id, neighbor.id, edge_id))
-                if neighbor.id in candidate_map:
-                    continue
-                neighbor_score = max(0.0, match_score - 0.2)
-                candidate_map[neighbor.id] = {
-                    "id": neighbor.id,
-                    "type": neighbor.type,
-                    "data": neighbor.data,
-                    "source_id": neighbor.source_id,
-                    "cluster_id": neighbor.cluster_id,
-                    "composite_importance": neighbor.composite_importance,
-                    "title": _title_from_data(neighbor.id, neighbor.data),
-                    "score": round(neighbor.composite_importance, 6),
-                    "match_score": round(float(neighbor_score), 6),
-                    "matched_on": f"neighbor_of:{entity.id}",
-                }
-
-        if self._events is not None:
-            self._events.emit_steps(nav_steps)
-
-        ranked = sorted(
-            candidate_map.values(),
-            key=lambda item: (
-                -float(item.get("score", 0.0)),
-                -float(item.get("match_score", 0.0)),
-                str(item["id"]),
-            ),
-        )
-        return {"results": ranked[:safe_limit], "count": len(ranked[:safe_limit])}
 
     def get_entity(
         self,
@@ -1466,7 +1399,9 @@ def build_mcp_server(
             intent="read",
             cluster_id=cluster_id or "external_mcp",
         )
-        return service.query_brain(query, max_results, entity_types, cluster_id, mode)
+        return service.query_brain(
+            query, max_results, entity_types, cluster_id, mode, passport_token
+        )
 
     @tool(name="axiom_get_entity", description="Fetch one entity and optional neighbors")
     def axiom_get_entity(

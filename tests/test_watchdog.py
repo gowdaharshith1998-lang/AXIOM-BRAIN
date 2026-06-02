@@ -108,9 +108,12 @@ def test_r1_billing_change_with_recent_decision_negative(db_session: Session) ->
         [
             _entity("bill_change", cluster_id="billing_payments"),
             _entity("decision_recent", type_="decision", updated_at=now),
-            _edge("edge_decision", "bill_change", "decision_recent"),
         ]
     )
+    # Flush entities before the edge: the real edges->entities FK is enforced and
+    # the unit-of-work cannot order raw-FK rows without an ORM relationship.
+    db_session.flush()
+    db_session.add(_edge("edge_decision", "bill_change", "decision_recent"))
     db_session.commit()
     assert "R1" not in _detect_rules(db_session, "bill_change", now)
 
@@ -131,9 +134,11 @@ def test_r2_p1_ticket_with_incident_runbook_negative(db_session: Session) -> Non
                 cluster_id="incidents_ops",
                 data={"doc_type": "runbook"},
             ),
-            _edge("edge_runbook", "ticket_p1", "runbook"),
         ]
     )
+    # Flush entities before the edge so the enforced edges->entities FK is satisfied.
+    db_session.flush()
+    db_session.add(_edge("edge_runbook", "ticket_p1", "runbook"))
     db_session.commit()
     assert "R2" not in _detect_rules(db_session, "ticket_p1", datetime.utcnow())
 
@@ -151,9 +156,11 @@ def test_r3_policy_doc_with_inbound_edge_negative(db_session: Session) -> None:
         [
             _entity("policy_old", type_="policy", created_at=old, updated_at=old),
             _entity("owner_process", type_="process"),
-            _edge("edge_policy", "owner_process", "policy_old"),
         ]
     )
+    # Flush entities before the edge so the enforced edges->entities FK is satisfied.
+    db_session.flush()
+    db_session.add(_edge("edge_policy", "owner_process", "policy_old"))
     db_session.commit()
     assert "R3" not in _detect_rules(db_session, "policy_old", datetime.utcnow())
 
@@ -218,10 +225,12 @@ def test_r6_stale_decision_referenced_positive(db_session: Session) -> None:
         [
             _entity("dependent", type_="process"),
             _entity("old_decision", type_="decision", updated_at=old, created_at=old),
-            _edge(
-                "edge_old_decision", "dependent", "old_decision", "depends_on", load_bearing=True
-            ),
         ]
+    )
+    # Flush entities before the edge so the enforced edges->entities FK is satisfied.
+    db_session.flush()
+    db_session.add(
+        _edge("edge_old_decision", "dependent", "old_decision", "depends_on", load_bearing=True)
     )
     db_session.commit()
     assert "R6" in _detect_rules(db_session, "dependent", datetime.utcnow())
@@ -232,14 +241,18 @@ def test_r6_fresh_decision_reference_negative(db_session: Session) -> None:
         [
             _entity("dependent", type_="process"),
             _entity("fresh_decision", type_="decision"),
-            _edge(
-                "edge_fresh_decision",
-                "dependent",
-                "fresh_decision",
-                "depends_on",
-                load_bearing=True,
-            ),
         ]
+    )
+    # Flush entities before the edge so the enforced edges->entities FK is satisfied.
+    db_session.flush()
+    db_session.add(
+        _edge(
+            "edge_fresh_decision",
+            "dependent",
+            "fresh_decision",
+            "depends_on",
+            load_bearing=True,
+        )
     )
     db_session.commit()
     assert "R6" not in _detect_rules(db_session, "dependent", datetime.utcnow())

@@ -186,6 +186,12 @@ def chat_complete(
     when the key store is unavailable, LLMProviderKeyNotFound when no key has
     been registered for the requested provider, and UnknownLLMProvider for an
     unsupported provider string.
+
+    On success the *actual* input+output token usage parsed from the provider
+    response is recorded via ``rate_limit.record_llm_tokens`` so the per-day
+    budget reconciles against reality and the /metrics LLM counters increment
+    (P0-6.5). The limiter key + requested budget are picked up from the active
+    thread's attribution stash set by the calling route/MCP entrypoint.
     """
 
     normalized = provider.strip().lower()
@@ -198,18 +204,44 @@ def chat_complete(
     if not resolved_model:
         raise ValueError("model must not be empty")
     if normalized == "anthropic":
-        return _call_anthropic(
+        completion = _call_anthropic(
             plaintext_key,
             model=resolved_model,
             messages=messages,
             max_tokens=max_tokens,
         )
-    return _call_openai(
-        plaintext_key,
-        model=resolved_model,
-        messages=messages,
-        max_tokens=max_tokens,
-    )
+    else:
+        completion = _call_openai(
+            plaintext_key,
+            model=resolved_model,
+            messages=messages,
+            max_tokens=max_tokens,
+        )
+    _record_usage(completion.usage)
+    return completion
+
+
+def _record_usage(usage: dict[str, int]) -> None:
+    """Wire actual LLM usage into the limiter/metrics hook (P0-6.5).
+
+    Imported lazily so this provider module has no hard dependency on the studio
+    layer; instrumentation failures never propagate to the caller.
+    """
+    try:
+        from axiom.studio.rate_limit import (
+            current_call_attribution,
+            record_llm_tokens,
+        )
+
+        key, requested = current_call_attribution()
+        record_llm_tokens(
+            int(usage.get("input_tokens") or 0),
+            int(usage.get("output_tokens") or 0),
+            key=key,
+            requested_tokens=requested,
+        )
+    except Exception:  # noqa: BLE001 - accounting must never break a completion
+        log.debug("LLM token accounting failed", exc_info=True)
 
 
 __all__ = [

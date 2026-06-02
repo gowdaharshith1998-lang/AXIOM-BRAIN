@@ -4,10 +4,17 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import TypedDict
 
-from sqlalchemy import select
+from sqlalchemy import func, nulls_last, select
 from sqlalchemy.orm import Session
 
 from axiom.schema.models import Edge, Entity
+
+# Hard ceiling on how many entity rows ``search_entities`` pulls into Python to
+# score per call (DB-003). Mirrors ``retrieval.search.MAX_CANDIDATES`` but is
+# defined locally to avoid a circular import (``retrieval.search`` imports from
+# this module). The candidate window is importance-ordered so the cap keeps the
+# most important / recent entities rather than an arbitrary set.
+MAX_CANDIDATES = 2000
 
 
 class EntitySearchResult(TypedDict):
@@ -83,18 +90,49 @@ def _score_title(query: str, title: str) -> float:
     return max(0.0, similarity * 0.75)
 
 
+def _connection_counts(session: Session, entity_ids: set[str]) -> Counter[str]:
+    """Edges incident to each candidate entity, aggregated in SQL (DB-003).
+
+    Two grouped ``COUNT(*)`` queries restricted to ``entity_ids`` replace a
+    full ``select(Edge)`` scan, so only counts for entities we actually score
+    are computed.
+    """
+
+    counts: Counter[str] = Counter()
+    if not entity_ids:
+        return counts
+    for column in (Edge.source_id, Edge.target_id):
+        rows = session.execute(
+            select(column, func.count()).where(column.in_(entity_ids)).group_by(column)
+        ).all()
+        for entity_id, count in rows:
+            counts[entity_id] += int(count)
+    return counts
+
+
 def search_entities(session: Session, query: str, *, limit: int = 8) -> list[EntitySearchResult]:
     q = query.strip()
     if not q:
         return []
 
     safe_limit = min(max(limit, 1), 25)
-    entities = session.execute(select(Entity)).scalars().all()
-    edges = session.execute(select(Edge)).scalars().all()
-    connection_counts: Counter[str] = Counter()
-    for edge in edges:
-        connection_counts[edge.source_id] += 1
-        connection_counts[edge.target_id] += 1
+    # Bound the candidate scan and order it so the cap retains the most
+    # important / recent entities rather than an arbitrary window (DB-003).
+    entities = list(
+        session.execute(
+            select(Entity)
+            .order_by(
+                nulls_last(Entity.composite_importance.desc()),
+                Entity.updated_at.desc(),
+            )
+            .limit(MAX_CANDIDATES)
+        )
+        .scalars()
+        .all()
+    )
+    # Count edges incident to only the candidate entities, pushing the
+    # aggregation into SQL instead of loading the whole edge table (DB-003).
+    connection_counts = _connection_counts(session, {entity.id for entity in entities})
 
     ranked: list[_RankedEntity] = []
     for entity in entities:

@@ -22,18 +22,33 @@ def ensure_sources_schema(engine: Engine) -> None:
     inspector = inspect(engine)
     if not inspector.has_table("sources"):
         create_schema_table(Source.__table__, engine)
+    # Defense in depth: seed both synthetic source rows so any synthetic ingest
+    # path (entities.source_id = 'synthetic-default' or 'live-synthetic') always
+    # has its referenced row present, even though entities.source_id is no longer
+    # a hard FK to sources.id.
+    seeds = [
+        Source(
+            id="synthetic-default",
+            source_type="synthetic",
+            display_name="Synthetic",
+            connected=True,
+            metadata_json={},
+        ),
+        Source(
+            id="live-synthetic",
+            source_type="synthetic",
+            display_name="Live Synthetic",
+            connected=True,
+            metadata_json={},
+        ),
+    ]
     with Session(engine, expire_on_commit=False, future=True) as session:
-        row = session.get(Source, "synthetic-default")
-        if row is None:
-            session.add(
-                Source(
-                    id="synthetic-default",
-                    source_type="synthetic",
-                    display_name="Synthetic",
-                    connected=True,
-                    metadata_json={},
-                )
-            )
+        added = False
+        for seed in seeds:
+            if session.get(Source, seed.id) is None:
+                session.add(seed)
+                added = True
+        if added:
             session.commit()
 
 

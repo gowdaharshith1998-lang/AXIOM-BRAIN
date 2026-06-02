@@ -21,19 +21,18 @@ import logging
 from typing import Any
 
 import networkx as nx  # type: ignore[import-untyped]
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from axiom.api.search import title_for_entity
 from axiom.retrieval.embeddings import EmbeddingProvider
 from axiom.retrieval.search import (
     SearchResult,
+    _edges_touching,
     _filtered_entities,
     _safe_limit,
     lexical_search,
     semantic_search,
 )
-from axiom.schema.models import Edge
 
 log = logging.getLogger("axiom.retrieval.graph_rank")
 
@@ -101,7 +100,10 @@ def _build_graph(
     entity_map = {entity.id: entity for entity in entities}
     graph: nx.DiGraph = nx.DiGraph()
     graph.add_nodes_from(entity_map)
-    for edge in session.execute(select(Edge)).scalars().all():
+    # Only edges with an endpoint in the candidate set can become graph edges,
+    # so restrict the scan to that set instead of loading the whole edge table
+    # (127k rows in the live DB). Bounded by AXIOM_MAX_EDGE_SCAN (DB-003).
+    for edge in _edges_touching(session, set(entity_map)):
         if edge.source_id in entity_map and edge.target_id in entity_map:
             # Multiple edges between the same pair just reinforce the link.
             if graph.has_edge(edge.source_id, edge.target_id):

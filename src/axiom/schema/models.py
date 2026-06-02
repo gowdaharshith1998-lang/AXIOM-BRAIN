@@ -49,9 +49,15 @@ class Entity(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     type: Mapped[str] = mapped_column(String(64), index=True)  # free-text; NOT enum
     data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    source_id: Mapped[str | None] = mapped_column(
-        String(32), ForeignKey("sources.id"), nullable=True, index=True
-    )
+    # Overloaded, intentionally NOT a ForeignKey to sources.id. This column holds
+    # EITHER a real sources.id (synthetic ingest paths: 'synthetic-default',
+    # 'live-synthetic') OR an external 'vendor:type:id' reference that doubles as
+    # the connector upsert dedup key (e.g. 'github:pull_request:123456789',
+    # 'linear:issue:issue_1') and is NOT a row in the sources table. A FK here
+    # would (and did, once PRAGMA foreign_keys=ON landed) reject every connector
+    # ingest. Widened from String(32): connector refs exceed 32 chars (SQLite
+    # ignores the length, but the model must be honest about what it stores).
+    source_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True

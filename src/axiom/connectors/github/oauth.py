@@ -44,4 +44,10 @@ class GitHubOAuth(OAuthFlow):
         )
 
     def refresh(self, state: ConnectorState) -> ConnectorState:
+        """No-op: GitHub OAuth access tokens do not expire.
+
+        GitHub App user-to-server tokens *can* expire, but the OAuth App tokens
+        this connector mints are non-expiring and carry no refresh token, so the
+        existing state is returned unchanged.
+        """
         return state

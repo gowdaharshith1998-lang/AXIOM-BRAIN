@@ -8,10 +8,11 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 import axiom.studio.server as server
 from axiom import cli
-from axiom.schema.models import Base
+from axiom.schema.models import Base, Source
 from axiom.studio.server import create_app
 
 
@@ -22,6 +23,22 @@ def _make_db_url(tmp_path: Path) -> str:
 def _create_schema(db_url: str) -> None:
     engine = create_engine(db_url, future=True)
     Base.metadata.create_all(engine)
+    # P0-5: foreign_keys are now enforced, so the live-synthetic ingest path
+    # requires the referenced sources row to exist before entities reference it.
+    # Seed it here as a valid precondition. (Deferred: production code should
+    # auto-seed this 'live-synthetic' source row — see notes.)
+    with Session(engine, future=True) as session:
+        if session.get(Source, "live-synthetic") is None:
+            session.add(
+                Source(
+                    id="live-synthetic",
+                    source_type="synthetic",
+                    display_name="Live Synthetic",
+                    connected=True,
+                    metadata_json={},
+                )
+            )
+            session.commit()
     engine.dispose()
 
 

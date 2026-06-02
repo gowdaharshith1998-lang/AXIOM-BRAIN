@@ -7,17 +7,19 @@ import os
 import sys
 from collections import Counter
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
 from axiom.ingest.broadcaster import EventBroadcaster
 from axiom.ingest.pipeline import IngestPipeline
 from axiom.sources.synthetic import SyntheticSource
+from axiom.storage.db import build_engine, run_boot_migration
 
 
 def cmd_ingest(args: argparse.Namespace) -> None:
-    engine = create_engine(args.db_url, future=True)
-    session_local = sessionmaker(bind=engine, future=True)
+    # P0-5/P1-11: route through the central factory so the SQLite PRAGMAs
+    # (WAL/busy_timeout/foreign_keys) apply to this separate writer process, and
+    # bring the schema to alembic head (gated by AXIOM_AUTO_MIGRATE) so a fresh
+    # DB has the tables this writer needs.
+    engine, session_local = build_engine(args.db_url)
+    run_boot_migration(args.db_url, engine=engine)
     broadcaster = EventBroadcaster()
 
     if args.source != "synthetic":

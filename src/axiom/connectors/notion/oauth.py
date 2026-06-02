@@ -49,4 +49,10 @@ class NotionOAuth(OAuthFlow):
         )
 
     def refresh(self, state: ConnectorState) -> ConnectorState:
+        """No-op: Notion internal-integration access tokens do not expire.
+
+        Notion does not issue refresh tokens for the OAuth flow this connector
+        uses; the access token remains valid until the integration is revoked,
+        so the existing state is returned unchanged.
+        """
         return state

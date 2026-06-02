@@ -114,39 +114,68 @@ def receipt_to_dict(receipt: Receipt) -> dict[str, Any]:
     }
 
 
-def canonical_receipt_payload(receipt: Receipt) -> dict[str, Any]:
+def _canonical_dict(receipt: Receipt, *, exclude: frozenset[str]) -> dict[str, Any]:
+    """Single source of truth for receipt canonicalization.
+
+    Builds the full receipt dict, drops every key in ``exclude``, and omits a
+    ``passport_id`` that is None (so legacy receipts written before the
+    passport_id column existed canonicalize identically to NULL-passport rows).
+    All three public canonicalizers below are thin wrappers over this function
+    so their key-handling and None-passport rules can never drift apart.
+    """
     payload = receipt_to_dict(receipt)
-    payload.pop("this_hash")
+    for key in exclude:
+        payload.pop(key, None)
     if payload.get("passport_id") is None:
         payload.pop("passport_id", None)
     return payload
 
 
-def canonical_payload(receipt: Receipt) -> bytes:
-    payload = receipt_to_dict(receipt)
-    for key in ("signature", "sig", "this_hash", "prev_hash"):
-        payload.pop(key, None)
-    if payload.get("passport_id") is None:
-        payload.pop("passport_id", None)
-    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+def _canonical_bytes(receipt: Receipt, *, exclude: frozenset[str]) -> bytes:
+    return json.dumps(
+        _canonical_dict(receipt, exclude=exclude),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+# Excludes for each canonicalization variant, declared once so the difference
+# between them is explicit and reviewable.
+_HASH_EXCLUDE = frozenset({"this_hash"})  # chain hash binds signature + prev_hash
+_SIGNING_EXCLUDE = frozenset({"signature", "sig", "this_hash"})  # KEEPS prev_hash
+_LEGACY_EXCLUDE = frozenset({"signature", "sig", "this_hash", "prev_hash"})
+
+
+def canonical_receipt_payload(receipt: Receipt) -> dict[str, Any]:
+    """Canonical dict the chain SHA-256 (``this_hash``) is computed over.
+
+    Thin alias over :func:`_canonical_dict`. Excludes only ``this_hash`` so the
+    chain hash binds both the signature and ``prev_hash``.
+    """
+    return _canonical_dict(receipt, exclude=_HASH_EXCLUDE)
 
 
 def signing_payload(receipt: Receipt) -> bytes:
     """Canonical bytes that the Ed25519 signature commits to.
 
-    GOV-SIG-004 / GOV-CHAIN-005: unlike ``canonical_payload`` (which drops
-    ``prev_hash`` and is kept only for backwards-compatible deterministic
-    hashing), the signature MUST cover ``prev_hash`` so a signed receipt cannot
-    be relocated to a different position in the chain and still verify. We sign
-    over everything except the signature itself and ``this_hash`` (which is
-    derived after signing); ``prev_hash`` is explicitly retained.
+    GOV-SIG-004 / GOV-CHAIN-005: the signature MUST cover ``prev_hash`` so a
+    signed receipt cannot be relocated to a different position in the chain and
+    still verify. We sign over everything except the signature itself and
+    ``this_hash`` (which is derived after signing); ``prev_hash`` is explicitly
+    retained. Thin alias over :func:`_canonical_dict`.
     """
-    payload = receipt_to_dict(receipt)
-    for key in ("signature", "sig", "this_hash"):
-        payload.pop(key, None)
-    if payload.get("passport_id") is None:
-        payload.pop("passport_id", None)
-    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return _canonical_bytes(receipt, exclude=_SIGNING_EXCLUDE)
+
+
+def canonical_payload(receipt: Receipt) -> bytes:
+    """Legacy canonicalizer kept for backwards compatibility.
+
+    Drops ``prev_hash`` in addition to the signature/hash columns, so it does
+    NOT commit to chain position — use :func:`signing_payload` for anything that
+    must be tamper-evident. Thin alias over :func:`_canonical_dict`; retained
+    only because external callers/tests still reference it.
+    """
+    return _canonical_bytes(receipt, exclude=_LEGACY_EXCLUDE)
 
 
 def compute_receipt_hash(receipt: Receipt) -> str:
