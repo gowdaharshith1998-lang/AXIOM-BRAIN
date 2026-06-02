@@ -728,6 +728,21 @@ def _serve_spa_enabled() -> bool:
     return os.environ.get("AXIOM_SERVE_SPA", "").strip() != "0"
 
 
+def _spa_explicitly_configured() -> bool:
+    """Whether the operator explicitly asked for SPA serving.
+
+    Readiness (P1-8 / D.3) only fails on a missing SPA when serving was
+    explicitly configured — AXIOM_FRONTEND_DIST points at a dist, or
+    AXIOM_SERVE_SPA=1. The Docker image sets AXIOM_FRONTEND_DIST, so a broken
+    container image still fails /readyz. Backend-only environments (CI, API
+    deployments, the test suite) configure neither and are healthy without a
+    frontend build.
+    """
+    if os.environ.get("AXIOM_FRONTEND_DIST", "").strip():
+        return True
+    return os.environ.get("AXIOM_SERVE_SPA", "").strip() == "1"
+
+
 def _resolve_frontend_dist() -> Path | None:
     """Locate the built SPA directory (P1-8 / DEP-06).
 
@@ -1206,12 +1221,17 @@ def create_app(
                 if task_exc is not None:
                     failed.append(f"task {attr}: {task_exc!r}")
 
-        # 4) SPA must be mounted when serving is enabled (P1-8 / D.3). The dist
-        # path is otherwise a silent failure: the API serves but the UI 404s.
-        if getattr(app.state, "spa_serve_enabled", False) and not getattr(
-            app.state, "spa_mounted", False
+        # 4) SPA must be mounted when serving was EXPLICITLY configured
+        # (P1-8 / D.3) — AXIOM_FRONTEND_DIST set (the Docker image does this) or
+        # AXIOM_SERVE_SPA=1. A broken container image therefore still fails
+        # readiness, while backend-only environments (CI, API-only deploys, the
+        # test suite) are healthy without a frontend build.
+        if (
+            getattr(app.state, "spa_explicitly_configured", False)
+            and getattr(app.state, "spa_serve_enabled", False)
+            and not getattr(app.state, "spa_mounted", False)
         ):
-            failed.append("spa: not mounted (set AXIOM_FRONTEND_DIST or AXIOM_SERVE_SPA=0)")
+            failed.append("spa: configured but not mounted (check AXIOM_FRONTEND_DIST)")
 
         status = "ok" if not failed else "unavailable"
         body = {"status": status, "checks": {"failed": failed}}
@@ -4428,6 +4448,7 @@ def create_app(
     # AXIOM_FRONTEND_DIST (container) with a source-relative fallback (dev). Record
     # whether it mounted so /readyz can flag a silent SPA-serving failure (D.3).
     app.state.spa_serve_enabled = _serve_spa_enabled()
+    app.state.spa_explicitly_configured = _spa_explicitly_configured()
     app.state.spa_mounted = False
     if app.state.spa_serve_enabled:
         frontend_dist = _resolve_frontend_dist()

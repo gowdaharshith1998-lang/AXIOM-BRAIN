@@ -60,3 +60,29 @@ def test_request_id_header_is_echoed() -> None:
         sent = "fixed-request-id-123"
         resp2 = client.get("/livez", headers={"X-Request-ID": sent})
         assert resp2.headers.get("X-Request-ID") == sent
+
+
+def test_readyz_healthy_without_frontend_build(monkeypatch) -> None:
+    """Backend-only environments (CI, API-only deploys) must be ready without a
+    frontend build. Regression for the CI failure where /readyz returned 503
+    purely because frontend/dist did not exist in the backend job."""
+    monkeypatch.delenv("AXIOM_FRONTEND_DIST", raising=False)
+    monkeypatch.delenv("AXIOM_SERVE_SPA", raising=False)
+    # Force the source-relative fallback to miss, as in CI's backend job.
+    monkeypatch.setattr("axiom.studio.server._resolve_frontend_dist", lambda: None)
+    with _client() as client:
+        resp = client.get("/readyz")
+        assert resp.status_code == 200, resp.json()
+        assert resp.json()["checks"]["failed"] == []
+
+
+def test_readyz_fails_when_spa_configured_but_missing(monkeypatch, tmp_path) -> None:
+    """Production protection (P1-8 / D.3): when the operator explicitly points
+    AXIOM_FRONTEND_DIST at a dist (as the Docker image does) and it cannot be
+    mounted, readiness must fail."""
+    monkeypatch.setenv("AXIOM_FRONTEND_DIST", str(tmp_path / "missing-dist"))
+    monkeypatch.delenv("AXIOM_SERVE_SPA", raising=False)
+    with _client() as client:
+        resp = client.get("/readyz")
+        assert resp.status_code == 503
+        assert any("spa" in item for item in resp.json()["checks"]["failed"])
