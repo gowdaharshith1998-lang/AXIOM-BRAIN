@@ -136,3 +136,63 @@ def test_busy_timeout_configurable_via_env(tmp_path: Path, monkeypatch: Any) -> 
         assert int(_pragma(engine, "busy_timeout")) == 9000
     finally:
         engine.dispose()
+
+
+def test_memory_sqlite_shares_one_database_across_threads() -> None:
+    """Regression: in-memory SQLite must use StaticPool so all threads see the
+    same database.
+
+    Without it, the lifespan thread creates the schema on one connection while
+    request handlers / background tasks get fresh empty databases on others —
+    CI failed test_readyz_200_when_healthy with "no such table" precisely this
+    way while local runs passed by thread-reuse luck.
+    """
+    import threading
+
+    from sqlalchemy import text
+
+    from axiom.storage.db import build_engine
+
+    engine, session_factory = build_engine("sqlite://")
+    try:
+        # Create a table on the main thread.
+        with engine.begin() as conn:
+            conn.execute(text("CREATE TABLE shared_check (id INTEGER PRIMARY KEY)"))
+            conn.execute(text("INSERT INTO shared_check (id) VALUES (1)"))
+
+        # Every OTHER thread must see the same database. Reads run one thread
+        # at a time: the property under test is cross-thread visibility (one
+        # shared in-memory DB), not simultaneous-query handling on a single
+        # connection (which pysqlite does not guarantee and the app never does
+        # against in-memory DBs - they are test-only).
+        results: list[int] = []
+
+        def read_from_thread() -> None:
+            with session_factory() as session:
+                count = session.execute(text("SELECT COUNT(*) FROM shared_check")).scalar_one()
+                results.append(int(count))
+
+        for _ in range(8):
+            worker = threading.Thread(target=read_from_thread)
+            worker.start()
+            worker.join()
+
+        assert results == [1] * 8
+    finally:
+        engine.dispose()
+
+
+def test_readyz_healthy_with_memory_sqlite_under_thread_pressure() -> None:
+    """End-to-end version of the CI failure: an app on sqlite:// must report
+    /readyz healthy because the schema its lifespan created is visible to the
+    request-handling thread."""
+    from fastapi.testclient import TestClient
+
+    from axiom.studio.server import create_app
+
+    # Repeat a few times to make thread-assignment luck irrelevant.
+    for _ in range(3):
+        with TestClient(create_app(db_url="sqlite://", enable_organizer=False)) as client:
+            resp = client.get("/readyz")
+            assert resp.status_code == 200, resp.json()
+            assert resp.json()["checks"]["failed"] == []
