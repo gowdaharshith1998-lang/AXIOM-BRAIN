@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { requestRaw } from "@/lib/http";
 import { wsConnect } from "@/lib/ws";
+import { useAuthEpoch } from "@/hooks/useAuthEpoch";
 import {
   CONNECTOR_VENDORS,
   useConnectorsStore,
@@ -26,6 +27,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
   const statuses = useConnectorsStore((s) => s.connectors);
   const fetchStatuses = useConnectorsStore((s) => s.fetchStatuses);
   const incrementConnectorEvents = useConnectorsStore((s) => s.incrementConnectorEvents);
+  const authEpoch = useAuthEpoch();
   const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
   const [drawerVendor, setDrawerVendor] = useState<string | null>(null);
   const [actionMessages, setActionMessages] = useState<Record<string, string>>({});
@@ -95,7 +97,8 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
       }
     };
     return () => socket.close();
-  }, [incrementConnectorEvents]);
+    // authEpoch: reconnect with fresh credentials after TokenGate auth.
+  }, [incrementConnectorEvents, authEpoch]);
 
   const byVendor = useMemo(
     () => new Map(statuses.map((status) => [status.vendor, status])),

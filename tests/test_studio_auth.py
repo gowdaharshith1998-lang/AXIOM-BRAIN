@@ -120,3 +120,59 @@ def test_brain_websocket_requires_token_when_auth_is_enabled(
             subprotocols=["axiom.auth", "axiom-token.cHJvZC1zZWNyZXQ"],
         ):
             pass
+
+
+def test_probe_endpoints_stay_public_when_auth_is_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Liveness/readiness probes must work without credentials (orchestrators,
+    load balancers, and the compose healthcheck cannot attach bearer tokens)."""
+    monkeypatch.setenv("AXIOM_API_TOKEN", "prod-secret")
+
+    with _client(tmp_path) as client:
+        assert client.get("/livez").status_code == 200
+        readyz = client.get("/readyz")
+        # 200 (healthy) or 503 (a check failed) are both acceptable here —
+        # what matters is the gate does not 401 the probe.
+        assert readyz.status_code in {200, 503}
+        assert "detail" not in readyz.json() or "token" not in str(readyz.json()).lower()
+
+
+def test_spa_paths_stay_public_when_auth_is_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The SPA shell is a public artifact (P1-8/P1-15): GET / must never return
+    the 401 JSON body, otherwise the browser can never load the TokenGate to
+    enter credentials."""
+    monkeypatch.setenv("AXIOM_API_TOKEN", "prod-secret")
+
+    with _client(tmp_path) as client:
+        # The SPA dist may not be mounted in tests (no frontend/dist); what we
+        # assert is the AUTH GATE behavior: not a 401 from enforce_api_auth.
+        response = client.get("/")
+        assert response.status_code != 401
+        assert response.status_code != 503
+
+        # Deep SPA routes (client-side routing) are also public.
+        deep = client.get("/governance")
+        assert deep.status_code != 401
+
+
+def test_api_and_metrics_stay_protected_with_spa_exemption(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The GET/HEAD SPA exemption must NOT leak through to the API, metrics,
+    or any write method."""
+    monkeypatch.setenv("AXIOM_API_TOKEN", "prod-secret")
+
+    with _client(tmp_path) as client:
+        # API reads still require auth.
+        assert client.get("/api/entities").status_code == 401
+        assert client.get("/api/internal/settings").status_code == 401
+        # Metrics stay protected (they leak operational details).
+        assert client.get("/metrics").status_code == 401
+        # Writes to ANY path (even non-API) still require auth.
+        assert client.post("/anything", json={}).status_code == 401

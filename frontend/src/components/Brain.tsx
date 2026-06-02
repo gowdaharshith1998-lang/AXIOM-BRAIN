@@ -41,6 +41,7 @@ import { hashStringToFloat, hubEmissiveIntensityAt, shimmerScale } from "@/lib/s
 import { hasWebGPU, preferredRendererKind } from "@/lib/webgpu-detect";
 import { request as fetchJson } from "@/lib/http";
 import { BrainSocket, type BrainEvent } from "@/lib/websocket";
+import { useAuthEpoch } from "@/hooks/useAuthEpoch";
 import { wsUrl } from "@/lib/wsUrl";
 import { useBrainStore, type ClusterHealthSnapshot, type Edge, type Entity } from "@/state/brain.store";
 
@@ -253,6 +254,7 @@ export function Brain() {
   const bootstrap = useBrainStore((s) => s.bootstrap);
   const setClusterHealth = useBrainStore((s) => s.setClusterHealth);
   const setConnectionStatus = useBrainStore((s) => s.setConnectionStatus);
+  const authEpoch = useAuthEpoch();
   const applyEvent = useBrainStore((s) => s.applyEvent);
   const setFps = useBrainStore((s) => s.setFps);
   const select = useBrainStore((s) => s.select);
@@ -299,7 +301,8 @@ export function Brain() {
       offStatus();
       ws.close();
     };
-  }, [applyEvent, setConnectionStatus]);
+    // authEpoch: reconnect with fresh credentials after TokenGate auth.
+  }, [applyEvent, setConnectionStatus, authEpoch]);
 
   useEffect(() => {
     const el = containerRef.current;

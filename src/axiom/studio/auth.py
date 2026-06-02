@@ -14,8 +14,18 @@ ALLOW_WS_QUERY_TOKEN_ENV = "AXIOM_ALLOW_WS_QUERY_TOKEN"
 WS_AUTH_SUBPROTOCOL = "axiom.auth"
 WS_AUTH_TOKEN_PREFIX = "axiom-token."
 
-_EXEMPT_HTTP_PATHS = {"/api/health"}
+# Liveness/readiness probes are exempt: load balancers, orchestrators, and the
+# docker-compose healthcheck cannot attach bearer tokens. They expose only
+# coarse operational state (status + failed-check names), no data.
+_EXEMPT_HTTP_PATHS = {"/api/health", "/readyz", "/livez"}
 _CONNECTOR_ROUTE_PREFIX = "/api/internal/connectors/"
+# Everything under these prefixes requires auth even for GET/HEAD. Any other
+# GET/HEAD path can only ever reach the SPA StaticFiles mount (P1-8): the SPA
+# bundle is a public artifact (secrets are entered by the user into the
+# TokenGate at runtime), so serving it unauthenticated is by design — without
+# this the browser gets a 401 JSON body instead of the app and the user can
+# never reach the token prompt.
+_PROTECTED_GET_PREFIXES = ("/api", "/ws", "/metrics")
 
 
 def _truthy(value: str | None) -> bool:
@@ -64,6 +74,10 @@ def is_http_auth_exempt(method: str, path: str) -> bool:
     if path.startswith(_CONNECTOR_ROUTE_PREFIX) and (
         path.endswith("/callback") or path.endswith("/webhook")
     ):
+        return True
+    # SPA static assets (P1-8): read-only requests outside the protected API /
+    # WS / metrics surface can only ever hit the StaticFiles mount at "/".
+    if method.upper() in {"GET", "HEAD"} and not path.startswith(_PROTECTED_GET_PREFIXES):
         return True
     return False
 

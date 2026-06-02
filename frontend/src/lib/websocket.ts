@@ -87,6 +87,9 @@ export class BrainSocket {
 
     this.ws.onopen = () => {
       this.retryDelayMs = 1000;
+      // A connected socket is "live" even before the first event arrives —
+      // without this, an empty brain shows OFFLINE despite a healthy socket.
+      this.emitStatus("live");
     };
 
     this.ws.onmessage = (msg) => {

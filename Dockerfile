@@ -34,6 +34,10 @@ ENV AXIOM_FRONTEND_DIST=/app/frontend/dist
 COPY alembic/ ./alembic/
 COPY alembic.ini ./alembic.ini
 
+# Synthetic demo fixture: lets `python -m axiom.cli ingest --source synthetic`
+# seed a demo brain inside the container (resolved via <cwd>/fixtures).
+COPY fixtures/ ./fixtures/
+
 # Entrypoint runs `alembic upgrade head` (gated by AXIOM_AUTO_MIGRATE, default 1)
 # before starting uvicorn so the migrations baked into the image are actually
 # applied at boot (P1-10/P1-11) instead of being dead weight.

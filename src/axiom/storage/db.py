@@ -177,20 +177,46 @@ def _auto_migrate_enabled() -> bool:
     }
 
 
-def _alembic_config(db_url: str) -> Any:
-    """Build an Alembic ``Config`` pointed at the repo ``alembic.ini`` with a
-    robustly-resolved ``script_location``.
+def _alembic_root() -> Path | None:
+    """Locate the directory holding ``alembic.ini`` + ``alembic/``.
 
-    The ini lives at the repo root (``src/axiom/storage/db.py`` → up 4). We set
-    an absolute ``script_location`` rather than relying on ``%(here)s`` so the
-    migration runs correctly regardless of the process CWD.
+    Resolution order (first hit wins):
+
+    1. ``AXIOM_ALEMBIC_DIR`` env var — explicit operator override.
+    2. The process CWD — covers the Docker image (WORKDIR ``/app`` holds
+       ``alembic.ini``) and running from a repo checkout.
+    3. Source-relative (repo root = this file → up 4 levels) — covers editable
+       installs / running the server from outside the repo. This does NOT work
+       when the package is pip-installed into site-packages, which is exactly
+       why it is the last resort.
+    """
+    candidates: list[Path] = []
+    env_dir = os.environ.get("AXIOM_ALEMBIC_DIR", "").strip()
+    if env_dir:
+        candidates.append(Path(env_dir))
+    candidates.append(Path.cwd())
+    candidates.append(Path(__file__).resolve().parents[3])
+    for root in candidates:
+        if (root / "alembic.ini").is_file() and (root / "alembic").is_dir():
+            return root
+    return None
+
+
+def _alembic_config(db_url: str) -> Any:
+    """Build an Alembic ``Config`` with an absolute ``script_location`` so the
+    migration runs correctly regardless of the process CWD or install layout.
     """
     from alembic.config import Config
 
-    repo_root = Path(__file__).resolve().parents[3]
-    ini_path = repo_root / "alembic.ini"
-    cfg = Config(str(ini_path)) if ini_path.exists() else Config()
-    cfg.set_main_option("script_location", str(repo_root / "alembic"))
+    root = _alembic_root()
+    if root is None:
+        raise FileNotFoundError(
+            "alembic.ini not found (checked AXIOM_ALEMBIC_DIR, CWD, and the "
+            "source tree); set AXIOM_ALEMBIC_DIR to the directory containing "
+            "alembic.ini or run with AXIOM_AUTO_MIGRATE=0"
+        )
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(root / "alembic"))
     cfg.set_main_option("sqlalchemy.url", db_url)
     return cfg
 
@@ -231,8 +257,8 @@ def run_boot_migration(db_url: str, *, engine: Engine | None = None) -> None:
         if owns_engine:
             engine.dispose()
 
-    cfg = _alembic_config(db_url)
     try:
+        cfg = _alembic_config(db_url)
         if not has_version and has_app_tables:
             # create_all path: schema exists but is unmanaged. Stamp to head so
             # subsequent upgrades are no-ops and we never re-create tables.

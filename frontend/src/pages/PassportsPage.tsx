@@ -9,6 +9,7 @@ import {
   type Passport,
 } from "@/lib/passportsClient";
 import { wsConnect } from "@/lib/ws";
+import { useAuthEpoch } from "@/hooks/useAuthEpoch";
 
 type FormState = Record<keyof IssuePassportBody, string>;
 
@@ -45,6 +46,7 @@ function formatDate(value: string | null): string {
 
 export function PassportsPage() {
   const [rows, setRows] = useState<Passport[]>([]);
+  const authEpoch = useAuthEpoch();
   const [issueOpen, setIssueOpen] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(initialForm);
@@ -72,7 +74,8 @@ export function PassportsPage() {
       }
     };
     return () => ws.close();
-  }, []);
+    // authEpoch: reconnect with fresh credentials after TokenGate auth.
+  }, [authEpoch]);
 
   const canIssue = useMemo(
     () => form.agent_name.trim() && form.agent_class.trim() && form.owner_email.trim() && Number(form.ttl_hours) > 0,

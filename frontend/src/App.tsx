@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { BrowserRouter, NavLink, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { Brain } from "@/components/Brain";
@@ -16,6 +16,7 @@ import { QueryBar } from "@/components/QueryBar";
 import { StatusFooter } from "@/components/StatusFooter";
 import { TokenGate } from "@/components/TokenGate";
 import { BrainSocket } from "@/lib/websocket";
+import { useAuthEpoch } from "@/hooks/useAuthEpoch";
 import { wsUrl } from "@/lib/wsUrl";
 import { AgentsPage } from "@/pages/AgentsPage";
 import { ActivityPage } from "@/pages/agents/ActivityPage";
@@ -221,15 +222,10 @@ function GraphPage() {
 function WsStatusBridge() {
   const setConnectionStatus = useBrainStore((s) => s.setConnectionStatus);
   const applyEvent = useBrainStore((s) => s.applyEvent);
-  // Bumped when a token is set so the socket reconnects with the auth
-  // subprotocol attached (otherwise the first connect predates the token).
-  const [authEpoch, setAuthEpoch] = useState(0);
-
-  useEffect(() => {
-    const onTokenSet = () => setAuthEpoch((epoch) => epoch + 1);
-    window.addEventListener("axiom:auth-token-set", onTokenSet);
-    return () => window.removeEventListener("axiom:auth-token-set", onTokenSet);
-  }, []);
+  // Re-create the socket whenever the auth token changes so it reconnects
+  // with the auth subprotocol attached (otherwise the first connect predates
+  // the token and keeps retrying unauthenticated).
+  const authEpoch = useAuthEpoch();
 
   useEffect(() => {
     const url = wsUrl("/ws/brain");
