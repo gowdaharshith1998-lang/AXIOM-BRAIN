@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, cast
 
-import requests  # type: ignore[import-untyped]
+import requests
 
 from axiom.connectors.base import ConnectorEvent
 

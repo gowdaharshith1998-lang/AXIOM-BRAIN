@@ -19,4 +19,3 @@ describe("brain-envelope", () => {
     expect(Math.abs(z)).toBeLessThanOrEqual(80);
   });
 });
-

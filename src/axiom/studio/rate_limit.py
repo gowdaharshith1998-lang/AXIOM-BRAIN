@@ -8,7 +8,7 @@ single-worker studio deployment. Enforces two independent limits per key:
   *pre-charged* by each request's requested ``max_tokens``.
 
 Both limits are checked atomically under a single lock. If either limit would be
-exceeded the call raises :class:`RateLimitExceeded` and charges nothing.
+exceeded the call raises :class:`RateLimitExceededError` and charges nothing.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ _RATE_WINDOW_SECONDS = 60.0
 _DAY_SECONDS = 86_400.0
 
 
-class RateLimitExceeded(Exception):
+class RateLimitExceededError(Exception):
     """Raised when a request would exceed a configured limit.
 
     ``retry_after`` is the number of whole seconds the caller should wait before
@@ -70,7 +70,7 @@ class AskRateLimiter:
     def check(self, key: str, requested_tokens: int, *, now: float | None = None) -> None:
         """Admit one request for ``key`` charging ``requested_tokens``.
 
-        Raises :class:`RateLimitExceeded` (charging nothing) when either the
+        Raises :class:`RateLimitExceededError` (charging nothing) when either the
         per-minute request limit or the per-day token budget would be exceeded.
         """
         if now is None:
@@ -85,10 +85,8 @@ class AskRateLimiter:
             if now - window_start >= _RATE_WINDOW_SECONDS:
                 window_start, count = now, 0
             if count + 1 > rate_limit:
-                retry_after = max(
-                    1, int(_RATE_WINDOW_SECONDS - (now - window_start)) + 1
-                )
-                raise RateLimitExceeded(
+                retry_after = max(1, int(_RATE_WINDOW_SECONDS - (now - window_start)) + 1)
+                raise RateLimitExceededError(
                     retry_after=retry_after,
                     detail=(
                         f"Rate limit exceeded: {rate_limit} requests per minute. "
@@ -102,7 +100,7 @@ class AskRateLimiter:
                 day_start, charged = now, 0
             if charged + requested > token_cap:
                 retry_after = max(1, int(_DAY_SECONDS - (now - day_start)) + 1)
-                raise RateLimitExceeded(
+                raise RateLimitExceededError(
                     retry_after=retry_after,
                     detail=(
                         f"Daily token budget exceeded: {token_cap} tokens/day. "

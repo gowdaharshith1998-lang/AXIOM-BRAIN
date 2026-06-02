@@ -267,9 +267,7 @@ class ConnectorEventRow(Base):
     __table_args__ = (
         Index("ix_connector_events_vendor_received", "vendor", "received_at"),
         Index("ix_connector_events_external", "vendor", "external_id"),
-        UniqueConstraint(
-            "vendor", "external_id", name="uq_connector_event_vendor_external"
-        ),
+        UniqueConstraint("vendor", "external_id", name="uq_connector_event_vendor_external"),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)

@@ -153,9 +153,7 @@ def test_ppr_mode_via_internal_search_api(tmp_path: Path) -> None:
                 Entity(id="a2", type="project", data={"title": "Alpha Platform"}),
             ]
         )
-        session.add(
-            Edge(id="ae1", source_id="a1", target_id="a2", relationship="owns", data={})
-        )
+        session.add(Edge(id="ae1", source_id="a1", target_id="a2", relationship="owns", data={}))
         session.commit()
     engine.dispose()
 

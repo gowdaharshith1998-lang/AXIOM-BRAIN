@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-import requests  # type: ignore[import-untyped]
+import requests
 
 from axiom.connectors.base import ConnectorConfig, ConnectorState, OAuthFlow
 from axiom.schema.models import new_id

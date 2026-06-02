@@ -3,7 +3,7 @@ from __future__ import annotations
 from email.utils import parseaddr
 from typing import Any, cast
 
-import requests  # type: ignore[import-untyped]
+import requests
 
 API = "https://gmail.googleapis.com/gmail/v1"
 

@@ -1323,10 +1323,7 @@ class AxiomMCPService:
         known = [fid for fid in frontier_ids if fid in self._cache.entities]
         skipped = [fid for fid in frontier_ids if fid not in self._cache.entities]
         if not known:
-            raise LookupError(
-                "no known entity ids in frontier: "
-                f"{frontier_ids[:10]}"
-            )
+            raise LookupError(f"no known entity ids in frontier: {frontier_ids[:10]}")
 
         q = (query or "").strip()
         frontier_set = set(known)
@@ -1395,9 +1392,7 @@ class AxiomMCPService:
         """Relevance of a neighbor to the walk query (title + data text)."""
         title = _title_from_data(neighbor.id, neighbor.data)
         title_score = _score_title(query, title)
-        haystack = " ".join(
-            str(value) for value in (neighbor.data or {}).values()
-        ).casefold()
+        haystack = " ".join(str(value) for value in (neighbor.data or {}).values()).casefold()
         q = query.casefold().strip()
         text_score = 0.0
         if q and q in haystack:
@@ -1535,9 +1530,7 @@ def build_mcp_server(
                 intent="read",
                 cluster_id=cluster_id,
             )
-            return service.walk(
-                query, frontier_ids, edge_types, direction, max_neighbors
-            )
+            return service.walk(query, frontier_ids, edge_types, direction, max_neighbors)
         except LookupError as exc:
             raise ToolError(str(exc)) from exc
 

@@ -114,8 +114,7 @@ def get_policy_evaluator(
     except Exception as exc:  # noqa: BLE001
         if _is_production():
             raise SystemExit(
-                f"FATAL: policy load failed in production; refusing to start "
-                f"fail-open: {exc}"
+                f"FATAL: policy load failed in production; refusing to start fail-open: {exc}"
             ) from exc
         logger.warning(
             "could not load real policies; falling back to DemoPolicyEvaluator: %s",

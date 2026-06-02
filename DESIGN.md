@@ -1,7 +1,7 @@
 # DESIGN — AXIOM Phase 0 (Foundational Design)
 
-**Repo:** `gowdaharshith1998-lang/AXIOM-BRAIN`  
-**Dispatch:** Phase 0 — design recon (single design doc + stub skeleton; no production code)  
+**Repo:** `gowdaharshith1998-lang/AXIOM-BRAIN`
+**Dispatch:** Phase 0 — design recon (single design doc + stub skeleton; no production code)
 
 > **Read-first dependency note:** the dispatch references a parent roadmap at `/mnt/user-data/outputs/AXIOM_BUILD_ROADMAP_2026-05-05.md`. That file was not accessible in this environment at the time of writing. This document therefore specifies the required *contracts* for Phases 1–15 as requested, but it also lists explicit roadmap-dependent open questions in §14 that must be ruled on before Phase 1 begins.
 
@@ -1165,4 +1165,3 @@ These must be ruled before Phase 1 proceeds.
 **Rationale:** Same logic as Q7. DB for queryability; FS for portability and `mcp.load_skill` external usage.
 
 **Phase that implements:** Phase 8 (writing both targets); Phase 2 reserves the table.
-

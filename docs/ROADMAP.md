@@ -1,9 +1,9 @@
 # AXIOM — Full Build Roadmap (Scratch Rebuild)
 
-> **Date:** 2026-05-05  
-> **Owner:** Hg, AXIOM Control Systems Inc. (Delaware C-Corp)  
-> **Co-founder (equity established, vesting unsigned):** Gagan  
-> **Status:** Scratch rebuild greenlit. Foundational dispatch next.  
+> **Date:** 2026-05-05
+> **Owner:** Hg, AXIOM Control Systems Inc. (Delaware C-Corp)
+> **Co-founder (equity established, vesting unsigned):** Gagan
+> **Status:** Scratch rebuild greenlit. Foundational dispatch next.
 > **Source of truth:** this file. Supersedes `OMNIX_AXIOM_CALIBRA_ROADMAP_2026-05-05.md`.
 
 ---

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, cast
 
-import requests  # type: ignore[import-untyped]
+import requests
 
 API = "https://slack.com/api"
 MENTION_RE = re.compile(r"<@(?P<user_id>[A-Z0-9]+)>")

@@ -69,9 +69,7 @@ def parse_skill_file_yaml(text: str) -> SkillFile:
     try:
         version = int(raw["version"])
     except (TypeError, ValueError) as exc:
-        raise SkillFileParseError(
-            f"version must be an integer, got {raw['version']!r}"
-        ) from exc
+        raise SkillFileParseError(f"version must be an integer, got {raw['version']!r}") from exc
 
     return SkillFile(
         name=str(raw["name"]),
@@ -95,9 +93,7 @@ def _parse_trigger(raw: Any) -> TriggerMatcher:
 
 def _require(raw: dict[str, Any], key: str, step_type: str, step_id: str) -> Any:
     if key not in raw or raw[key] is None:
-        raise SkillFileParseError(
-            f"{step_type} step {step_id!r} missing required field: {key}"
-        )
+        raise SkillFileParseError(f"{step_type} step {step_id!r} missing required field: {key}")
     return raw[key]
 
 
@@ -118,9 +114,7 @@ def _parse_step(raw: Any) -> Step:
     if step_type == "if_then":
         condition = _require(raw, "condition", "if_then", step_id)
         if not isinstance(condition, str):
-            raise SkillFileParseError(
-                f"if_then step {step_id!r}: condition must be a string"
-            )
+            raise SkillFileParseError(f"if_then step {step_id!r}: condition must be a string")
         # Validate the DSL condition parses now, so a bad condition is rejected
         # at save time rather than blowing up mid-run.
         from axiom.policy.dsl import parse_predicate
@@ -152,9 +146,7 @@ def _parse_step(raw: Any) -> Step:
     if step_type == "write_entity":
         data = _require(raw, "data", "write_entity", step_id)
         if not isinstance(data, dict):
-            raise SkillFileParseError(
-                f"write_entity step {step_id!r}: data must be a mapping"
-            )
+            raise SkillFileParseError(f"write_entity step {step_id!r}: data must be a mapping")
         return StepWriteEntity(
             id=step_id,
             type="write_entity",

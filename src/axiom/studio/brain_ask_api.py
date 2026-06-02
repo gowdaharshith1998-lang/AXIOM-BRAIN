@@ -8,18 +8,18 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from axiom.api.brain_ask import (
-    ChatCompletionError,
-    LLMProviderKeyNotFound,
     MAX_QUESTION_LENGTH,
     MAX_TOP_K,
     MIN_QUESTION_LENGTH,
+    ChatCompletionError,
+    LLMProviderKeyNotFound,
     UnknownLLMProvider,
     VaultCorrupt,
     VaultLocked,
     ask_brain,
 )
 from axiom.studio.rate_limit import (
-    RateLimitExceeded,
+    RateLimitExceededError,
     ask_limiter,
     rate_limit_key,
 )
@@ -59,7 +59,7 @@ def post_brain_ask(body: AskIn, request: Request) -> dict[str, Any]:
     key = rate_limit_key(_bearer_token(request), client_host)
     try:
         ask_limiter.check(key, body.max_tokens)
-    except RateLimitExceeded as exc:
+    except RateLimitExceededError as exc:
         raise HTTPException(
             status_code=429,
             detail=exc.detail,

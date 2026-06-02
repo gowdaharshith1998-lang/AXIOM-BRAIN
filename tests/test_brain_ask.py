@@ -86,9 +86,7 @@ def _stub_completer(*, content: str = "Refund window is 30 days [1].") -> Any:
     return fake
 
 
-def test_ask_brain_returns_grounded_answer_and_citations(
-    tmp_path: Path, vault_env: None
-) -> None:
+def test_ask_brain_returns_grounded_answer_and_citations(tmp_path: Path, vault_env: None) -> None:
     del vault_env
     sf, _ = _seed_session_factory(tmp_path)
     with sf() as session:
@@ -110,9 +108,7 @@ def test_ask_brain_returns_grounded_answer_and_citations(
     assert payload["retrieval_mode"] == "hybrid"
 
 
-def test_ask_brain_picks_default_provider_when_unspecified(
-    tmp_path: Path, vault_env: None
-) -> None:
+def test_ask_brain_picks_default_provider_when_unspecified(tmp_path: Path, vault_env: None) -> None:
     del vault_env
     sf, _ = _seed_session_factory(tmp_path, db_name="ask-default.db")
     with sf() as session:
@@ -143,9 +139,7 @@ def test_ask_brain_rejects_short_question(tmp_path: Path, vault_env: None) -> No
             ask_brain(session, question="a", completer=_stub_completer())
 
 
-def test_ask_brain_propagates_chat_completion_error(
-    tmp_path: Path, vault_env: None
-) -> None:
+def test_ask_brain_propagates_chat_completion_error(tmp_path: Path, vault_env: None) -> None:
     del vault_env
     sf, _ = _seed_session_factory(tmp_path, db_name="ask-upstream.db")
     with sf() as session:
@@ -208,9 +202,7 @@ def test_post_brain_ask_returns_409_when_no_key(
     assert "key" in response.json()["detail"].lower()
 
 
-def test_post_brain_ask_validation_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_post_brain_ask_validation_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(ENV_VAR, Fernet.generate_key().decode("utf-8"))
     _, db_url = _seed_session_factory(tmp_path, db_name="ask-route-short.db")
     from axiom.studio.server import create_app

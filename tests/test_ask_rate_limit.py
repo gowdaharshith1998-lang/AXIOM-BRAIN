@@ -14,7 +14,7 @@ from sqlalchemy import create_engine
 from axiom.schema.models import Base
 from axiom.studio.rate_limit import (
     AskRateLimiter,
-    RateLimitExceeded,
+    RateLimitExceededError,
     ask_limiter,
     rate_limit_key,
 )
@@ -73,7 +73,7 @@ def test_check_allows_up_to_limit_then_raises(
     limiter = AskRateLimiter()
     for _ in range(3):
         limiter.check("k", 1, now=1000.0)
-    with pytest.raises(RateLimitExceeded) as excinfo:
+    with pytest.raises(RateLimitExceededError) as excinfo:
         limiter.check("k", 1, now=1000.0)
     assert excinfo.value.retry_after >= 1
 
@@ -85,7 +85,7 @@ def test_check_window_resets_after_a_minute(
     limiter = AskRateLimiter()
     limiter.check("k", 1, now=1000.0)
     limiter.check("k", 1, now=1000.0)
-    with pytest.raises(RateLimitExceeded):
+    with pytest.raises(RateLimitExceededError):
         limiter.check("k", 1, now=1000.0)
     # New window -> allowed again.
     limiter.check("k", 1, now=1061.0)
@@ -99,7 +99,7 @@ def test_check_token_cap_charges_requested_tokens(
     limiter = AskRateLimiter()
     limiter.check("k", 60, now=0.0)
     # 60 + 60 = 120 > 100 -> raises, and charges nothing on raise.
-    with pytest.raises(RateLimitExceeded) as excinfo:
+    with pytest.raises(RateLimitExceededError) as excinfo:
         limiter.check("k", 60, now=0.0)
     assert "token" in excinfo.value.detail.lower()
     # The failed request charged nothing, so a smaller one still fits (60+40).
@@ -123,19 +123,13 @@ def test_11th_request_in_window_returns_429(
     assert int(resp.headers["Retry-After"]) >= 1
 
 
-def test_daily_token_cap_returns_429(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_daily_token_cap_returns_429(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AXIOM_ASK_RATE_PER_MIN", "1000")
     # Cap of 1500 with max_tokens=1024 -> first ok (1024), second over (2048).
     monkeypatch.setenv("AXIOM_ASK_DAILY_TOKEN_CAP", "1500")
     ask_limiter.reset()
-    resp = client.post(
-        "/api/brain/ask", json={"question": "hello there?", "max_tokens": 1024}
-    )
+    resp = client.post("/api/brain/ask", json={"question": "hello there?", "max_tokens": 1024})
     assert resp.status_code == 200, resp.text
-    resp = client.post(
-        "/api/brain/ask", json={"question": "hello there?", "max_tokens": 1024}
-    )
+    resp = client.post("/api/brain/ask", json={"question": "hello there?", "max_tokens": 1024})
     assert resp.status_code == 429
     assert "Retry-After" in resp.headers

@@ -8,7 +8,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any, cast
 
-import requests  # type: ignore[import-untyped]
+import requests
 
 from axiom.connectors.base import ConnectorEvent, WebhookHandler
 

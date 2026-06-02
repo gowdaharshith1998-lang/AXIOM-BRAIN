@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-import requests  # type: ignore[import-untyped]
+import requests
 
 API = "https://api.linear.app/graphql"
 

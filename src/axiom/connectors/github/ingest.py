@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import requests  # type: ignore[import-untyped]
+import requests
 
 API = "https://api.github.com"
 

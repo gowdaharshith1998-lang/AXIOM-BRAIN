@@ -22,7 +22,9 @@ def test_load_axiom_env_reads_project_dotenv(tmp_path: Path, monkeypatch: Any) -
     assert os.environ["AXIOM_CONNECTOR_SYNC_INTERVAL_SECONDS"] == "120"
 
 
-def test_log_vault_startup_status_warns_when_missing(monkeypatch: Any, caplog: pytest.LogCaptureFixture) -> None:
+def test_log_vault_startup_status_warns_when_missing(
+    monkeypatch: Any, caplog: pytest.LogCaptureFixture
+) -> None:
     from axiom.env import log_vault_startup_status
 
     monkeypatch.delenv("AXIOM_VAULT_KEY", raising=False)
@@ -31,7 +33,9 @@ def test_log_vault_startup_status_warns_when_missing(monkeypatch: Any, caplog: p
     assert "WARNING: AXIOM_VAULT_KEY not set" in caplog.text
 
 
-def test_log_vault_startup_status_ok_with_valid_key(monkeypatch: Any, caplog: pytest.LogCaptureFixture) -> None:
+def test_log_vault_startup_status_ok_with_valid_key(
+    monkeypatch: Any, caplog: pytest.LogCaptureFixture
+) -> None:
     from axiom.env import log_vault_startup_status
 
     monkeypatch.setenv("AXIOM_VAULT_KEY", Fernet.generate_key().decode("utf-8"))
@@ -44,7 +48,6 @@ def test_sync_all_lists_connected_vendor_strings(monkeypatch: Any) -> None:
     """Regression: select(ConnectorStateRow.vendor).scalars() yields str rows."""
     from axiom.connectors import sync_runner
     from axiom.ingest.broadcaster import EventBroadcaster
-    from axiom.schema.models import ConnectorStateRow
 
     class _FakeSession:
         def __enter__(self) -> _FakeSession:
@@ -77,7 +80,9 @@ def test_sync_all_lists_connected_vendor_strings(monkeypatch: Any) -> None:
     monkeypatch.setattr(sync_runner, "sync_vendor", _fake_sync_vendor)
     monkeypatch.setattr(sync_runner, "bootstrap_embeddings", lambda _session: 0)
 
-    session_factory = lambda: _FakeSession()
+    def session_factory() -> _FakeSession:
+        return _FakeSession()
+
     summary = __import__("asyncio").run(
         sync_runner.sync_all_connected_connectors(session_factory, EventBroadcaster())
     )

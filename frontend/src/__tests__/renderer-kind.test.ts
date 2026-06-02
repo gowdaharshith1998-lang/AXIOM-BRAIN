@@ -15,4 +15,3 @@ describe("preferredRendererKind", () => {
     ).toBe("webgl");
   });
 });
-

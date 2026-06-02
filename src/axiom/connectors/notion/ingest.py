@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-import requests  # type: ignore[import-untyped]
+import requests
 
 from axiom.connectors.notion.poller import API, NOTION_VERSION
 

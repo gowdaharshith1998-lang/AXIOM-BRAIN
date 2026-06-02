@@ -43,9 +43,7 @@ def log_vault_startup_status() -> bool:
     """Log vault state on startup. Returns ``True`` when the vault can be used."""
     present, error = vault_status()
     if not present:
-        log.warning(
-            "WARNING: AXIOM_VAULT_KEY not set — vault is locked, connectors will not sync."
-        )
+        log.warning("WARNING: AXIOM_VAULT_KEY not set — vault is locked, connectors will not sync.")
         return False
     if error:
         log.warning(

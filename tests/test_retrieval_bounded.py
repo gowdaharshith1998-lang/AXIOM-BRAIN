@@ -96,9 +96,7 @@ def test_filtered_entities_applies_limit_directly(
     _seed(session_factory, 12)
 
     with session_factory() as session:
-        scanned = search_mod._filtered_entities(
-            session, entity_types=None, cluster_id=None
-        )
+        scanned = search_mod._filtered_entities(session, entity_types=None, cluster_id=None)
 
     assert len(scanned) == 3
 

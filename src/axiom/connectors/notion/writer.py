@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import requests  # type: ignore[import-untyped]
+import requests
 from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.connectors.notion.poller import API, NOTION_VERSION

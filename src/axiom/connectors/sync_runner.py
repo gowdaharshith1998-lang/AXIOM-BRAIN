@@ -56,18 +56,20 @@ from axiom.connectors.notion.ingest import fetch_pages_in_database as notion_fet
 from axiom.connectors.notion.ingest import normalize_database as notion_normalize_database
 from axiom.connectors.notion.ingest import normalize_page as notion_normalize_page
 from axiom.connectors.notion.poller import NotionPoller
-from axiom.connectors.slack.ingest import fetch_channels as slack_fetch_channels
-from axiom.connectors.slack.ingest import fetch_recent_messages_per_channel as slack_fetch_recent_messages_per_channel
-from axiom.connectors.slack.ingest import fetch_users as slack_fetch_users
-from axiom.connectors.slack.ingest import normalize_channel as slack_normalize_channel
-from axiom.connectors.slack.ingest import normalize_message as slack_normalize_message
-from axiom.connectors.slack.ingest import normalize_user as slack_normalize_user
 from axiom.connectors.slack.ingest import (
     channel_to_message_edge as slack_channel_to_message_edge,
 )
+from axiom.connectors.slack.ingest import fetch_channels as slack_fetch_channels
+from axiom.connectors.slack.ingest import (
+    fetch_recent_messages_per_channel as slack_fetch_recent_messages_per_channel,
+)
+from axiom.connectors.slack.ingest import fetch_users as slack_fetch_users
 from axiom.connectors.slack.ingest import (
     message_mention_edges as slack_message_mention_edges,
 )
+from axiom.connectors.slack.ingest import normalize_channel as slack_normalize_channel
+from axiom.connectors.slack.ingest import normalize_message as slack_normalize_message
+from axiom.connectors.slack.ingest import normalize_user as slack_normalize_user
 from axiom.connectors.slack.ingest import (
     thread_parent_child_edge as slack_thread_parent_child_edge,
 )
@@ -191,7 +193,9 @@ async def sync_linear(session: Session, broadcaster: EventBroadcaster) -> dict[s
             linked_project_entity = projects_by_id.get(project_id)
             if linked_project_entity is not None:
                 edges.append(
-                    linear_project_to_issue_edge(linked_project_entity["nick"], issue_entity["nick"])
+                    linear_project_to_issue_edge(
+                        linked_project_entity["nick"], issue_entity["nick"]
+                    )
                 )
     count = await apply_to_brain(session, entities, edges, broadcaster=broadcaster)
     state.last_sync_at = datetime.utcnow()
@@ -312,7 +316,9 @@ async def sync_gmail(session: Session, broadcaster: EventBroadcaster) -> dict[st
         for message in messages:
             message_entity = gmail_normalize_message(message)
             entities.append(message_entity)
-            edges.append(gmail_thread_to_message_edge(thread_entity["nick"], message_entity["nick"]))
+            edges.append(
+                gmail_thread_to_message_edge(thread_entity["nick"], message_entity["nick"])
+            )
     count = await apply_to_brain(session, entities, edges, broadcaster=broadcaster)
     state.last_sync_at = datetime.utcnow()
     session.add(state)
@@ -473,6 +479,8 @@ async def connector_sync_loop(
         try:
             summary = await sync_all_connected_connectors(session_factory, broadcaster)
             if summary.get("results"):
-                log.info("Connector auto-sync cycle finished: %d vendor(s)", len(summary["results"]))
+                log.info(
+                    "Connector auto-sync cycle finished: %d vendor(s)", len(summary["results"])
+                )
         except Exception:
             log.exception("Connector auto-sync cycle failed; will retry")

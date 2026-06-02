@@ -30,6 +30,15 @@ def skill_db(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[tuple[sessionmaker[Session], str]]:
     monkeypatch.setenv(ENV_VAR, Fernet.generate_key().decode("utf-8"))
+    # Isolate policy to an empty dir so load_policies() returns only the built-in
+    # watchdog rules and skill runs are ALLOWED. These tests verify the emitter /
+    # runner / skill API (the skill must actually RUN and yield a "run" result);
+    # they are not policy-denial tests. Without this, the per-test policy-cache
+    # reset (conftest) lets the repo starter-pack policies deny the run, so
+    # run_skill() returns {"decision": ...} instead of {"run": ...} -> KeyError.
+    empty_policies = tmp_path / "empty_policies"
+    empty_policies.mkdir()
+    monkeypatch.setenv("AXIOM_POLICY_DIR", str(empty_policies))
     db_url = f"sqlite:///{tmp_path / 'skills.db'}"
     engine = create_engine(db_url, future=True)
     Base.metadata.create_all(engine)

@@ -46,3 +46,13 @@ def db_session(tmp_path: Path) -> Iterator[Session]:
         session.close()
         engine.dispose()
         reset_engine()
+
+
+@pytest.fixture(autouse=True)
+def _reset_policy_cache():
+    """Clear the policy lru_cache around every test to prevent cross-test leakage."""
+    from axiom.policy import load_policies
+
+    load_policies.cache_clear()
+    yield
+    load_policies.cache_clear()

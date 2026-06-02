@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlencode
 
-import requests  # type: ignore[import-untyped]
+import requests
 
 from axiom.connectors.base import ConnectorState, OAuthFlow
 from axiom.schema.models import new_id

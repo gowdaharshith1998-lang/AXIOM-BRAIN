@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func
@@ -25,7 +25,7 @@ from axiom.skills.skill_file_parser import SkillFileParseError, parse_skill_file
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass
@@ -56,9 +56,7 @@ def _to_stored(session: Session, row: SkillFileRow) -> StoredSkillFile:
     )
     validation_status = latest.validation_status if latest else "unknown"
     validation_errors = (
-        json.loads(latest.validation_errors)
-        if latest and latest.validation_errors
-        else []
+        json.loads(latest.validation_errors) if latest and latest.validation_errors else []
     )
     return StoredSkillFile(
         id=row.id,
@@ -112,9 +110,7 @@ def save_skill_file(
     try:
         parsed = parse_skill_file_yaml(yaml_text)
         if parsed.name != name:
-            errors.append(
-                f"name in YAML ({parsed.name!r}) must match the URL slug ({name!r})"
-            )
+            errors.append(f"name in YAML ({parsed.name!r}) must match the URL slug ({name!r})")
     except SkillFileParseError as exc:
         errors.append(str(exc))
 
@@ -124,9 +120,7 @@ def save_skill_file(
     # ── First save of this name ──────────────────────────────────────────
     if row is None:
         if errors:
-            raise SkillFileParseError(
-                f"cannot create {name!r}: {'; '.join(errors)}"
-            )
+            raise SkillFileParseError(f"cannot create {name!r}: {'; '.join(errors)}")
         row = SkillFileRow(
             id=new_id(),
             name=name,
@@ -216,9 +210,7 @@ def list_versions(session: Session, name: str) -> list[dict[str, Any]]:
             "saved_at": v.saved_at,
             "saved_by": v.saved_by,
             "validation_status": v.validation_status,
-            "validation_errors": (
-                json.loads(v.validation_errors) if v.validation_errors else []
-            ),
+            "validation_errors": (json.loads(v.validation_errors) if v.validation_errors else []),
         }
         for v in versions
     ]

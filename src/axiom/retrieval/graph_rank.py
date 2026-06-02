@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import networkx as nx
+import networkx as nx  # type: ignore[import-untyped]
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -165,9 +165,7 @@ def personalized_pagerank_search(
     if not seeds:
         return []
 
-    graph, entity_map = _build_graph(
-        session, entity_types=entity_types, cluster_id=cluster_id
-    )
+    graph, entity_map = _build_graph(session, entity_types=entity_types, cluster_id=cluster_id)
     # Keep only seeds that survived filtering and exist as graph nodes.
     seeds = {sid: weight for sid, weight in seeds.items() if sid in graph}
     if not seeds or graph.number_of_edges() == 0:
@@ -181,9 +179,7 @@ def personalized_pagerank_search(
         )
 
     total = sum(seeds.values()) or 1.0
-    personalization = {
-        node: (seeds.get(node, 0.0) / total) for node in graph.nodes
-    }
+    personalization = {node: (seeds.get(node, 0.0) / total) for node in graph.nodes}
 
     try:
         ranks = nx.pagerank(

@@ -244,8 +244,18 @@ async def test_watchdog_receipt_uses_real_signer(receipt_sf: sessionmaker[Sessio
 def test_skill_run_receipt_uses_real_signer(
     receipt_sf: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setenv(ENV_VAR, Fernet.generate_key().decode("utf-8"))
+    # Isolate policy to an empty dir so load_policies() returns only the built-in
+    # watchdog rules and the skill is ALLOWED to run. This test's intent is to
+    # verify the produced receipt is signed by the real ed25519 signer — the skill
+    # must actually RUN. Without this, the per-test policy-cache reset (conftest)
+    # lets the repo starter-pack policies deny the run, so run_skill() returns a
+    # decision dict with no "run" key -> KeyError: 'run'.
+    empty_policies = tmp_path / "empty_policies"
+    empty_policies.mkdir()
+    monkeypatch.setenv("AXIOM_POLICY_DIR", str(empty_policies))
 
     class Response:
         def raise_for_status(self) -> None:

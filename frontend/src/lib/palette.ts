@@ -28,4 +28,3 @@ export function colorForType(type: string): string {
   }
   return FALLBACK_COLOR;
 }
-

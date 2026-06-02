@@ -148,11 +148,7 @@ class SkillFileRunner:
                 )
 
         final_receipt_id = next(
-            (
-                r.detail["receipt_id"]
-                for r in reversed(step_results)
-                if r.detail.get("receipt_id")
-            ),
+            (r.detail["receipt_id"] for r in reversed(step_results) if r.detail.get("receipt_id")),
             None,
         )
         return SkillFileRun(
@@ -209,9 +205,7 @@ class SkillFileRunner:
         try:
             matched = bool(expr.evaluate(eval_ctx))
         except Exception as exc:  # noqa: BLE001 — any eval failure is a step failure
-            raise SkillFileExecutionError(
-                step.id, f"condition eval failed: {exc}"
-            ) from exc
+            raise SkillFileExecutionError(step.id, f"condition eval failed: {exc}") from exc
 
         if not matched:
             return StepResult(
@@ -254,14 +248,10 @@ class SkillFileRunner:
 
         resolved = _resolve_string(step.query, context)
         if ":" not in resolved:
-            raise SkillFileExecutionError(
-                step.id, f"query must be '<type>:<id>', got {resolved!r}"
-            )
+            raise SkillFileExecutionError(step.id, f"query must be '<type>:<id>', got {resolved!r}")
         entity_type, _, entity_id = resolved.partition(":")
         if not entity_id:
-            raise SkillFileExecutionError(
-                step.id, f"query has an empty entity id: {resolved!r}"
-            )
+            raise SkillFileExecutionError(step.id, f"query has an empty entity id: {resolved!r}")
 
         with self.session_factory() as session:
             dto = get_entity(session, entity_id)
@@ -337,13 +327,9 @@ class SkillFileRunner:
             approval_timeout_seconds=step.timeout_seconds,
         )
         try:
-            approval = create_approval_request(
-                self.session_factory, action, None, decision
-            )
+            approval = create_approval_request(self.session_factory, action, None, decision)
         except Exception as exc:  # noqa: BLE001
-            raise SkillFileExecutionError(
-                step.id, f"approval request failed: {exc}"
-            ) from exc
+            raise SkillFileExecutionError(step.id, f"approval request failed: {exc}") from exc
         return StepResult(
             step_id=step.id,
             step_type="require_approval",
@@ -355,9 +341,7 @@ class SkillFileRunner:
         self, step: StepLogDecision, context: dict[str, Any], run_id: str
     ) -> StepResult:
         resolved_note = _resolve_string(step.note, context)
-        receipt_id = self._write_meta_receipt(
-            run_id, step.id, step.cluster, resolved_note
-        )
+        receipt_id = self._write_meta_receipt(run_id, step.id, step.cluster, resolved_note)
         return StepResult(
             step_id=step.id,
             step_type="log_decision",
@@ -365,9 +349,7 @@ class SkillFileRunner:
             detail={"resolved_note": resolved_note, "receipt_id": receipt_id},
         )
 
-    def _write_meta_receipt(
-        self, run_id: str, step_id: str, cluster: str, reason: str
-    ) -> str:
+    def _write_meta_receipt(self, run_id: str, step_id: str, cluster: str, reason: str) -> str:
         """Chain a meta-receipt for an executed step. A receipt failure fails
         the step (the audit trail is correctness, not optional observability)."""
         from axiom.govern.receipts import ReceiptInsert, chain_insert_receipt
@@ -391,9 +373,7 @@ class SkillFileRunner:
         try:
             receipt, _created = chain_insert_receipt(self.session_factory, payload)
         except Exception as exc:  # noqa: BLE001
-            raise SkillFileExecutionError(
-                step_id, f"receipt chaining failed: {exc}"
-            ) from exc
+            raise SkillFileExecutionError(step_id, f"receipt chaining failed: {exc}") from exc
         return receipt.id
 
 
@@ -406,9 +386,7 @@ def run_to_dict(result: SkillFileRun) -> dict[str, Any]:
         "skill_file_name": result.skill_file_name,
         "status": result.status,
         "approval_id": result.approval_id,
-        "steps_executed": sum(
-            1 for r in result.step_results if r.status == "executed"
-        ),
+        "steps_executed": sum(1 for r in result.step_results if r.status == "executed"),
         "step_results": [
             {
                 "step_id": r.step_id,
@@ -432,9 +410,7 @@ def _main(argv: list[str] | None = None) -> int:
     run_p = sub.add_parser("run", help="parse and execute a SkillFile")
     run_p.add_argument("path", help="path to the .skill.yaml file")
     run_p.add_argument("--trigger", required=True, help="JSON trigger payload")
-    run_p.add_argument(
-        "--database-url", required=True, help="SQLAlchemy database URL"
-    )
+    run_p.add_argument("--database-url", required=True, help="SQLAlchemy database URL")
     args = parser.parse_args(argv)
 
     from axiom.schema.models import Base

@@ -40,3 +40,7 @@ CLAUDE.md
 ruvector.db
 frontend/tsconfig.tsbuildinfo
 _*.txt
+.gstack/
+.understand-anything/
+.pytest-tmp*/
+.coverage

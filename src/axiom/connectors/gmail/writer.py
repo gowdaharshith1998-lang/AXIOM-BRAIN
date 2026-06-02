@@ -4,7 +4,7 @@ import base64
 from email.message import EmailMessage
 from typing import Any
 
-import requests  # type: ignore[import-untyped]
+import requests
 from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.connectors.writer import ConnectorWriter

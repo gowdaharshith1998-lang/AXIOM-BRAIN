@@ -2,20 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import html
 import hmac
+import html
 import json
 import logging
 import os
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import TypeVar
 from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Annotated, Any, NoReturn, cast
+from typing import Annotated, Any, NoReturn, TypeVar, cast
 
 from fastapi import (
     BackgroundTasks,
@@ -35,29 +34,7 @@ from sqlalchemy import Table, create_engine, desc, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from axiom.api.search import EntitySearchResult, search_entities
-from axiom.connectors.sync_runner import (
-    connector_sync_loop,
-    run_initial_sync,
-    schedule_connector_sync_after_oauth,
-    sync_all_connected_connectors,
-    sync_gmail,
-    sync_github,
-    sync_linear,
-    sync_notion,
-    sync_slack,
-    sync_vendor,
-)
-from axiom.env import load_axiom_env, log_vault_startup_status
 from axiom.connectors.base import ConnectorConfig
-from axiom.connectors.github.ingest import (
-    fetch_initial_repos as github_fetch_initial_repos,
-)
-from axiom.connectors.github.ingest import (
-    fetch_issues as github_fetch_issues,
-)
-from axiom.connectors.github.ingest import (
-    fetch_pull_requests as github_fetch_pull_requests,
-)
 from axiom.connectors.github.ingest import (
     normalize_issue as github_normalize_issue,
 )
@@ -75,50 +52,36 @@ from axiom.connectors.github.ingest import (
 )
 from axiom.connectors.github.oauth import GITHUB_SCOPES, GitHubOAuth
 from axiom.connectors.github.webhook import GitHubWebhookHandler
-from axiom.connectors.gmail.ingest import fetch_labels as gmail_fetch_labels
-from axiom.connectors.gmail.ingest import fetch_messages_in_thread as gmail_fetch_messages_in_thread
-from axiom.connectors.gmail.ingest import fetch_threads as gmail_fetch_threads
-from axiom.connectors.gmail.ingest import normalize_label as gmail_normalize_label
-from axiom.connectors.gmail.ingest import normalize_message as gmail_normalize_message
-from axiom.connectors.gmail.ingest import normalize_thread as gmail_normalize_thread
-from axiom.connectors.gmail.ingest import thread_to_message_edge as gmail_thread_to_message_edge
 from axiom.connectors.gmail.oauth import GMAIL_SCOPES, GmailOAuth
 from axiom.connectors.gmail.webhook import GmailWebhookHandler
 from axiom.connectors.ingest import apply_to_brain, normalize_to_edges, normalize_to_entity
-from axiom.connectors.linear.ingest import fetch_issues_for_team as linear_fetch_issues_for_team
-from axiom.connectors.linear.ingest import fetch_projects as linear_fetch_projects
-from axiom.connectors.linear.ingest import fetch_teams as linear_fetch_teams
 from axiom.connectors.linear.ingest import normalize_issue as linear_normalize_issue
 from axiom.connectors.linear.ingest import normalize_project as linear_normalize_project
 from axiom.connectors.linear.ingest import normalize_team as linear_normalize_team
-from axiom.connectors.linear.ingest import project_to_issue_edge as linear_project_to_issue_edge
-from axiom.connectors.linear.ingest import team_to_issue_edge as linear_team_to_issue_edge
 from axiom.connectors.linear.oauth import LINEAR_SCOPES, LinearOAuth
 from axiom.connectors.linear.webhook import LinearWebhookHandler
-from axiom.connectors.notion.ingest import database_to_page_edge as notion_database_to_page_edge
-from axiom.connectors.notion.ingest import fetch_databases as notion_fetch_databases
-from axiom.connectors.notion.ingest import fetch_pages_in_database as notion_fetch_pages_in_database
-from axiom.connectors.notion.ingest import normalize_database as notion_normalize_database
-from axiom.connectors.notion.ingest import normalize_page as notion_normalize_page
 from axiom.connectors.notion.oauth import NotionOAuth
 from axiom.connectors.notion.poller import NotionPoller
 from axiom.connectors.registry import ensure_connectors_schema
 from axiom.connectors.registry import list_installed as list_connectors
-from axiom.connectors.slack.ingest import channel_to_message_edge as slack_channel_to_message_edge
-from axiom.connectors.slack.ingest import fetch_channels as slack_fetch_channels
-from axiom.connectors.slack.ingest import (
-    fetch_recent_messages_per_channel as slack_fetch_recent_messages_per_channel,
-)
-from axiom.connectors.slack.ingest import fetch_users as slack_fetch_users
 from axiom.connectors.slack.ingest import message_mention_edges as slack_message_mention_edges
 from axiom.connectors.slack.ingest import normalize_channel as slack_normalize_channel
 from axiom.connectors.slack.ingest import normalize_message as slack_normalize_message
-from axiom.connectors.slack.ingest import normalize_user as slack_normalize_user
-from axiom.connectors.slack.ingest import (
-    thread_parent_child_edge as slack_thread_parent_child_edge,
-)
 from axiom.connectors.slack.oauth import SLACK_BOT_SCOPES, SlackOAuth
 from axiom.connectors.slack.webhook import SlackWebhookHandler
+from axiom.connectors.sync_runner import (
+    connector_sync_loop,
+    run_initial_sync,
+    schedule_connector_sync_after_oauth,
+    sync_all_connected_connectors,
+    sync_github,
+    sync_gmail,
+    sync_linear,
+    sync_notion,
+    sync_slack,
+    sync_vendor,
+)
+from axiom.env import load_axiom_env, log_vault_startup_status
 from axiom.govern.agent_actions import emit_demo_agent_actions
 from axiom.govern.agent_registry import (
     AgentType,
@@ -574,16 +537,24 @@ def _fail_fast_on_bad_config() -> None:
 try:  # pragma: no cover - exercised indirectly
     from prometheus_client import (
         CONTENT_TYPE_LATEST,
+    )
+    from prometheus_client import (
         REGISTRY as _PROM_REGISTRY,
+    )
+    from prometheus_client import (
         Counter as _PromCounter,
+    )
+    from prometheus_client import (
         Gauge as _PromGauge,
+    )
+    from prometheus_client import (
         generate_latest as _prom_generate_latest,
     )
 
     _PROMETHEUS_AVAILABLE = True
 except Exception:  # noqa: BLE001 - any import failure must not break the app
     _PROMETHEUS_AVAILABLE = False
-    CONTENT_TYPE_LATEST = "text/plain"  # type: ignore[assignment]
+    CONTENT_TYPE_LATEST = "text/plain"
 
 
 def _get_or_create_prom(factory: Callable[[], Any], name: str) -> Any | None:
@@ -607,9 +578,7 @@ def _get_or_create_prom(factory: Callable[[], Any], name: str) -> Any | None:
 # Process-wide metric objects (created once, reused across create_app calls).
 if _PROMETHEUS_AVAILABLE:
     HTTP_REQUESTS_TOTAL = _get_or_create_prom(
-        lambda: _PromCounter(
-            "axiom_http_requests_total", "Total HTTP requests served"
-        ),
+        lambda: _PromCounter("axiom_http_requests_total", "Total HTTP requests served"),
         "axiom_http_requests_total",
     )
     LLM_TOKENS_TOTAL = _get_or_create_prom(
@@ -1032,11 +1001,11 @@ def create_app(
                 if getattr(task, "cancelled", lambda: False)():
                     continue
                 try:
-                    exc = task.exception()
+                    task_exc = task.exception()
                 except Exception:  # noqa: BLE001
                     continue
-                if exc is not None:
-                    failed.append(f"task {attr}: {exc!r}")
+                if task_exc is not None:
+                    failed.append(f"task {attr}: {task_exc!r}")
 
         status = "ok" if not failed else "unavailable"
         body = {"status": status, "checks": {"failed": failed}}
@@ -1189,10 +1158,14 @@ def create_app(
         uri = redirect_uri.strip()
         if uri.startswith("http://") or uri.startswith("https://"):
             return uri
-        base = os.environ.get("AXIOM_PUBLIC_BASE_URL", "").rstrip("/") or str(request.base_url).rstrip("/")
+        base = os.environ.get("AXIOM_PUBLIC_BASE_URL", "").rstrip("/") or str(
+            request.base_url
+        ).rstrip("/")
         return f"{base}{uri if uri.startswith('/') else f'/{uri}'}"
 
-    def _connector_config_with_resolved_redirect(config: ConnectorConfig, request: Request) -> ConnectorConfig:
+    def _connector_config_with_resolved_redirect(
+        config: ConnectorConfig, request: Request
+    ) -> ConnectorConfig:
         redirect_uri = (config.redirect_uri or "").strip()
         if not redirect_uri:
             return config
@@ -1201,7 +1174,7 @@ def create_app(
             return config
         return replace(config, redirect_uri=resolved)
 
-    _CONNECTOR_VENDOR_LABELS = {
+    _connector_vendor_labels = {
         "github": "GitHub",
         "linear": "Linear",
         "slack": "Slack",
@@ -1210,7 +1183,7 @@ def create_app(
     }
 
     def _connector_vendor_label(vendor: str) -> str:
-        return _CONNECTOR_VENDOR_LABELS.get(vendor, vendor.replace("_", " ").title())
+        return _connector_vendor_labels.get(vendor, vendor.replace("_", " ").title())
 
     def _connector_oauth_callback_html(
         vendor: str,
@@ -1222,7 +1195,9 @@ def create_app(
     ) -> HTMLResponse:
         vendor_label = _connector_vendor_label(vendor)
         safe_detail = html.escape(detail)
-        safe_account = html.escape(account_label.strip()) if account_label and account_label.strip() else ""
+        safe_account = (
+            html.escape(account_label.strip()) if account_label and account_label.strip() else ""
+        )
         message = {
             "type": "axiom:connector-oauth",
             "vendor": vendor,
@@ -1245,9 +1220,7 @@ def create_app(
             if ok and safe_account
             else ""
         )
-        error_block = (
-            f'<p class="oauth-error-detail">{safe_detail}</p>' if not ok else ""
-        )
+        error_block = f'<p class="oauth-error-detail">{safe_detail}</p>' if not ok else ""
         page_html = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1442,10 +1415,11 @@ def create_app(
             else:
                 schedule_connector_sync_after_oauth(vendor, session_local, broadcaster)
             account_label = str(result.get("account_label") or "").strip() or None
+            vendor_label = _connector_vendor_label(vendor)
             return _connector_oauth_callback_html(
                 vendor,
                 ok=True,
-                detail=f"{_connector_vendor_label(vendor)} has been connected to your Company Brain.",
+                detail=f"{vendor_label} has been connected to your Company Brain.",
                 account_label=account_label,
                 payload=result,
             )
@@ -2884,9 +2858,7 @@ def create_app(
             # Source 2: MCP tool calls (the actions ledger); watchdog rows excluded.
             try:
                 actions = (
-                    session.execute(
-                        select(Action).order_by(desc(Action.created_at)).limit(limit)
-                    )
+                    session.execute(select(Action).order_by(desc(Action.created_at)).limit(limit))
                     .scalars()
                     .all()
                 )
@@ -3628,9 +3600,7 @@ def create_app(
 
         trigger = payload.get("trigger", {})
         if not isinstance(trigger, dict):
-            raise HTTPException(
-                status_code=400, detail="trigger must be a JSON object"
-            )
+            raise HTTPException(status_code=400, detail="trigger must be a JSON object")
         runner = SkillFileRunner(session_factory=session_local)
         result = runner.run(skill_file, trigger=trigger)
         return run_to_dict(result)

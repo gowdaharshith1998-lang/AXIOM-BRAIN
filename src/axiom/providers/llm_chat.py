@@ -191,8 +191,7 @@ def chat_complete(
     normalized = provider.strip().lower()
     if normalized not in SUPPORTED_PROVIDERS:
         raise UnknownLLMProvider(
-            f"unsupported chat provider: {provider!r}; supported: "
-            f"{sorted(SUPPORTED_PROVIDERS)}"
+            f"unsupported chat provider: {provider!r}; supported: {sorted(SUPPORTED_PROVIDERS)}"
         )
     plaintext_key = get_provider_key_plaintext_with_session(session, normalized)
     resolved_model = (model or DEFAULT_MODELS[normalized]).strip()
