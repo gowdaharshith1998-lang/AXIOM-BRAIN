@@ -9,6 +9,7 @@ from typing import Any, Final, cast
 from sqlalchemy import Index, Table, create_engine, event, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 log = logging.getLogger("axiom.storage.db")
 
@@ -28,6 +29,15 @@ SessionLocal: sessionmaker[Session] | None = None
 
 def _is_sqlite_url(url: str) -> bool:
     return url.startswith("sqlite:")
+
+
+def _is_memory_sqlite_url(url: str) -> bool:
+    """In-memory SQLite URL forms: ``sqlite://``, ``sqlite:///:memory:``, and
+    shared-cache/file: variants carrying ``mode=memory``."""
+    if not _is_sqlite_url(url):
+        return False
+    tail = url.split("://", 1)[1] if "://" in url else ""
+    return tail in {"", "/:memory:"} or ":memory:" in tail or "mode=memory" in tail
 
 
 def _env_int(name: str, default: int) -> int:
@@ -112,9 +122,19 @@ def build_engine(database_url: str | None = None) -> tuple[Engine, sessionmaker[
     """
     url = database_url or os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
     connect_args: dict[str, Any] = {}
+    engine_kwargs: dict[str, Any] = {}
     if _is_sqlite_url(url):
         connect_args["check_same_thread"] = False
-    engine = create_engine(url, future=True, connect_args=connect_args)
+        if _is_memory_sqlite_url(url):
+            # In-memory SQLite: every NEW connection is a separate empty
+            # database. With the default pool, the lifespan thread creates the
+            # schema on one connection while request handlers / background
+            # tasks get fresh (empty) databases on others — "no such table"
+            # under load (exactly what CI's 2-core runner exposed). StaticPool
+            # shares ONE connection across all threads so everyone sees the
+            # same database. File-backed DBs keep the default pool.
+            engine_kwargs["poolclass"] = StaticPool
+    engine = create_engine(url, future=True, connect_args=connect_args, **engine_kwargs)
     if _is_sqlite_url(url):
         _register_sqlite_pragmas(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False, future=True)
