@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { requestRaw } from "@/lib/http";
 import { useBrainStore, type WardenInsight, type WatchdogAlert } from "@/state/brain.store";
 
 const severityRank = { critical: 3, warning: 2, info: 1 } as const;
@@ -18,7 +19,7 @@ function insightFromAlert(alert: WatchdogAlert): WardenInsight {
 }
 
 async function fetchOpenWatchdogAlert(): Promise<WardenInsight | null> {
-  const response = await fetch("/api/internal/watchdog/alerts?status=open&limit=50");
+  const response = await requestRaw("/api/internal/watchdog/alerts?status=open&limit=50");
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const payload = (await response.json()) as { alerts?: WatchdogAlert[] };
   const [alert] = [...(payload.alerts ?? [])].sort((a, b) => {

@@ -1,3 +1,5 @@
+import { requestRaw } from "@/lib/http";
+
 export type LLMProviderId = "anthropic" | "groq" | "mistral" | "openai";
 
 export type LLMKeyMetadata = {
@@ -12,8 +14,7 @@ export type LLMKeyMetadata = {
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    credentials: "include",
+  const response = await requestRaw(path, {
     ...init,
     headers: {
       ...(init?.body ? JSON_HEADERS : {}),

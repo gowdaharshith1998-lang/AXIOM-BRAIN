@@ -8,7 +8,7 @@ import {
   type IssuePassportBody,
   type Passport,
 } from "@/lib/passportsClient";
-import { wsUrl } from "@/lib/wsUrl";
+import { wsConnect } from "@/lib/ws";
 
 type FormState = Record<keyof IssuePassportBody, string>;
 
@@ -56,8 +56,7 @@ export function PassportsPage() {
   }, []);
 
   useEffect(() => {
-    const url = wsUrl("/ws/brain");
-    const ws = new WebSocket(url);
+    const ws = wsConnect("/ws/brain");
     ws.onmessage = (message) => {
       try {
         const event = JSON.parse(String(message.data)) as { type?: string; payload?: Passport };

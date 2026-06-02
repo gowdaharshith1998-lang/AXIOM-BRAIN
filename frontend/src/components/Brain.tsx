@@ -39,15 +39,10 @@ import { ParticleBehaviorPool } from "@/lib/particle-behaviors";
 import { ParticleFlowController, createDotTexture } from "@/lib/particle-flow";
 import { hashStringToFloat, hubEmissiveIntensityAt, shimmerScale } from "@/lib/spoke-shimmer";
 import { hasWebGPU, preferredRendererKind } from "@/lib/webgpu-detect";
+import { request as fetchJson } from "@/lib/http";
 import { BrainSocket, type BrainEvent } from "@/lib/websocket";
 import { wsUrl } from "@/lib/wsUrl";
 import { useBrainStore, type ClusterHealthSnapshot, type Edge, type Entity } from "@/state/brain.store";
-
-async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { credentials: "include" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return (await res.json()) as T;
-}
 
 const SCENE_TARGET = new THREE.Vector3(10, 12, 0);
 const INITIAL_CAMERA_POSITION = new THREE.Vector3(10, 12, 205);

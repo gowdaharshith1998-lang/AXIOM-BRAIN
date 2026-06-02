@@ -40,6 +40,8 @@ export type BrainEvent = {
   payload: Record<string, unknown>;
 };
 
+import { authSubprotocols } from "@/lib/ws";
+
 export type BrainEventHandler = (event: BrainEvent) => void;
 
 export class BrainSocket {
@@ -77,7 +79,11 @@ export class BrainSocket {
   start(): void {
     if (this.closed) return;
     const sep = this.url.includes("?") ? "&" : "?";
-    this.ws = new WebSocket(`${this.url}${sep}since=${this.lastSeq}`);
+    const target = `${this.url}${sep}since=${this.lastSeq}`;
+    // Resolve subprotocols at connect time so a token set after construction
+    // (and on reconnect) is honoured. Empty for cookie-based / dev deployments.
+    const protocols = authSubprotocols();
+    this.ws = protocols ? new WebSocket(target, protocols) : new WebSocket(target);
 
     this.ws.onopen = () => {
       this.retryDelayMs = 1000;

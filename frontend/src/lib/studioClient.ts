@@ -1,3 +1,5 @@
+import { request } from "@/lib/http";
+
 export type StudioSettings = Record<string, unknown>;
 
 export type MCPToolStat = {
@@ -20,13 +22,6 @@ export type MCPStats = {
     duration_ms?: number;
   }>;
 };
-
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  // credentials: "include" sends the same-origin HttpOnly session cookie.
-  const response = await fetch(url, { credentials: "include", ...init });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return (await response.json()) as T;
-}
 
 export async function getStudioSettings(): Promise<StudioSettings> {
   const data = await request<{ settings: StudioSettings }>("/api/internal/settings");

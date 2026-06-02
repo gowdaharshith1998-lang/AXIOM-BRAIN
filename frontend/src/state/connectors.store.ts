@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import { requestRaw } from "@/lib/http";
+
 export type ConnectorStatus = {
   vendor: string;
   status: "connected" | "disconnected" | "error";
@@ -45,7 +47,7 @@ export const useConnectorsStore = create<ConnectorsState>((set, get) => ({
   fetchStatuses: async () => {
     set({ loading: true, error: null });
     try {
-      const response = await fetch(STATUS_URL);
+      const response = await requestRaw(STATUS_URL);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -66,7 +68,7 @@ export const useConnectorsStore = create<ConnectorsState>((set, get) => ({
   syncAll: async () => {
     set({ syncingAll: true });
     try {
-      const response = await fetch(SYNC_ALL_URL, { method: "POST" });
+      const response = await requestRaw(SYNC_ALL_URL, { method: "POST" });
       if (!response.ok) {
         let detail = `HTTP ${response.status}`;
         try {

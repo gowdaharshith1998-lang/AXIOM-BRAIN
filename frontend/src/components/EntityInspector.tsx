@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { CLUSTER_LABELS, isClusterId, type ClusterId } from "@/lib/cluster-layout";
 import { superClusterIdForEntity } from "@/lib/cluster-reframe";
+import { request as requestJson } from "@/lib/http";
 import type { BrainEvent } from "@/lib/websocket";
 import { useBrainStore, type Edge, type Entity } from "@/state/brain.store";
 
@@ -51,12 +52,6 @@ type ActivePolicyRule = {
   reason?: string | null;
   metadata?: Record<string, unknown>;
 };
-
-async function requestJson<T>(path: string): Promise<T> {
-  const response = await fetch(path);
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return (await response.json()) as T;
-}
 
 function titleForEntity(entity: Entity): string {
   for (const key of ["title", "name", "subject", "label", "file_path"]) {

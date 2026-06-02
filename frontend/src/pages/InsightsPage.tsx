@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { request } from "@/lib/http";
 import { getMcpStats, type MCPStats } from "@/lib/studioClient";
 import { useBrainStore, type ClusterHealthSnapshot, type Edge, type Entity, type WardenInsight } from "@/state/brain.store";
 
@@ -15,12 +16,6 @@ const tabs: Array<{ id: Tab; label: string }> = [
   { id: "adoption", label: "Adoption" },
   { id: "ai-impact", label: "AI Impact" },
 ];
-
-async function request<T>(url: string): Promise<T> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return (await response.json()) as T;
-}
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");

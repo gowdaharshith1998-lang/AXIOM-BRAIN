@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 
+import { requestRaw } from "@/lib/http";
 import {
   acknowledgeWatchdogAlert,
   listWatchdogAlerts,
@@ -153,13 +154,13 @@ const tabs: Array<{ id: Tab; label: string }> = [
 ];
 
 async function fetchGovernanceSnapshot(): Promise<GovernanceSnapshot> {
-  const response = await fetch("/api/governance");
+  const response = await requestRaw("/api/governance");
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return (await response.json()) as GovernanceSnapshot;
 }
 
 async function fetchRealPolicyRules(source: PolicySourceFilter): Promise<RealPolicyResponse> {
-  const response = await fetch(`/api/internal/policies?source=${encodeURIComponent(source)}`);
+  const response = await requestRaw(`/api/internal/policies?source=${encodeURIComponent(source)}`);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return (await response.json()) as RealPolicyResponse;
 }

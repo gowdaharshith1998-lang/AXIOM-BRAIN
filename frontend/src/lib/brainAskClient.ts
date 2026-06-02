@@ -1,3 +1,5 @@
+import { requestRaw } from "@/lib/http";
+
 export type AskCitation = {
   entity_id: string;
   title: string;
@@ -45,9 +47,8 @@ export async function askBrain(
   request: AskRequest,
   init?: { signal?: AbortSignal },
 ): Promise<AskResponse> {
-  const response = await fetch("/api/brain/ask", {
+  const response = await requestRaw("/api/brain/ask", {
     method: "POST",
-    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
     signal: init?.signal,

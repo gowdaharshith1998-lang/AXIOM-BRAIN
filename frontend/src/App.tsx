@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { BrowserRouter, NavLink, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { Brain } from "@/components/Brain";
@@ -14,6 +14,7 @@ import { EntityInspector } from "@/components/EntityInspector";
 // import { PendingApprovalsBadge } from "@/components/PendingApprovalsBadge";
 import { QueryBar } from "@/components/QueryBar";
 import { StatusFooter } from "@/components/StatusFooter";
+import { TokenGate } from "@/components/TokenGate";
 import { BrainSocket } from "@/lib/websocket";
 import { wsUrl } from "@/lib/wsUrl";
 import { AgentsPage } from "@/pages/AgentsPage";
@@ -220,6 +221,15 @@ function GraphPage() {
 function WsStatusBridge() {
   const setConnectionStatus = useBrainStore((s) => s.setConnectionStatus);
   const applyEvent = useBrainStore((s) => s.applyEvent);
+  // Bumped when a token is set so the socket reconnects with the auth
+  // subprotocol attached (otherwise the first connect predates the token).
+  const [authEpoch, setAuthEpoch] = useState(0);
+
+  useEffect(() => {
+    const onTokenSet = () => setAuthEpoch((epoch) => epoch + 1);
+    window.addEventListener("axiom:auth-token-set", onTokenSet);
+    return () => window.removeEventListener("axiom:auth-token-set", onTokenSet);
+  }, []);
 
   useEffect(() => {
     const url = wsUrl("/ws/brain");
@@ -234,7 +244,7 @@ function WsStatusBridge() {
       off();
       socket.close();
     };
-  }, [applyEvent, setConnectionStatus]);
+  }, [applyEvent, setConnectionStatus, authEpoch]);
 
   return null;
 }
@@ -242,6 +252,7 @@ function WsStatusBridge() {
 export function App() {
   return (
     <BrowserRouter>
+      <TokenGate />
       <ConnectorBootstrap />
       <WsStatusBridge />
       <Routes>

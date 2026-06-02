@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
+import { requestRaw } from "@/lib/http";
 import { colorForType } from "@/lib/palette";
 import { useBrainStore } from "@/state/brain.store";
 import type { Entity } from "@/state/brain.store";
@@ -175,7 +176,7 @@ export function CommandPalette() {
 
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      void fetch(SEARCH_URL, {
+      void requestRaw(SEARCH_URL, {
         method: "POST",
         signal: controller.signal,
         headers: { "Content-Type": "application/json" },

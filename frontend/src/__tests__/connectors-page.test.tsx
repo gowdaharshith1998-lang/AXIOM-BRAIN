@@ -105,7 +105,7 @@ describe("ConnectorsPage", () => {
   it("github_sync_now_button_calls_sync_endpoint", async () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Sync GitHub" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/internal/connectors/github/sync", { method: "POST" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/internal/connectors/github/sync", expect.objectContaining({ method: "POST", credentials: "include" })));
   });
 
   it("linear_connect_button_opens_authorize_popup", async () => {
@@ -184,7 +184,7 @@ describe("ConnectorsPage", () => {
   it("connectors_page_disconnect_button_revokes_token", async () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Disconnect Gmail" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/internal/connectors/gmail", { method: "DELETE" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/internal/connectors/gmail", expect.objectContaining({ method: "DELETE", credentials: "include" })));
   });
 
   it("connectors_page_aggregates_status_for_all_five", async () => {
@@ -223,7 +223,7 @@ describe("ConnectorsPage", () => {
   it("test_connection_button_per_row", async () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Test GitHub" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/internal/connectors/github/test", { method: "POST" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/internal/connectors/github/test", expect.objectContaining({ method: "POST", credentials: "include" })));
   });
 
   it("connect_button_opens_setup_when_connector_needs_oauth_config", async () => {
@@ -289,7 +289,7 @@ describe("ConnectorsPage", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/internal/connectors/github/install",
-      { method: "POST" },
+      expect.objectContaining({ method: "POST", credentials: "include" }),
     ));
     await waitFor(() => expect(window.open).toHaveBeenCalledWith(
       "https://github.com/login/oauth/authorize?client_id=client-id",
