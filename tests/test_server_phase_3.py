@@ -162,7 +162,9 @@ def test_entity_edges_endpoint_returns_both_directions(tmp_path: Path) -> None:
         session.commit()
     engine.dispose()
 
-    app = create_app(db_url=db_url)
+    # enable_organizer=False: the organizer's EdgeProposer would inject
+    # same_cluster_related edges during startup and break the exact-set asserts.
+    app = create_app(db_url=db_url, enable_organizer=False)
     with TestClient(app) as client:
         response = client.get("/api/entities/center/edges")
 
@@ -210,7 +212,9 @@ def test_entity_lineage_endpoint_respects_depth(tmp_path: Path) -> None:
         session.commit()
     engine.dispose()
 
-    app = create_app(db_url=db_url)
+    # enable_organizer=False: the organizer's EdgeProposer would inject
+    # same_cluster_related edges during startup and break the exact-set asserts.
+    app = create_app(db_url=db_url, enable_organizer=False)
     with TestClient(app) as client:
         payload = client.get("/api/entities/leaf/lineage?depth=2").json()
 
@@ -235,7 +239,9 @@ def test_entity_lineage_handles_cycles(tmp_path: Path) -> None:
         session.commit()
     engine.dispose()
 
-    app = create_app(db_url=db_url)
+    # enable_organizer=False: the organizer's EdgeProposer would inject
+    # same_cluster_related edges during startup and break the exact-set asserts.
+    app = create_app(db_url=db_url, enable_organizer=False)
     with TestClient(app) as client:
         payload = client.get("/api/entities/a/lineage?depth=5").json()
 

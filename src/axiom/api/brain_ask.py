@@ -23,12 +23,12 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from axiom.providers.llm_chat import (
+    DEFAULT_MODELS,
+    SUPPORTED_PROVIDERS,
     ChatCompletion,
     ChatCompletionError,
     ChatMessage,
-    DEFAULT_MODELS,
     LLMProviderKeyNotFound,
-    SUPPORTED_PROVIDERS,
     UnknownLLMProvider,
     VaultCorrupt,
     VaultLocked,
@@ -99,9 +99,7 @@ def _normalize_question(question: str) -> str:
     if len(cleaned) < MIN_QUESTION_LENGTH:
         raise ValueError("question must be at least 3 characters")
     if len(cleaned) > MAX_QUESTION_LENGTH:
-        raise ValueError(
-            f"question must be {MAX_QUESTION_LENGTH} characters or fewer"
-        )
+        raise ValueError(f"question must be {MAX_QUESTION_LENGTH} characters or fewer")
     return cleaned
 
 
@@ -201,9 +199,7 @@ def _build_messages(question: str, citations: list[Citation]) -> list[ChatMessag
         )
     else:
         context_block = _build_context(citations)
-        user_content = (
-            f"Question: {question}\n\nContext (numbered entities):\n{context_block}"
-        )
+        user_content = f"Question: {question}\n\nContext (numbered entities):\n{context_block}"
     return [
         ChatMessage(role="system", content=SYSTEM_PROMPT),
         ChatMessage(role="user", content=user_content),

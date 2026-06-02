@@ -22,4 +22,3 @@ describe("palette", () => {
     expect(colorForType("unknown_type")).toBe(FALLBACK_COLOR);
   });
 });
-

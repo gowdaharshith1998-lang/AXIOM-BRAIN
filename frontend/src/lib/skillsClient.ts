@@ -1,3 +1,5 @@
+import { requestRaw } from "@/lib/http";
+
 export type Skill = {
   id: string;
   name: string;
@@ -60,7 +62,7 @@ export type RegisterSkillBody = {
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+  const response = await requestRaw(path, {
     ...init,
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
@@ -121,7 +123,7 @@ export async function uploadSkillMd(content: string): Promise<Skill> {
 }
 
 export async function downloadSkillMd(skillId: string): Promise<string> {
-  const response = await fetch(`/api/internal/skills/${encodeURIComponent(skillId)}/md`);
+  const response = await requestRaw(`/api/internal/skills/${encodeURIComponent(skillId)}/md`);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.text();
 }

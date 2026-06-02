@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { BrowserRouter, NavLink, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { Brain } from "@/components/Brain";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { BrainHealthCard } from "@/components/BrainHealthCard";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ConnectorBootstrap } from "@/components/ConnectorBootstrap";
@@ -13,7 +14,10 @@ import { EntityInspector } from "@/components/EntityInspector";
 // import { PendingApprovalsBadge } from "@/components/PendingApprovalsBadge";
 import { QueryBar } from "@/components/QueryBar";
 import { StatusFooter } from "@/components/StatusFooter";
+import { TokenGate } from "@/components/TokenGate";
 import { BrainSocket } from "@/lib/websocket";
+import { useAuthEpoch } from "@/hooks/useAuthEpoch";
+import { wsUrl } from "@/lib/wsUrl";
 import { AgentsPage } from "@/pages/AgentsPage";
 import { ActivityPage } from "@/pages/agents/ActivityPage";
 // HIDDEN-V2: schedules/triggers/runtime/approvals pages removed for YC company-brain positioning. uncomment to restore.
@@ -141,8 +145,7 @@ function StudioShell() {
               </div>
             </div>
             <div className="rounded-lg border border-[#213c5e] bg-[#071225]/90 p-3">
-              <div className="text-[13px] text-[#eef6ff]">Axiom Corp.</div>
-              <div className="text-[12px] text-[#8ba8cb]">Enterprise Plan</div>
+              <div className="text-[13px] text-[#eef6ff]">AXIOM</div>
             </div>
           </div>
         ) : (
@@ -203,7 +206,9 @@ function GraphPage() {
       <ConnectorStatusBar />
       <BrainHealthCard />
       <div className="absolute inset-0">
-        <Brain />
+        <ErrorBoundary label="the 3D brain view">
+          <Brain />
+        </ErrorBoundary>
       </div>
       <QueryBar />
       <EdgeLegend />
@@ -217,10 +222,13 @@ function GraphPage() {
 function WsStatusBridge() {
   const setConnectionStatus = useBrainStore((s) => s.setConnectionStatus);
   const applyEvent = useBrainStore((s) => s.applyEvent);
+  // Re-create the socket whenever the auth token changes so it reconnects
+  // with the auth subprotocol attached (otherwise the first connect predates
+  // the token and keeps retrying unauthenticated).
+  const authEpoch = useAuthEpoch();
 
   useEffect(() => {
-    const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
-    const url = `${wsScheme}://${window.location.hostname}:8000/ws/brain`;
+    const url = wsUrl("/ws/brain");
     const socket = new BrainSocket(url);
     socket.onStatus(setConnectionStatus);
     const off = socket.on((event) => {
@@ -232,7 +240,7 @@ function WsStatusBridge() {
       off();
       socket.close();
     };
-  }, [applyEvent, setConnectionStatus]);
+  }, [applyEvent, setConnectionStatus, authEpoch]);
 
   return null;
 }
@@ -240,6 +248,7 @@ function WsStatusBridge() {
 export function App() {
   return (
     <BrowserRouter>
+      <TokenGate />
       <ConnectorBootstrap />
       <WsStatusBridge />
       <Routes>

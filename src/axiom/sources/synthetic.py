@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime
@@ -9,7 +10,31 @@ from typing import Any
 
 from axiom.sources.base import IngestEvent, Source, SourceMetadata
 
-DEFAULT_FIXTURE = Path(__file__).resolve().parents[3] / "fixtures" / "synthetic_company.json"
+
+def _default_fixture() -> Path:
+    """Locate ``fixtures/synthetic_company.json`` across install layouts.
+
+    Resolution order: ``AXIOM_FIXTURE_PATH`` env var → ``<cwd>/fixtures/`` (repo
+    checkout or container WORKDIR) → source-relative (editable installs). The
+    source-relative path does not exist when the package is pip-installed into
+    site-packages, which is why it is the last resort.
+    """
+    env_path = os.environ.get("AXIOM_FIXTURE_PATH", "").strip()
+    if env_path:
+        return Path(env_path)
+    candidates = [
+        Path.cwd() / "fixtures" / "synthetic_company.json",
+        Path(__file__).resolve().parents[3] / "fixtures" / "synthetic_company.json",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    # Preserve the historical default for error messages when nothing exists.
+    return candidates[-1]
+
+
+# Kept as a module-level name for backwards compatibility with existing imports.
+DEFAULT_FIXTURE = _default_fixture()
 
 
 class SyntheticSource(Source):
@@ -17,7 +42,7 @@ class SyntheticSource(Source):
 
     def __init__(self, *, fixture_path: Path | None = None, source_id: str = "synthetic-default"):
         self.source_id = source_id
-        self.fixture_path = fixture_path or DEFAULT_FIXTURE
+        self.fixture_path = fixture_path or _default_fixture()
         self._data: dict[str, Any] | None = None
 
     async def discover(self) -> SourceMetadata:

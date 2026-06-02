@@ -12,4 +12,3 @@ describe("webgpu-detect", () => {
     nav.gpu = prev;
   });
 });
-

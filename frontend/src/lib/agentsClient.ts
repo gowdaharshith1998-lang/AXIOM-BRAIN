@@ -1,3 +1,4 @@
+import { requestRaw } from "@/lib/http";
 import type { Passport } from "@/lib/passportsClient";
 
 export type AgentRegistryRow = {
@@ -40,7 +41,7 @@ export type ReceiptRow = {
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+  const response = await requestRaw(path, {
     ...init,
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),

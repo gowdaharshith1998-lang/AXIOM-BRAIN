@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 import { superClusterIdForEntity } from "@/lib/cluster-reframe";
+import { request } from "@/lib/http";
 import { useBrainStore, type ClusterHealthSnapshot, type Edge, type Entity } from "@/state/brain.store";
 
 type Section = "all" | "people" | "teams" | "systems" | "documents" | "decisions" | "tickets" | "vendors" | "customers" | "policies";
@@ -37,12 +38,6 @@ const sections: Array<{ id: Section; label: string }> = [
   { id: "customers", label: "Customers" },
   // HIDDEN-V2: "Policies" category chip removed for YC company-brain positioning.
 ];
-
-async function request<T>(url: string): Promise<T> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return (await response.json()) as T;
-}
 
 function parseClusterHealth(payload: ClusterHealthResponse): {
   clusterHealth: Record<string, ClusterHealthSnapshot>;

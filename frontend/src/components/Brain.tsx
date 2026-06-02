@@ -39,14 +39,11 @@ import { ParticleBehaviorPool } from "@/lib/particle-behaviors";
 import { ParticleFlowController, createDotTexture } from "@/lib/particle-flow";
 import { hashStringToFloat, hubEmissiveIntensityAt, shimmerScale } from "@/lib/spoke-shimmer";
 import { hasWebGPU, preferredRendererKind } from "@/lib/webgpu-detect";
+import { request as fetchJson } from "@/lib/http";
 import { BrainSocket, type BrainEvent } from "@/lib/websocket";
+import { useAuthEpoch } from "@/hooks/useAuthEpoch";
+import { wsUrl } from "@/lib/wsUrl";
 import { useBrainStore, type ClusterHealthSnapshot, type Edge, type Entity } from "@/state/brain.store";
-
-async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return (await res.json()) as T;
-}
 
 const SCENE_TARGET = new THREE.Vector3(10, 12, 0);
 const INITIAL_CAMERA_POSITION = new THREE.Vector3(10, 12, 205);
@@ -98,23 +95,6 @@ function titleForEntity(entity: Entity): string {
   return entity.id;
 }
 
-function syntheticEntity(cluster: ClusterId, index: number): Entity {
-  return {
-    id: `synthetic-${cluster}-${index}`,
-    type: cluster === "agents" ? "agent" : cluster === "receipts" ? "receipt" : cluster === "governance" ? "governance" : "entity",
-    cluster_id: cluster,
-    source_id: null,
-    created_at: new Date(0).toISOString(),
-    updated_at: new Date(0).toISOString(),
-    composite_importance: 0.35 + index * 0.02,
-    data: {
-      title: `${cluster.replace(/_/g, " ")} signal ${index + 1}`,
-      description: "Visual placeholder synthesized from aggregate cluster metadata.",
-      synthetic: true,
-    },
-  };
-}
-
 function visualEntities(realEntities: Iterable<Entity>): Entity[] {
   const byCluster = new Map<ClusterId, Entity[]>();
   for (const cluster of VISUAL_CLUSTER_IDS) byCluster.set(cluster, []);
@@ -128,9 +108,6 @@ function visualEntities(realEntities: Iterable<Entity>): Entity[] {
     const cap = VISUAL_CAPS[cluster];
     const selected = sortedVisibleEntities(byCluster.get(cluster) ?? [], cap);
     out.push(...selected);
-    for (let i = selected.length; i < Math.min(MIN_VISIBLE_PER_CLUSTER, cap); i++) {
-      out.push(syntheticEntity(cluster, i));
-    }
   }
   return out;
 }
@@ -277,6 +254,7 @@ export function Brain() {
   const bootstrap = useBrainStore((s) => s.bootstrap);
   const setClusterHealth = useBrainStore((s) => s.setClusterHealth);
   const setConnectionStatus = useBrainStore((s) => s.setConnectionStatus);
+  const authEpoch = useAuthEpoch();
   const applyEvent = useBrainStore((s) => s.applyEvent);
   const setFps = useBrainStore((s) => s.setFps);
   const select = useBrainStore((s) => s.select);
@@ -306,10 +284,9 @@ export function Brain() {
   }, [bootstrap, setClusterHealth]);
 
   useEffect(() => {
-    const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
-    // Bypass Vite WS proxy in dev; production will be single-origin via reverse proxy (Phase 11).
-    const wsHost = window.location.hostname;
-    const url = `${wsScheme}://${wsHost}:8000/ws/brain`;
+    // Single-origin WS URL derived from window.location so the app works behind
+    // a reverse proxy / TLS terminator without a hardcoded backend port.
+    const url = wsUrl("/ws/brain");
     const ws = new BrainSocket(url);
     setConnectionStatus("syncing");
     const off = ws.on((event) => {
@@ -324,7 +301,8 @@ export function Brain() {
       offStatus();
       ws.close();
     };
-  }, [applyEvent, setConnectionStatus]);
+    // authEpoch: reconnect with fresh credentials after TokenGate auth.
+  }, [applyEvent, setConnectionStatus, authEpoch]);
 
   useEffect(() => {
     const el = containerRef.current;

@@ -8,18 +8,36 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from axiom.api.brain_ask import (
-    ChatCompletionError,
-    LLMProviderKeyNotFound,
     MAX_QUESTION_LENGTH,
     MAX_TOP_K,
     MIN_QUESTION_LENGTH,
+    ChatCompletionError,
+    LLMProviderKeyNotFound,
     UnknownLLMProvider,
     VaultCorrupt,
     VaultLocked,
     ask_brain,
 )
+from axiom.studio.rate_limit import (
+    RateLimitExceededError,
+    ask_limiter,
+    begin_llm_call,
+    end_llm_call,
+    rate_limit_key,
+)
 
 router = APIRouter()
+
+
+def _bearer_token(request: Request) -> str | None:
+    """Extract the bearer token from the Authorization header, if any."""
+    header = request.headers.get("authorization")
+    if not header:
+        return None
+    parts = header.split(None, 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1].strip() or None
+    return None
 
 
 class AskIn(BaseModel):
@@ -39,6 +57,17 @@ def _session_factory(request: Request) -> Any:
 
 @router.post("/api/brain/ask")
 def post_brain_ask(body: AskIn, request: Request) -> dict[str, Any]:
+    client_host = request.client.host if request.client else None
+    key = rate_limit_key(_bearer_token(request), client_host)
+    try:
+        ask_limiter.check(key, body.max_tokens)
+    except RateLimitExceededError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=exc.detail,
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+    begin_llm_call(key, body.max_tokens)
     try:
         with _session_factory(request)() as session:
             result = ask_brain(
@@ -75,4 +104,6 @@ def post_brain_ask(body: AskIn, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=status, detail=exc.detail) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        end_llm_call()
     return result.to_dict()

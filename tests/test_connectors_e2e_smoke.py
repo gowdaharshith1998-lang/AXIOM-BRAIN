@@ -221,31 +221,39 @@ def test_e2e_linear_install_through_first_sync(
     monkeypatch.setenv("AXIOM_CONNECTOR_LINEAR_ENABLED", "1")
     app, db_url = _make_app(tmp_path, monkeypatch)
     responses.post("https://api.linear.app/oauth/token", json={"access_token": "lin_e2e"})
-    responses.post(
-        "https://api.linear.app/graphql",
-        json={"data": {"teams": {"nodes": [{"id": "team_1", "name": "Platform"}]}}},
-    )
-    responses.post(
-        "https://api.linear.app/graphql",
-        json={"data": {"projects": {"nodes": [{"id": "project_1", "name": "Launch"}]}}},
-    )
-    responses.post(
-        "https://api.linear.app/graphql",
-        json={
-            "data": {
-                "issues": {
-                    "nodes": [
-                        {
-                            "id": "issue_1",
-                            "title": "Bug",
-                            "identifier": "AX-1",
-                            "team": {"id": "team_1", "name": "Platform"},
-                            "project": {"id": "project_1", "name": "Launch"},
-                        }
-                    ]
+
+    # The OAuth callback schedules a post-OAuth auto-sync (BackgroundTasks) AND the
+    # test calls the explicit sync endpoint — both hit the single GraphQL URL with
+    # different queries. Route mock responses by query content (not registration
+    # order) so the test is independent of how many sync passes run.
+    def _graphql_router(request: Any) -> tuple[int, dict[str, str], str]:
+        query = str(json.loads(request.body).get("query", ""))
+        if "AxiomLinearTeamsAndIssues" in query:
+            payload: dict[str, Any] = {
+                "data": {"teams": {"nodes": [{"id": "team_1", "name": "Platform"}]}}
+            }
+        elif "AxiomLinearProjects" in query:
+            payload = {"data": {"projects": {"nodes": [{"id": "project_1", "name": "Launch"}]}}}
+        else:  # AxiomLinearIssues — per-team issue fetch
+            payload = {
+                "data": {
+                    "issues": {
+                        "nodes": [
+                            {
+                                "id": "issue_1",
+                                "title": "Bug",
+                                "identifier": "AX-1",
+                                "team": {"id": "team_1", "name": "Platform"},
+                                "project": {"id": "project_1", "name": "Launch"},
+                            }
+                        ]
+                    }
                 }
             }
-        },
+        return (200, {"Content-Type": "application/json"}, json.dumps(payload))
+
+    responses.add_callback(
+        responses.POST, "https://api.linear.app/graphql", callback=_graphql_router
     )
 
     with TestClient(app) as client:

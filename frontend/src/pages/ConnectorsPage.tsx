@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
+import { requestRaw } from "@/lib/http";
+import { wsConnect } from "@/lib/ws";
+import { useAuthEpoch } from "@/hooks/useAuthEpoch";
 import {
   CONNECTOR_VENDORS,
   useConnectorsStore,
@@ -24,6 +27,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
   const statuses = useConnectorsStore((s) => s.connectors);
   const fetchStatuses = useConnectorsStore((s) => s.fetchStatuses);
   const incrementConnectorEvents = useConnectorsStore((s) => s.incrementConnectorEvents);
+  const authEpoch = useAuthEpoch();
   const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
   const [drawerVendor, setDrawerVendor] = useState<string | null>(null);
   const [actionMessages, setActionMessages] = useState<Record<string, string>>({});
@@ -66,9 +70,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
 
   useEffect(() => {
     if (typeof WebSocket === "undefined") return;
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const host = window.location.host || "localhost";
-    const socket = new WebSocket(`${protocol}://${host}/ws/brain`);
+    const socket = wsConnect("/ws/brain");
     socket.onmessage = (message) => {
       try {
         const event = JSON.parse(String(message.data));
@@ -95,7 +97,8 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
       }
     };
     return () => socket.close();
-  }, [incrementConnectorEvents]);
+    // authEpoch: reconnect with fresh credentials after TokenGate auth.
+  }, [incrementConnectorEvents, authEpoch]);
 
   const byVendor = useMemo(
     () => new Map(statuses.map((status) => [status.vendor, status])),
@@ -112,7 +115,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
   async function startInstall(vendor: string): Promise<{ ok: boolean; error?: string }> {
     setActionMessage(vendor, "Connecting...");
     try {
-      const response = await fetch(`/api/internal/connectors/${vendor}/install`, { method: "POST" });
+      const response = await requestRaw(`/api/internal/connectors/${vendor}/install`, { method: "POST" });
       if (!response.ok) {
         const message = await responseMessage(response, "Connector install failed");
         setActionMessage(vendor, message);
@@ -158,7 +161,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
     setSetupError(null);
     setActionMessage(vendor, "Saving connector setup...");
     try {
-      const response = await fetch(`/api/internal/connectors/${vendor}/config`, {
+      const response = await requestRaw(`/api/internal/connectors/${vendor}/config`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(setupForm),
@@ -188,7 +191,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
   async function sync(vendor: string) {
     setActionMessage(vendor, "Syncing...");
     try {
-      const response = await fetch(`/api/internal/connectors/${vendor}/sync`, { method: "POST" });
+      const response = await requestRaw(`/api/internal/connectors/${vendor}/sync`, { method: "POST" });
       if (!response.ok) {
         setActionMessage(vendor, await responseMessage(response, "Connector sync failed"));
         return;
@@ -203,7 +206,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
   async function testConnection(vendor: string) {
     setActionMessage(vendor, "Testing...");
     try {
-      const response = await fetch(`/api/internal/connectors/${vendor}/test`, { method: "POST" });
+      const response = await requestRaw(`/api/internal/connectors/${vendor}/test`, { method: "POST" });
       if (!response.ok) {
         setActionMessage(vendor, await responseMessage(response, "Connection test failed"));
         return;
@@ -219,7 +222,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
     setDrawerVendor(vendor);
     setActionMessage(vendor, "Loading events...");
     try {
-      const response = await fetch(`/api/internal/connectors/${vendor}/events`);
+      const response = await requestRaw(`/api/internal/connectors/${vendor}/events`);
       if (!response.ok) {
         setActionMessage(vendor, await responseMessage(response, "Could not load events"));
         return;
@@ -237,7 +240,7 @@ export function ConnectorsPage({ embedded = false }: { embedded?: boolean }) {
   async function disconnect(vendor: string) {
     setActionMessage(vendor, "Disconnecting...");
     try {
-      const response = await fetch(`/api/internal/connectors/${vendor}`, { method: "DELETE" });
+      const response = await requestRaw(`/api/internal/connectors/${vendor}`, { method: "DELETE" });
       if (!response.ok) {
         setActionMessage(vendor, await responseMessage(response, "Disconnect failed"));
         return;

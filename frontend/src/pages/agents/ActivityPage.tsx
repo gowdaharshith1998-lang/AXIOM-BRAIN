@@ -2,6 +2,8 @@
 // (skill runs + MCP tool calls + connector syncs) for YC company-brain positioning.
 import { useEffect, useState } from "react";
 
+import { requestRaw } from "@/lib/http";
+
 type ActivityItem = {
   kind: "skill_run" | "mcp_tool_call" | "connector_sync";
   id: string;
@@ -30,7 +32,7 @@ export function ActivityPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/internal/agents/activity?limit=100")
+    requestRaw("/api/internal/agents/activity?limit=100")
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();

@@ -167,7 +167,7 @@ describe("SettingsPage", () => {
   });
 
   it.each([
-    ["Integrations", "Data Sources / Integrations"],
+    ["Integrations", "Connectors"],
     ["Access", "Members"],
     ["Notifications", "Notification Rules"],
     ["Security", "Authentication"],

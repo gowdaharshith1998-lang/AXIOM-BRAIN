@@ -1,3 +1,5 @@
+import { requestRaw } from "@/lib/http";
+
 export type ApprovalRequest = {
   id: string;
   action_id: string;
@@ -25,7 +27,7 @@ export type ApprovalResolution = {
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+  const response = await requestRaw(path, {
     ...init,
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),

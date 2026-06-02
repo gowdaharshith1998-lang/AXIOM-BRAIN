@@ -1,7 +1,7 @@
 # AXIOM Company Brain Audit
 
-**Scope:** Repository-grounded architecture audit for a governed, source-backed company intelligence layer **inside this codebase** (`AXIOM-BRAIN`).  
-**Date:** 2026-05-07  
+**Scope:** Repository-grounded architecture audit for a governed, source-backed company intelligence layer **inside this codebase** (`AXIOM-BRAIN`).
+**Date:** 2026-05-07
 **MCP tooling:** Ruflo `analyze_file-risk` was run on representative backend files (high risk flagged for large `schema/models.py` changes; `studio/server.py` assessed low for moderate route additions). Ruflo `guidance_discover` confirmed local skill inventory (informational).
 
 ---
@@ -427,7 +427,7 @@ Use this **after Phase 0 sign-off**. It deliberately avoids ripping out architec
 **Prompt (Phase 1 — Brain Foundation)**
 
 > You are implementing Phase 1 of the Company Brain inside the **AXIOM-BRAIN** repo. Constraints:
-> 
+>
 > 1. **Reuse** existing SQLAlchemy models **`Entity`, `Edge`, `Source`** — do **not** add `BrainNode` tables unless unavoidable; store brain-specific attributes under `entity.data` with documented keys (`trust_level`, `authority_rank`, `source_refs`, timestamps).
 > 2. Add FastAPI routes in **a new module** (e.g. `src/axiom/api/brain.py`) and **include the router** from `studio/server.py` — avoid an unmaintainable giant `server.py`.
 > 3. Routes (single-tenant, no auth yet): **`GET/PATCH /api/brain/nodes/{id}`, `POST /api/brain/nodes`, `GET /api/brain/edges`, `POST /api/brain/edges`** with Pydantic request/response models mirroring **`EntityDTO`/`EdgeDTO`** plus validated `relationship` for edge kinds.

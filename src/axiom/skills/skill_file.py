@@ -26,7 +26,7 @@ class StepIfThen:
     id: str
     type: Literal["if_then"]
     condition: str
-    then: list["Step"]
+    then: list[Step]
 
 
 @dataclass(frozen=True)
@@ -62,13 +62,7 @@ class StepLogDecision:
     note: str
 
 
-Step = (
-    StepIfThen
-    | StepFetchEntity
-    | StepWriteEntity
-    | StepRequireApproval
-    | StepLogDecision
-)
+Step = StepIfThen | StepFetchEntity | StepWriteEntity | StepRequireApproval | StepLogDecision
 
 
 @dataclass(frozen=True)

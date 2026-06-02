@@ -9,4 +9,3 @@ export function useBrainFocus() {
 
   return { focus, focusCluster, focusEntity, clearFocus, setHoveredCluster };
 }
-

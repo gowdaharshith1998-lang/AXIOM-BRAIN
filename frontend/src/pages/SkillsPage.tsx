@@ -14,6 +14,7 @@ import {
   type CompileSkillItem,
   type SkillRun,
 } from "@/lib/skillsClient";
+import { requestRaw } from "@/lib/http";
 import type { BrainEvent } from "@/lib/websocket";
 
 function cx(...classes: Array<string | false | null | undefined>) {
@@ -230,7 +231,7 @@ export function SkillsPage() {
     // The SkillFiles list is supplementary to the primary skills table; defer
     // it to a macrotask so it never interleaves with other mount-time loads.
     const timer = setTimeout(() => {
-      fetch("/api/internal/skill-files")
+      requestRaw("/api/internal/skill-files")
         .then((response) => (response.ok ? response.json() : { skill_files: [] }))
         .then((data: { skill_files?: SkillFileSummary[] }) => setSkillFiles(data.skill_files ?? []))
         .catch(() => setSkillFiles([]));
@@ -367,7 +368,7 @@ export function SkillsPage() {
     setCompileResults([]);
     setCompileError(null);
     try {
-      const response = await fetch("/api/entities?type=process");
+      const response = await requestRaw("/api/entities?type=process");
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const rows = dedupeProcesses((await response.json()) as ProcessEntity[]);
       setProcesses(rows);

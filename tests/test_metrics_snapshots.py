@@ -137,6 +137,10 @@ def test_backfill_from_receipts_creates_per_day_rows(db_session: Session) -> Non
     db_session.add(
         Entity(id="e2", type="thread", data={}, created_at=datetime(2026, 5, 9, 9, 0, 0))
     )
+    # Flush entities before the edge: the real edges->entities FK is enforced
+    # (PRAGMA foreign_keys=ON), and the unit-of-work has no ORM relationship to
+    # order these raw-FK rows, so the edge must see its endpoints already in the DB.
+    db_session.flush()
     db_session.add(
         Edge(
             id="edge1",

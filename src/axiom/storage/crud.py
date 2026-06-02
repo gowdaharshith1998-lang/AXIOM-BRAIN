@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import deque
 from datetime import datetime
 from typing import Any, Literal
@@ -9,6 +10,42 @@ from sqlalchemy.orm import Session
 
 from axiom.schema.dto import EdgeDTO, EntityDTO
 from axiom.schema.models import Edge, Entity
+
+log = logging.getLogger("axiom.storage.crud")
+
+
+def _upsert_entity_fts(session: Session, entity: Entity) -> None:
+    """Keep the FTS5 keyword index in sync on create/update (E.3 / DB-003).
+
+    Cheap and fully optional: a no-op unless ``AXIOM_FTS_ENABLED`` is truthy and
+    the sqlite build supports FTS5. Reuses the retrieval module's contentless
+    ``entities_fts`` virtual table (created on demand by ``ensure_entities_fts``)
+    and upserts just the one row (DELETE + INSERT), so live ingest no longer
+    leaves the keyword pushdown unpopulated. Any failure is swallowed — the index
+    is an optimisation, never a correctness dependency for a write.
+    """
+    from axiom.retrieval.search import (
+        _FTS_TABLE,
+        _raw_sqlite,
+        ensure_entities_fts,
+        fts_enabled,
+    )
+
+    if not fts_enabled():
+        return
+    try:
+        if not ensure_entities_fts(session):
+            return
+        from axiom.retrieval.embeddings import canonical_entity_text
+
+        cur = _raw_sqlite(session).cursor()
+        cur.execute(f"DELETE FROM {_FTS_TABLE} WHERE entity_id = ?", (entity.id,))
+        cur.execute(
+            f"INSERT INTO {_FTS_TABLE}(entity_id, searchable) VALUES (?, ?)",
+            (entity.id, canonical_entity_text(entity)),
+        )
+    except Exception:  # noqa: BLE001 - FTS upkeep must never break a write
+        log.debug("entities_fts upsert failed for %s", entity.id, exc_info=True)
 
 
 def create_entity(
@@ -21,6 +58,8 @@ def create_entity(
 ) -> EntityDTO:
     entity = Entity(type=type_, data=data, source_id=source_id, cluster_id=cluster_id)
     session.add(entity)
+    session.flush()
+    _upsert_entity_fts(session, entity)
     session.commit()
     session.refresh(entity)
     return EntityDTO.model_validate(entity)
@@ -40,6 +79,8 @@ def update_entity(session: Session, entity_id: str, data: dict[str, Any]) -> Ent
     entity.data = data
     entity.updated_at = datetime.utcnow()
     session.add(entity)
+    session.flush()
+    _upsert_entity_fts(session, entity)
     session.commit()
     session.refresh(entity)
     return EntityDTO.model_validate(entity)
@@ -141,6 +182,25 @@ def add_edge(
     type_: str,
     data: dict[str, Any] | None = None,
 ) -> EdgeDTO:
+    """Create an edge, or return the existing one (idempotent ingest, P1-4).
+
+    Replayed webhook/sync events otherwise duplicate the same logical edge. An
+    edge is identified by ``(source_id, target_id, relationship)``; if one already
+    exists it is returned unchanged rather than inserting a duplicate.
+    """
+    existing = (
+        session.execute(
+            select(Edge).where(
+                Edge.source_id == source_id,
+                Edge.target_id == target_id,
+                Edge.relationship == type_,
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing is not None:
+        return EdgeDTO.model_validate(existing)
     edge = Edge(source_id=source_id, target_id=target_id, relationship=type_, data=data or {})
     session.add(edge)
     session.commit()

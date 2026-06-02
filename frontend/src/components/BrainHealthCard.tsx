@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { requestRaw } from "@/lib/http";
 import type { Entity } from "@/state/brain.store";
 import { useBrainStore } from "@/state/brain.store";
 
@@ -133,7 +134,7 @@ export function BrainHealthCard() {
 
     async function loadHistory() {
       try {
-        const response = await fetch(
+        const response = await requestRaw(
           "/api/internal/metrics-snapshots?days=2&metric=brain_health",
           { signal: controller.signal },
         );

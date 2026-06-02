@@ -7,4 +7,3 @@ describe("PhaseStubApp", () => {
     expect(() => PhaseStubApp()).toThrow(/PhaseStubApp is removed in Phase 4/);
   });
 });
-

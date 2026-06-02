@@ -142,7 +142,7 @@ class HybridClassifier:
         except ImportError:
             return None
         try:  # pragma: no cover
-            client = anthropic.Anthropic(api_key=self._api_key)
+            client: object = anthropic.Anthropic(api_key=self._api_key)
         except Exception:  # noqa: BLE001
             logger.exception("Failed to instantiate Anthropic client")
             return None

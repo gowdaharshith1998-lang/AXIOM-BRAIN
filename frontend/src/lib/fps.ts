@@ -16,4 +16,3 @@ export class RollingFpsCounter {
     return Math.round((this.windowSize - 1) / elapsedSec);
   }
 }
-

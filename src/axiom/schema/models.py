@@ -49,9 +49,15 @@ class Entity(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     type: Mapped[str] = mapped_column(String(64), index=True)  # free-text; NOT enum
     data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    source_id: Mapped[str | None] = mapped_column(
-        String(32), ForeignKey("sources.id"), nullable=True, index=True
-    )
+    # Overloaded, intentionally NOT a ForeignKey to sources.id. This column holds
+    # EITHER a real sources.id (synthetic ingest paths: 'synthetic-default',
+    # 'live-synthetic') OR an external 'vendor:type:id' reference that doubles as
+    # the connector upsert dedup key (e.g. 'github:pull_request:123456789',
+    # 'linear:issue:issue_1') and is NOT a row in the sources table. A FK here
+    # would (and did, once PRAGMA foreign_keys=ON landed) reject every connector
+    # ingest. Widened from String(32): connector refs exceed 32 chars (SQLite
+    # ignores the length, but the model must be honest about what it stores).
+    source_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True
@@ -173,7 +179,7 @@ class AgentPassport(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     revocation_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     issuer_signature: Mapped[str] = mapped_column(String, nullable=False)
-    signing_scheme: Mapped[str] = mapped_column(String, nullable=False, default="demo")
+    signing_scheme: Mapped[str] = mapped_column(String, nullable=False, default="ed25519")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -267,6 +273,7 @@ class ConnectorEventRow(Base):
     __table_args__ = (
         Index("ix_connector_events_vendor_received", "vendor", "received_at"),
         Index("ix_connector_events_external", "vendor", "external_id"),
+        UniqueConstraint("vendor", "external_id", name="uq_connector_event_vendor_external"),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -275,7 +282,9 @@ class ConnectorEventRow(Base):
         String(32), ForeignKey("connector_states.id"), nullable=True, index=True
     )
     event_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    external_id: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    external_id: Mapped[str | None] = mapped_column(
+        String(512), nullable=True, default=None, index=True
+    )
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     signature_ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

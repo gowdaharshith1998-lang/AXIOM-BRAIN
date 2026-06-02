@@ -96,7 +96,7 @@ def _mk_threads(rng: random.Random, n: int) -> list[EntitySpec]:
                 nick=nick,
                 type="thread",
                 data={
-                    "title": f"{titles[i % len(titles)]} ({i+1})",
+                    "title": f"{titles[i % len(titles)]} ({i + 1})",
                     "channel": channels[i % len(channels)],
                     "message_count": rng.randint(3, 42),
                 },
@@ -125,7 +125,7 @@ def _mk_tickets(rng: random.Random, n: int) -> list[EntitySpec]:
                 nick=nick,
                 type="ticket",
                 data={
-                    "title": f"{titles[i % len(titles)]} [{i+1}]",
+                    "title": f"{titles[i % len(titles)]} [{i + 1}]",
                     "status": statuses[i % len(statuses)],
                     "priority": ["p0", "p1", "p2"][i % 3],
                 },
@@ -181,7 +181,7 @@ def _mk_decisions(rng: random.Random, n: int) -> list[EntitySpec]:
                 nick=nick,
                 type="decision",
                 data={
-                    "title": f"{titles[i % len(titles)]} ({i+1})",
+                    "title": f"{titles[i % len(titles)]} ({i + 1})",
                     "status": statuses[(i + 1) % len(statuses)],
                     "summary": "A concrete call made with a clear rationale and follow-ups.",
                 },
@@ -355,4 +355,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

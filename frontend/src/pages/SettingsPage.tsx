@@ -38,6 +38,7 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
       <input
         className="h-[41px] w-full rounded-md border border-[#223b5c] bg-[#071225] px-3 text-[#e6f0ff] outline-none focus:border-[#2389ff]"
         value={value}
+        aria-label={label}
         readOnly={!onChange}
         onChange={(event) => onChange?.(event.target.value)}
       />
@@ -105,6 +106,7 @@ function SettingSelect({
     <select
       value={value}
       onChange={(event) => onChange(event.target.value)}
+      aria-label="Setting value"
       className="inline-flex h-8 min-w-0 rounded border border-[#1a3550] bg-[#071225] px-2 text-[#e6f0ff] outline-none focus:border-[#2389ff]"
     >
       {options.map((item) => <option key={item} value={item}>{item}</option>)}
@@ -115,7 +117,7 @@ function SettingSelect({
 function SettingToggle({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
   return (
     <label className="inline-flex items-center gap-2 text-[13px] text-[#9aa8c4]">
-      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <input type="checkbox" checked={checked} aria-label="Toggle setting" onChange={(event) => onChange(event.target.checked)} />
       <span>{checked ? "On" : "Off"}</span>
     </label>
   );
@@ -356,6 +358,7 @@ export function SettingsPage() {
                   value={inviteEmail}
                   onChange={(event) => setInviteEmail(event.target.value)}
                   placeholder="name@company.com"
+                  aria-label="Invite Email"
                   type="email"
                 />
               </label>
@@ -365,6 +368,7 @@ export function SettingsPage() {
                   className="h-[41px] w-full rounded-md border border-[#223b5c] bg-[#071225] px-3 text-[#e6f0ff] outline-none focus:border-[#2389ff]"
                   value={inviteRole}
                   onChange={(event) => setInviteRole(event.target.value)}
+                  aria-label="Invite Role"
                 >
                   <option>Viewer</option>
                   <option>Editor</option>

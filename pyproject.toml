@@ -1,10 +1,9 @@
 [project]
 name = "axiom"
-version = "0.1.0"
+version = "0.2.0"
 description = "AXIOM — the company brain"
 requires-python = ">=3.13"
 dependencies = [
-    "pqcrypto",
     "cryptography",
     "fastapi",
     "uvicorn[standard]",
@@ -19,7 +18,12 @@ dependencies = [
     "google-auth",
     "uuid-utils",
     "networkx>=3.0",
+    # networkx.pagerank delegates to scipy/numpy at runtime (no hard dep in networkx
+    # itself) — declare them explicitly so clean installs reproduce a working build.
+    "numpy>=1.26",
+    "scipy>=1.11",
     "mcp==1.9.4",
+    "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +31,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio",
     "pytest-cov",
+    "pytest-timeout",
     "responses",
     "ruff",
     "mypy",
@@ -51,7 +56,17 @@ select = ["E", "F", "I", "N", "UP", "B", "C4"]
 asyncio_mode = "auto"
 pythonpath = ["src"]
 testpaths = ["tests"]
+# Convert any hang into a failing test that NAMES the culprit (CI safety + diagnosis).
+# thread method works with the sync TestClient/asyncio loops used in this suite.
+timeout = 120
+timeout_method = "thread"
 
 [tool.mypy]
 strict = true
 files = ["src/axiom"]
+
+[[tool.mypy.overrides]]
+# anthropic is an optional runtime dependency (LLM fallback in HybridClassifier);
+# it is lazily imported and absent in the default install.
+module = "anthropic.*"
+ignore_missing_imports = true

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any, cast
 from urllib.parse import urlencode
 
-import requests  # type: ignore[import-untyped]
+import requests
 
 from axiom.connectors.base import ConnectorConfig, ConnectorState, OAuthFlow
 from axiom.schema.models import new_id

@@ -10,4 +10,3 @@ describe("fps", () => {
     expect(c.tick(32)).toBeGreaterThan(0);
   });
 });
-

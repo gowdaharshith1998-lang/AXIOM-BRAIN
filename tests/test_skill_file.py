@@ -185,9 +185,7 @@ def test_runner_variable_substitution(session_factory):
     )
     assert result.status == "success"
     log_result = next(
-        r
-        for r in result.step_results
-        if r.step_id == "log_decision" and r.status == "executed"
+        r for r in result.step_results if r.step_id == "log_decision" and r.status == "executed"
     )
     assert "Beta Industries" in log_result.detail["resolved_note"]
     assert "$80" in log_result.detail["resolved_note"]

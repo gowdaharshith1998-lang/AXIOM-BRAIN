@@ -20,20 +20,19 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import networkx as nx
-from sqlalchemy import select
+import networkx as nx  # type: ignore[import-untyped]
 from sqlalchemy.orm import Session
 
 from axiom.api.search import title_for_entity
 from axiom.retrieval.embeddings import EmbeddingProvider
 from axiom.retrieval.search import (
     SearchResult,
+    _edges_touching,
     _filtered_entities,
     _safe_limit,
     lexical_search,
     semantic_search,
 )
-from axiom.schema.models import Edge
 
 log = logging.getLogger("axiom.retrieval.graph_rank")
 
@@ -101,7 +100,10 @@ def _build_graph(
     entity_map = {entity.id: entity for entity in entities}
     graph: nx.DiGraph = nx.DiGraph()
     graph.add_nodes_from(entity_map)
-    for edge in session.execute(select(Edge)).scalars().all():
+    # Only edges with an endpoint in the candidate set can become graph edges,
+    # so restrict the scan to that set instead of loading the whole edge table
+    # (127k rows in the live DB). Bounded by AXIOM_MAX_EDGE_SCAN (DB-003).
+    for edge in _edges_touching(session, set(entity_map)):
         if edge.source_id in entity_map and edge.target_id in entity_map:
             # Multiple edges between the same pair just reinforce the link.
             if graph.has_edge(edge.source_id, edge.target_id):
@@ -165,9 +167,7 @@ def personalized_pagerank_search(
     if not seeds:
         return []
 
-    graph, entity_map = _build_graph(
-        session, entity_types=entity_types, cluster_id=cluster_id
-    )
+    graph, entity_map = _build_graph(session, entity_types=entity_types, cluster_id=cluster_id)
     # Keep only seeds that survived filtering and exist as graph nodes.
     seeds = {sid: weight for sid, weight in seeds.items() if sid in graph}
     if not seeds or graph.number_of_edges() == 0:
@@ -181,9 +181,7 @@ def personalized_pagerank_search(
         )
 
     total = sum(seeds.values()) or 1.0
-    personalization = {
-        node: (seeds.get(node, 0.0) / total) for node in graph.nodes
-    }
+    personalization = {node: (seeds.get(node, 0.0) / total) for node in graph.nodes}
 
     try:
         ranks = nx.pagerank(

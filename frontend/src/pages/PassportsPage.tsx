@@ -8,6 +8,8 @@ import {
   type IssuePassportBody,
   type Passport,
 } from "@/lib/passportsClient";
+import { wsConnect } from "@/lib/ws";
+import { useAuthEpoch } from "@/hooks/useAuthEpoch";
 
 type FormState = Record<keyof IssuePassportBody, string>;
 
@@ -44,6 +46,7 @@ function formatDate(value: string | null): string {
 
 export function PassportsPage() {
   const [rows, setRows] = useState<Passport[]>([]);
+  const authEpoch = useAuthEpoch();
   const [issueOpen, setIssueOpen] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(initialForm);
@@ -55,8 +58,7 @@ export function PassportsPage() {
   }, []);
 
   useEffect(() => {
-    const url = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:8000/ws/brain`;
-    const ws = new WebSocket(url);
+    const ws = wsConnect("/ws/brain");
     ws.onmessage = (message) => {
       try {
         const event = JSON.parse(String(message.data)) as { type?: string; payload?: Passport };
@@ -72,7 +74,8 @@ export function PassportsPage() {
       }
     };
     return () => ws.close();
-  }, []);
+    // authEpoch: reconnect with fresh credentials after TokenGate auth.
+  }, [authEpoch]);
 
   const canIssue = useMemo(
     () => form.agent_name.trim() && form.agent_class.trim() && form.owner_email.trim() && Number(form.ttl_hours) > 0,
@@ -172,6 +175,7 @@ export function PassportsPage() {
                   <input
                     className="h-[38px] w-full rounded-md border border-[#223b5c] bg-[#071225] px-3 text-[#e6f0ff] outline-none"
                     value={form[key as keyof FormState]}
+                    aria-label={key}
                     type={key === "ttl_hours" ? "number" : "text"}
                     onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))}
                   />

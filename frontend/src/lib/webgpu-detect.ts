@@ -11,4 +11,3 @@ export function preferredRendererKind(opts: {
 }): RendererKind {
   return opts.navigatorHasWebGpu && opts.threeHasWebGpuRenderer ? "webgpu" : "webgl";
 }
-

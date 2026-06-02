@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 import { SkillFileBuilder } from "@/components/skill-builder/SkillFileBuilder";
 import { compile, decompile, DecompileError } from "@/components/skill-builder/compile";
 import type { AnyStepBlock, SkillFileDoc } from "@/components/skill-builder/types";
+import { requestRaw } from "@/lib/http";
 
 type SkillFileDetail = {
   name: string;
@@ -91,7 +92,7 @@ export function SkillFileDetailPage() {
 
   useEffect(() => {
     if (!name) return;
-    fetch(`/api/internal/skill-files/${name}`)
+    requestRaw(`/api/internal/skill-files/${name}`)
       .then((response) => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json();
@@ -165,7 +166,7 @@ export function SkillFileDetailPage() {
       editorMode === "yaml_edit" ? yamlText : doc ? compile(doc) : yamlText;
     setSaveStatus("Saving…");
     try {
-      const response = await fetch(`/api/internal/skill-files/${name}`, {
+      const response = await requestRaw(`/api/internal/skill-files/${name}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ yaml_text: yamlToSave }),
@@ -180,7 +181,7 @@ export function SkillFileDetailPage() {
       setErrors([]);
       setSaveStatus(`Saved as v${body.version}`);
       // Refresh from server; the decompile effect re-derives doc + yamlText.
-      const fresh = await fetch(`/api/internal/skill-files/${name}`).then((r) =>
+      const fresh = await requestRaw(`/api/internal/skill-files/${name}`).then((r) =>
         r.json(),
       );
       setDetail(fresh);
@@ -196,7 +197,7 @@ export function SkillFileDetailPage() {
     setRunResult(null);
     try {
       const trigger = JSON.parse(triggerJson);
-      const response = await fetch(`/api/internal/skill-files/${name}/run`, {
+      const response = await requestRaw(`/api/internal/skill-files/${name}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ trigger }),

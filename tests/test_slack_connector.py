@@ -73,7 +73,7 @@ def test_slack_oauth_authorize_url_includes_bot_and_user_scopes() -> None:
 
 
 @responses.activate
-def test_slack_oauth_exchange_code_stores_bot_and_user_tokens() -> None:
+def test_slack_oauth_exchange_code_stores_bot_token_and_rotation_refresh() -> None:
     from axiom.connectors.base import ConnectorConfig
     from axiom.connectors.slack.oauth import SlackOAuth
 
@@ -82,6 +82,8 @@ def test_slack_oauth_exchange_code_stores_bot_and_user_tokens() -> None:
         json={
             "ok": True,
             "access_token": "xoxb-bot",
+            "refresh_token": "xoxe-1-refresh",
+            "expires_in": 43200,
             "authed_user": {"access_token": "xoxp-user"},
             "team": {"id": "T1", "name": "Axiom HQ"},
         },
@@ -99,7 +101,10 @@ def test_slack_oauth_exchange_code_stores_bot_and_user_tokens() -> None:
 
     assert state.connector_id == "slack"
     assert state.access_token == "xoxb-bot"
-    assert state.refresh_token == "xoxp-user"
+    # The rotation refresh token (not the authed-user token) is what enables
+    # grant_type=refresh_token rotation in refresh().
+    assert state.refresh_token == "xoxe-1-refresh"
+    assert state.token_expires_at is not None
     assert state.account_label == "Axiom HQ"
 
 

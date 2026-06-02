@@ -57,4 +57,3 @@ ruflo_walk() {
 ruflo_walk_summary() {
   ruflo_walk "$@" | grep "Total symbols" | awk '{s+=$4} END{print "Aggregate symbols across files:", s}'
 }
-
