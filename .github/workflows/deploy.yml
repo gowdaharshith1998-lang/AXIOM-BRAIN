@@ -1,0 +1,174 @@
+# =============================================================================
+# Continuous Deployment (P1-10)
+# =============================================================================
+# Builds the production Docker image, publishes it to GitHub Container Registry
+# (GHCR), then runs migrations and a health-gated deploy.
+#
+# WHAT WORKS OUT OF THE BOX
+#   - `build-and-push` builds the repo Dockerfile and pushes to
+#     ghcr.io/<owner>/<repo> using the auto-provisioned GITHUB_TOKEN. No extra
+#     secrets are required for image publishing.
+#
+# REQUIRED SETUP BEFORE `deploy` CAN PROMOTE A RELEASE
+#   1. Repository → Settings → Actions → General → Workflow permissions:
+#        enable "Read and write permissions" (lets GITHUB_TOKEN push to GHCR).
+#   2. Repository variable `DEPLOY_URL` — the base URL of the running service
+#        (e.g. https://axiom.example.com). The deploy job probes
+#        `${DEPLOY_URL}/readyz` as a promotion gate; if it is unset the job is
+#        skipped (the build still publishes a usable image).
+#   3. Repository → Settings → Environments → create `production` and (optional)
+#        add required reviewers so deploys wait for manual approval.
+#   4. Any host-specific deploy command (ssh / fly / render / k8s rollout) goes
+#        in the "Deploy released image" step below — it is a template today.
+#
+# TRIGGERS
+#   - Pushing a version tag matching v*  (e.g. v1.2.3) — the normal release path.
+#   - Manual `workflow_dispatch` from the Actions tab.
+# =============================================================================
+name: Deploy
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# One deploy per ref at a time; never cancel an in-flight deploy mid-rollout.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    name: Build & push image (GHCR)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Lowercase the repository slug — GHCR rejects uppercase image paths,
+      # and the {owner}/{repo} slug can contain capitals.
+      - name: Compute image reference
+        id: meta
+        run: |
+          repo_lc="$(echo "${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')"
+          image="${REGISTRY}/${repo_lc}"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          # On a tag push GITHUB_REF_NAME is the tag (e.g. v1.2.3); for manual
+          # dispatch fall back to the short SHA so the run is still tagged.
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Migrate & deploy (health-gated)
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Manual-approval gate when the `production` environment has required
+    # reviewers configured (see header). The deployment URL surfaces in the UI.
+    environment:
+      name: production
+      url: ${{ vars.DEPLOY_URL }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Apply migrations using the *published* image so the schema matches the
+      # exact code being deployed (P1-10 / P1-11). DATABASE_URL must point at the
+      # production database; configure it as an environment secret/variable.
+      #
+      #   docker run --rm -e DATABASE_URL <image> alembic upgrade head
+      #
+      # Disabled until a production DATABASE_URL is wired up — uncomment and
+      # supply the connection string via the `production` environment secrets.
+      - name: Run migrations (alembic upgrade head)
+        if: ${{ vars.DEPLOY_URL != '' }}
+        env:
+          IMAGE: ${{ needs.build-and-push.outputs.image }}:${{ needs.build-and-push.outputs.version }}
+        run: |
+          echo "TEMPLATE: run migrations against the production database."
+          echo "Configure DATABASE_URL as a 'production' environment secret, then:"
+          echo "  docker run --rm -e DATABASE_URL=\"\$DATABASE_URL\" \"$IMAGE\" alembic upgrade head"
+          # docker run --rm -e DATABASE_URL="${{ secrets.DATABASE_URL }}" "$IMAGE" alembic upgrade head
+
+      # Host-agnostic deploy template. Replace with the concrete rollout for the
+      # chosen platform (ssh + docker compose pull/up, fly deploy, render deploy
+      # hook, kubectl set image + rollout status, ...). The published image
+      # reference is available as $IMAGE.
+      - name: Deploy released image
+        if: ${{ vars.DEPLOY_URL != '' }}
+        env:
+          IMAGE: ${{ needs.build-and-push.outputs.image }}:${{ needs.build-and-push.outputs.version }}
+        run: |
+          echo "TEMPLATE: deploy $IMAGE to the production host."
+          echo "Examples:"
+          echo "  ssh deploy@host 'docker compose pull && docker compose up -d'"
+          echo "  flyctl deploy --image \"$IMAGE\""
+          echo "  kubectl set image deploy/axiom axiom=\"$IMAGE\" && kubectl rollout status deploy/axiom"
+
+      # Promotion gate: poll /readyz until the new revision reports healthy.
+      # A non-2xx after all retries fails the job, signalling a rollback is
+      # needed (the previous revision keeps serving on platforms with atomic
+      # rollouts). /readyz checks DB reachability, vault unlock, and background
+      # task health (server.py).
+      - name: Health gate (/readyz)
+        if: ${{ vars.DEPLOY_URL != '' }}
+        run: |
+          url="${{ vars.DEPLOY_URL }}/readyz"
+          echo "Probing ${url} ..."
+          curl --fail --silent --show-error \
+            --retry 10 --retry-delay 5 --retry-connrefused \
+            "${url}" || {
+              echo "::error::Health gate failed: ${url} did not become ready. Rollback required."
+              exit 1
+            }
+          echo "Health gate passed: service is ready."
+
+      - name: Deploy not configured
+        if: ${{ vars.DEPLOY_URL == '' }}
+        run: |
+          echo "::notice::DEPLOY_URL is not set — image published to GHCR but no"
+          echo "deploy target is configured. See the header of this workflow to"
+          echo "enable the migrate/deploy/health-gate steps."

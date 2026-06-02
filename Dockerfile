@@ -26,16 +26,27 @@ RUN pip install --upgrade pip && pip install .
 
 # Bring in the built SPA so create_app() mounts frontend/dist at "/".
 COPY --from=frontend /app/frontend/dist ./frontend/dist
+# P1-8: the source-relative parents[] lookup does not work once the package is
+# pip-installed into site-packages. Point create_app() at the absolute dist path.
+ENV AXIOM_FRONTEND_DIST=/app/frontend/dist
 
 # Alembic migrations (real migration tree is ./alembic).
 COPY alembic/ ./alembic/
 COPY alembic.ini ./alembic.ini
 
+# Entrypoint runs `alembic upgrade head` (gated by AXIOM_AUTO_MIGRATE, default 1)
+# before starting uvicorn so the migrations baked into the image are actually
+# applied at boot (P1-10/P1-11) instead of being dead weight.
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
+
 # SQLite DB lives in a mounted volume (see docker-compose.yml).
-ENV DATABASE_URL=sqlite:////data/axiom.db
+ENV DATABASE_URL=sqlite:////data/axiom.db \
+    AXIOM_AUTO_MIGRATE=1
 VOLUME ["/data"]
 
 EXPOSE 8000
 
 # Module-level ASGI app (DEP-09): uvicorn axiom.studio.server:app
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["uvicorn", "axiom.studio.server:app", "--host", "0.0.0.0", "--port", "8000"]

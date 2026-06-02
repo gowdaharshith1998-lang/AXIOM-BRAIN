@@ -32,5 +32,93 @@ services:
       retries: 5
       start_period: 20s
 
+  # ---------------------------------------------------------------------------
+  # backup — scheduled SQLite backups of the receipt chain (P1-7 / DB-004).
+  #
+  # Opt-in via the "backup" profile so it never runs in the default `up`:
+  #
+  #   # run a single backup now (recommended: invoke this from HOST cron):
+  #   AXIOM_API_TOKEN=ignored docker compose run --rm backup
+  #
+  #   # OR run the long-lived daily-loop sidecar alongside the app:
+  #   docker compose --profile backup up -d backup
+  #
+  # The DB volume is mounted READ-ONLY (the backup never writes to the live DB;
+  # `sqlite3 .backup` is a read-only snapshot operation). Backups land on the
+  # dedicated read-write `axiom-backups` volume. The scripts/ dir is mounted
+  # read-only so the same audited scripts run in the container and on the host.
+  #
+  # Prerequisite: WAL mode (the P0-5 fix). The .backup API is consistent across
+  # WAL while the app keeps writing.
+  backup:
+    image: alpine:3.20
+    profiles: ["backup"]
+    depends_on:
+      - axiom
+    # Install sqlite (and rclone only if an offsite remote is configured), then
+    # loop: back up every BACKUP_INTERVAL_SECONDS (default 86400 = 24h). For a
+    # one-shot run via `docker compose run --rm backup`, set RUN_ONCE=1.
+    command:
+      - "/bin/sh"
+      - "-c"
+      - |
+        set -eu
+        apk add --no-cache sqlite >/dev/null
+        if [ -n "${RCLONE_REMOTE:-}" ]; then apk add --no-cache rclone >/dev/null; fi
+        INTERVAL="${BACKUP_INTERVAL_SECONDS:-86400}"
+        while true; do
+          /scripts/backup_db.sh "$${AXIOM_DB_PATH:-/data/axiom.db}" "$${AXIOM_BACKUP_DIR:-/backups}" || echo "backup failed (will retry next cycle)" >&2
+          [ "$${RUN_ONCE:-0}" = "1" ] && break
+          echo "next backup in $${INTERVAL}s" >&2
+          sleep "$$INTERVAL"
+        done
+    environment:
+      AXIOM_DB_PATH: "/data/axiom.db"
+      AXIOM_BACKUP_DIR: "/backups"
+      # Keep the newest N backups (default 14 -> ~2 weeks of dailies).
+      BACKUP_RETENTION: "${BACKUP_RETENTION:-14}"
+      # Seconds between backups in loop mode (86400 = daily).
+      BACKUP_INTERVAL_SECONDS: "${BACKUP_INTERVAL_SECONDS:-86400}"
+      # Set RUN_ONCE=1 for `docker compose run --rm backup` (host-cron pattern).
+      RUN_ONCE: "${RUN_ONCE:-0}"
+      # Optional offsite copy target, e.g. "s3:my-bucket/axiom-backups".
+      # Requires an rclone config mounted at /root/.config/rclone/rclone.conf.
+      RCLONE_REMOTE: "${RCLONE_REMOTE:-}"
+    volumes:
+      - axiom-db:/data:ro
+      - axiom-backups:/backups
+      - ./scripts:/scripts:ro
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # litestream (OPTIONAL, commented out) — streaming replication alternative.
+  #
+  # Litestream continuously replicates the SQLite WAL to object storage, giving a
+  # near-zero RPO (vs. up to 24h with the daily `backup` service). It is an
+  # ALTERNATIVE to the `backup` service, not a complement — pick one strategy.
+  # Uncomment, supply a litestream.yml + cloud credentials, then:
+  #
+  #   docker compose --profile litestream up -d litestream
+  #
+  # Restore with: `litestream restore -o /data/axiom.db <replica-url>`.
+  #
+  # litestream:
+  #   image: litestream/litestream:0.3
+  #   profiles: ["litestream"]
+  #   depends_on:
+  #     - axiom
+  #   command: ["replicate"]
+  #   environment:
+  #     # Credentials for the configured replica (example: S3).
+  #     LITESTREAM_ACCESS_KEY_ID: "${LITESTREAM_ACCESS_KEY_ID:-}"
+  #     LITESTREAM_SECRET_ACCESS_KEY: "${LITESTREAM_SECRET_ACCESS_KEY:-}"
+  #   volumes:
+  #     # Same DB volume the app writes to (read-write: Litestream reads the WAL).
+  #     - axiom-db:/data
+  #     # litestream.yml maps /data/axiom.db -> your object-storage replica.
+  #     - ./litestream.yml:/etc/litestream.yml:ro
+  #   restart: unless-stopped
+
 volumes:
   axiom-db:
+  axiom-backups:

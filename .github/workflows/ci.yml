@@ -5,41 +5,87 @@ on:
     branches: [main]
   pull_request:
 
-# Cancel superseded runs on the same ref to save CI minutes.
+# Cancel superseded runs on the same ref to save CI minutes (P1-9).
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   backend:
-    name: Backend (pytest)
+    name: Backend (lint + types + pytest)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      # Pin the interpreter so CI matches the project target (3.13), not the
+      # runner default. setup-uv manages the toolchain + a warm dependency cache.
+      - name: Set up uv (Python 3.13)
+        uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.13"
-          cache: pip
-          cache-dependency-path: pyproject.toml
+          enable-cache: true
 
-      - name: Install package + dev deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+      # Fail fast if pyproject.toml and the committed uv.lock have drifted, so
+      # `--frozen` installs below are provably reproducible (P1-9 lockfile gate).
+      - name: Verify lockfile is in sync
+        run: uv lock --check
+
+      # Reproducible install straight from the committed lock — no resolution.
+      - name: Install package + dev deps (frozen)
+        run: uv sync --frozen --extra dev
+
+      - name: Lint (ruff check)
+        run: uv run ruff check src/ tests/ scripts/
+
+      - name: Lint (ruff format --check)
+        run: uv run ruff format --check src/ tests/ scripts/
+
+      - name: Type-check (mypy)
+        run: uv run mypy
 
       - name: Run tests with coverage gate
         run: |
-          pytest -p no:cacheprovider -q \
-            --maxfail=1 \
+          uv run pytest -q \
+            --maxfail=5 \
+            --junitxml=pytest-results.xml \
             --cov=axiom \
-            --cov-report=term-missing \
+            --cov-report=xml \
             --cov-fail-under=50
 
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: pytest-results.xml
+
+  alembic-check:
+    name: Alembic (migrations apply from scratch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv (Python 3.13)
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install package + deps (frozen)
+        run: uv sync --frozen
+
+      # Prove the full migration tree upgrades cleanly against an empty SQLite
+      # database — guards against migrations that only work on an existing DB
+      # (P1-9 / P1-11). `DATABASE_URL` is honoured by alembic/env.py.
+      - name: Apply migrations from scratch
+        env:
+          DATABASE_URL: sqlite:///ci-fresh.db
+        run: uv run alembic upgrade head
+
   frontend:
-    name: Frontend (vitest + build)
+    name: Frontend (vitest + tsc + build)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -51,18 +97,19 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # Reproducible install from package-lock.json (not `npm install`).
       - name: Install dependencies
         run: npm ci
 
       - name: Unit tests
-        run: npm test
+        run: npx vitest run
 
       - name: Type-check
-        run: npx tsc -b
+        run: npx tsc --noEmit
 
       - name: Build
-        run: npm run build
+        run: npx vite build
