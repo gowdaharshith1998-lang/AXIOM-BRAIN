@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 
+import { AxiomGlyph } from "@/components/AxiomGlyph";
 import { hasApiToken, setApiToken } from "@/lib/auth";
 import { AUTH_REQUIRED_EVENT } from "@/lib/http";
+import { PRODUCT_NAME } from "@/lib/product";
 
 // Auth gate overlay (P1-15).
 //
@@ -58,15 +60,15 @@ export function TokenGate() {
         className="w-full max-w-md rounded-xl border border-[#1a3550]/80 bg-[#06101b]/95 p-6 shadow-[0_0_60px_rgba(0,0,0,0.55)]"
       >
         <div className="flex items-center gap-3">
-          <div className="text-[28px] leading-none text-[#00E5D8]">⌬</div>
+          <AxiomGlyph className="h-7 w-7 text-[#00E5D8]" />
           <h3 id="token-gate-title" className="font-mono text-lg font-semibold text-[#E8F0FF]">
-            Connect to AXIOM
+            Connect to {PRODUCT_NAME}
           </h3>
         </div>
         <p className="mt-2 text-[13px] leading-snug text-[#9aa8c4]">
           {alreadyHadToken
             ? "That token was rejected. Enter a valid API token to continue."
-            : "This deployment requires an API token. Paste yours to access the company brain."}
+            : `This deployment requires an API token. Paste yours to access ${PRODUCT_NAME}.`}
         </p>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">

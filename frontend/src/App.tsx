@@ -1,30 +1,12 @@
-import { useEffect } from "react";
-import { BrowserRouter, NavLink, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
-import { Brain } from "@/components/Brain";
-import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { BrainHealthCard } from "@/components/BrainHealthCard";
-import { CommandPalette } from "@/components/CommandPalette";
+import { GraphPage } from "@/app-shell/GraphPage";
+import { StudioShell } from "@/app-shell/StudioShell";
+import { WsStatusBridge } from "@/app-shell/WsStatusBridge";
 import { ConnectorBootstrap } from "@/components/ConnectorBootstrap";
-import { ConnectorLoadingIndicator } from "@/components/ConnectorLoadingIndicator";
-import { ConnectorStatusBar } from "@/components/ConnectorStatusBar";
-import { EdgeLegend } from "@/components/EdgeLegend";
-import { EntityInspector } from "@/components/EntityInspector";
-// HIDDEN-V2: PendingApprovalsBadge removed for YC company-brain positioning. uncomment to restore.
-// import { PendingApprovalsBadge } from "@/components/PendingApprovalsBadge";
-import { QueryBar } from "@/components/QueryBar";
-import { StatusFooter } from "@/components/StatusFooter";
 import { TokenGate } from "@/components/TokenGate";
-import { BrainSocket } from "@/lib/websocket";
-import { useAuthEpoch } from "@/hooks/useAuthEpoch";
-import { wsUrl } from "@/lib/wsUrl";
 import { AgentsPage } from "@/pages/AgentsPage";
 import { ActivityPage } from "@/pages/agents/ActivityPage";
-// HIDDEN-V2: schedules/triggers/runtime/approvals pages removed for YC company-brain positioning. uncomment to restore.
-// import { ApprovalsPage } from "@/pages/agents/ApprovalsPage";
-// import { RuntimePage } from "@/pages/agents/RuntimePage";
-// import { SchedulesPage } from "@/pages/agents/SchedulesPage";
-// import { TriggersPage } from "@/pages/agents/TriggersPage";
 import { ConnectorsPage } from "@/pages/ConnectorsPage";
 import { ExplorePage } from "@/pages/ExplorePage";
 import { InsightsPage } from "@/pages/InsightsPage";
@@ -32,218 +14,6 @@ import { PassportsPage } from "@/pages/PassportsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { SkillFileDetailPage } from "@/pages/SkillFileDetailPage";
 import { SkillsPage } from "@/pages/SkillsPage";
-import { useBrainStore } from "@/state/brain.store";
-
-const navItems = [
-  ["/graph", "Graph"],
-  ["/explore", "Explore"],
-  ["/insights", "Insights"],
-  ["/agents", "Agents"],
-  ["/skills", "Skills"],
-  ["/settings", "Settings"],
-] as const;
-
-const agentNavItems = [
-  ["/graph", "Graph"],
-  ["/explore", "Explore"],
-  ["/insights", "Insights"],
-  ["/agents", "Agents"],
-  ["/skills", "Skills"],
-  // HIDDEN-V2: schedules/triggers/runtime/approvals removed for YC company-brain positioning. uncomment to restore.
-  ["/agents/activity", "Activity"],
-  ["/settings", "Settings"],
-] as const;
-
-function NavIcon({ label }: { label: string }) {
-  const common = "h-5 w-5 text-current";
-  if (label === "Graph") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M6 6h.01M18 6h.01M6 18h.01M18 18h.01M7 6h10M6 7v10M18 7v10M7 18h10" /></svg>;
-  if (label === "Agents") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M16 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4ZM8 13a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm8 1c-3.3 0-6 1.6-6 3.5V20h12v-2.5c0-1.9-2.7-3.5-6-3.5ZM8 14c-2.8 0-5 1.2-5 2.8V19h5" /></svg>;
-  if (label === "Skills") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 3 4 7v10l8 4 8-4V7l-8-4Zm0 8 8-4M12 11 4 7m8 4v10" /><path d="M8.5 13.5 12 15l3.5-1.5" /></svg>;
-  if (label === "Explore") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="8"/><path d="m15 9-2 5-5 2 2-5 5-2Z"/></svg>;
-  if (label === "Insights") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 19V8m5 11V5m5 14v-8m6 8H3"/></svg>;
-  // HIDDEN-V2: NavIcon branches for removed/absent labels (Governance/Schedules/Triggers/Runtime/Approvals) deleted; unmapped labels fall through to the default icon below.
-  if (label === "Activity") return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 12h4l2-6 4 12 2-6h4" /></svg>;
-  return <svg viewBox="0 0 24 24" className={common} fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="3.5"/><path d="m19 12 2-1-1-3-2-.3-.7-1.8 1.2-1.7-2.3-2.3-1.7 1.2-1.8-.7L12 1 9 2l-.3 2-1.8.7-1.7-1.2L2.9 5.8l1.2 1.7L3.4 9.3 1.5 9.6v3l1.9.3.7 1.8-1.2 1.7 2.3 2.3 1.7-1.2 1.8.7.3 2h3l.3-2 1.8-.7 1.7 1.2 2.3-2.3-1.2-1.7.7-1.8 2-.3Z"/></svg>;
-}
-
-function isRouteHotkeyTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return !target.closest(
-    'input, textarea, select, button, a, [contenteditable="true"], [contenteditable=""], [role="button"], [role="link"], [role="textbox"], [role="combobox"]',
-  );
-}
-
-function StudioShell() {
-  const connectionStatus = useBrainStore((s) => s.connectionStatus);
-  const location = useLocation();
-  const navigate = useNavigate();
-  const isGraphRoute = location.pathname === "/graph";
-  const isAgentsRoute = location.pathname.startsWith("/agents");
-  const isSkillsRoute = location.pathname.startsWith("/skills");
-  const isExploreRoute = location.pathname.startsWith("/explore");
-  const isInsightsRoute = location.pathname === "/insights";
-  const isSettingsRoute = location.pathname.startsWith("/settings");
-  const hasCompactHeader = isInsightsRoute;
-  const shellNavItems = isAgentsRoute ? agentNavItems : navItems;
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        const input = document.querySelector<HTMLInputElement>('input[type="search"], input[placeholder*="Search" i]');
-        if (input) {
-          event.preventDefault();
-          input.focus();
-        }
-      }
-      if (event.defaultPrevented || !isRouteHotkeyTarget(event.target)) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const key = event.key.toLowerCase();
-      if (key === "g") navigate("/graph");
-      if (key === "a") navigate("/agents");
-      if (key === "e") navigate("/explore");
-      if (key === "i") navigate("/insights");
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [navigate]);
-
-  return (
-    <div className="studio-root h-screen w-screen overflow-hidden text-[#dce8ff]">
-      <aside className="studio-rail fixed inset-y-0 left-0 z-30 w-[228px] border-r border-[#162a45]">
-        <div className="h-[90px] border-b border-[#162a45] px-4 py-5">
-          <div className="flex items-center gap-3">
-            <div className="text-[34px] leading-none text-[#00bfff]">⌬</div>
-            <div>
-              <div className="text-[29px] leading-none tracking-[0.13em] text-[#f3f7ff]">AXIOM</div>
-              <div className="mt-1 text-[13px] text-[#9aaac0]">Company Brain</div>
-            </div>
-          </div>
-        </div>
-        <nav className="px-2 py-5">
-          {shellNavItems.map(([to, label]) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === "/agents" || to === "/graph"}
-              className={({ isActive }) =>
-                `mb-1 flex h-[52px] items-center gap-4 rounded-lg px-4 text-[18px] transition ${isActive ? "border border-[#1f5db0] bg-[#10266a]/70 text-[#eef5ff] shadow-[inset_3px_0_0_#2389ff]" : "text-[#aab5c7] hover:bg-[#0b1930]"}`
-              }
-            >
-              <NavIcon label={label} />
-              {label}
-            </NavLink>
-          ))}
-        </nav>
-        {isAgentsRoute ? (
-          <div className="absolute bottom-2 left-0 right-0 border-t border-[#162a45] px-3 py-4">
-            <div className="mb-3 rounded-lg border border-[#213c5e] bg-[#071225]/90 p-4">
-              <div className="text-[13px] text-[#eef6ff]">AXIOM Company Brain</div>
-              <div className="axiom-grid-preview my-4 h-[94px] rounded-lg" />
-              <div className={`mx-auto flex h-[28px] w-[104px] items-center justify-center gap-2 rounded-md text-[12px] ${connectionStatus === "live" ? "bg-[#05271f] text-[#2af8a9]" : "bg-[#1c2636] text-[#9fb0c8]"}`}>
-                <span className={`h-2 w-2 rounded-full ${connectionStatus === "live" ? "bg-[#20e99b]" : "bg-[#7d8ba0]"}`} />
-                {connectionStatus === "live" ? "Connected" : connectionStatus === "syncing" ? "Syncing" : "Offline"}
-              </div>
-            </div>
-            <div className="rounded-lg border border-[#213c5e] bg-[#071225]/90 p-3">
-              <div className="text-[13px] text-[#eef6ff]">AXIOM</div>
-            </div>
-          </div>
-        ) : (
-          <div className="absolute bottom-2 left-0 right-0 border-t border-[#162a45] px-4 py-4">
-            <div className="rounded-lg border border-[#213c5e] bg-[#071225]/90 p-3">
-              <div className="text-[13px] text-[#eef6ff]">Axiom Operator</div>
-              <div className="text-[12px] text-[#8ba8cb]">Platform Admin</div>
-            </div>
-          </div>
-        )}
-      </aside>
-
-      {!isExploreRoute && !isAgentsRoute && !isSkillsRoute && !isGraphRoute ? (
-        <header className={`fixed left-[228px] right-0 top-0 z-30 flex items-start justify-between border-b border-[#132339] px-8 ${hasCompactHeader ? "h-[60px] pt-4" : "h-[112px] pt-7"}`}>
-          {hasCompactHeader ? (
-            <div className="absolute left-1/2 top-5 -translate-x-1/2 text-[15px] text-[#b9c1cf]">
-              {"Unified intelligence. Informed decisions. Reduced risk."}
-            </div>
-          ) : (
-            <div>
-              <div className="text-[28px] leading-none tracking-[0.22em] text-[#eef5ff]">{isSettingsRoute ? "SETTINGS" : "STUDIO"}</div>
-              <div className="mt-2 text-[12px] text-[#7fa2c8]">Think in graph. Act with agents.</div>
-            </div>
-          )}
-          <div className="ml-auto mt-[-4px] flex items-center gap-2">
-            <ConnectorLoadingIndicator />
-            {/* HIDDEN-V2: PendingApprovalsBadge removed for YC company-brain positioning. */}
-            <div className="flex h-[38px] items-center gap-2 rounded-lg border border-[#1d3452] bg-[#071328] px-4 text-[16px] text-[#14e0a7]">
-              <span className={`h-2.5 w-2.5 rounded-full ${connectionStatus === "live" ? "bg-[#16f0a9]" : "bg-[#5f728f]"}`} />
-              LIVE
-            </div>
-          </div>
-        </header>
-      ) : null}
-
-      <main
-        className={
-          isGraphRoute
-            ? "fixed inset-y-0 right-0 left-[228px] z-0 overflow-hidden"
-            : isAgentsRoute || isSkillsRoute
-              ? "fixed inset-0 left-[228px] z-0 overflow-y-auto"
-            : isExploreRoute
-              ? "fixed inset-0 left-[228px] z-0 overflow-y-auto"
-            : hasCompactHeader
-              ? "fixed inset-0 left-[228px] top-[60px] z-0 overflow-y-auto"
-            : "fixed inset-0 left-[228px] top-[112px] z-0 overflow-y-auto"
-        }
-      >
-        <Outlet />
-      </main>
-    </div>
-  );
-}
-
-function GraphPage() {
-  return (
-    <>
-      <ConnectorStatusBar />
-      <BrainHealthCard />
-      <div className="absolute inset-0">
-        <ErrorBoundary label="the 3D brain view">
-          <Brain />
-        </ErrorBoundary>
-      </div>
-      <QueryBar />
-      <EdgeLegend />
-      <EntityInspector />
-      <StatusFooter />
-      <CommandPalette />
-    </>
-  );
-}
-
-function WsStatusBridge() {
-  const setConnectionStatus = useBrainStore((s) => s.setConnectionStatus);
-  const applyEvent = useBrainStore((s) => s.applyEvent);
-  // Re-create the socket whenever the auth token changes so it reconnects
-  // with the auth subprotocol attached (otherwise the first connect predates
-  // the token and keeps retrying unauthenticated).
-  const authEpoch = useAuthEpoch();
-
-  useEffect(() => {
-    const url = wsUrl("/ws/brain");
-    const socket = new BrainSocket(url);
-    socket.onStatus(setConnectionStatus);
-    const off = socket.on((event) => {
-      applyEvent(event);
-      window.dispatchEvent(new CustomEvent("axiom:brain-event", { detail: event }));
-    });
-    socket.start();
-    return () => {
-      off();
-      socket.close();
-    };
-  }, [applyEvent, setConnectionStatus, authEpoch]);
-
-  return null;
-}
 
 export function App() {
   return (
@@ -258,7 +28,6 @@ export function App() {
           <Route path="/settings/passports" element={<PassportsPage />} />
           <Route path="/settings/connectors" element={<ConnectorsPage />} />
           <Route path="/agents" element={<AgentsPage />} />
-          {/* HIDDEN-V2: schedules/triggers/runtime/approvals routes removed for YC company-brain positioning. Direct hits fall through to the * redirect. uncomment to restore. */}
           <Route path="/agents/activity" element={<ActivityPage />} />
           <Route path="/skills" element={<SkillsPage />} />
           <Route path="/skills/:name" element={<SkillFileDetailPage />} />

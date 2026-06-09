@@ -1,3 +1,5 @@
+import { PRODUCT_SHORT_NAME, PRODUCT_TAGLINE } from "@/lib/product";
+
 export function BrandMark() {
   return (
     <div className="font-mono text-white/85">
@@ -10,9 +12,9 @@ export function BrandMark() {
             strokeWidth="1.5"
           />
         </svg>
-        <span className="text-sm font-semibold tracking-[0.32em]">AXIOM</span>
+        <span className="text-sm font-semibold tracking-[0.32em]">{PRODUCT_SHORT_NAME}</span>
       </div>
-      <div className="mt-1 text-[10px] tracking-normal text-white/45">Your company, brought to life</div>
+      <div className="mt-1 text-[10px] tracking-normal text-white/45">{PRODUCT_TAGLINE}</div>
     </div>
   );
 }

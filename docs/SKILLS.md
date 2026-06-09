@@ -17,7 +17,9 @@ Optional keys:
 
 - `trigger_config`
 - `requires_approval`
-- `calibra_threshold`
+- `confidence_threshold`
+
+Reserved compatibility fields may appear in older generated artifacts, but they are not evidence of an integrated external calibration service.
 
 Example:
 

@@ -1165,3 +1165,7 @@ These must be ruled before Phase 1 proceeds.
 **Rationale:** Same logic as Q7. DB for queryability; FS for portability and `mcp.load_skill` external usage.
 
 **Phase that implements:** Phase 8 (writing both targets); Phase 2 reserves the table.
+> Historical design reference. This file preserves the original Phase 0 contract
+> and may contain aspirational or deferred items. For current public positioning,
+> product naming, and implementation status, use `README.md`, `docs/PHASES.md`,
+> and `docs/ROADMAP.md`.

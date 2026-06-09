@@ -12,6 +12,6 @@ describe("BrandMark", () => {
 
   it("renders the company-brain tagline", () => {
     render(<BrandMark />);
-    expect(screen.getAllByText("Your company, brought to life").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Company knowledge graph").length).toBeGreaterThanOrEqual(1);
   });
 });

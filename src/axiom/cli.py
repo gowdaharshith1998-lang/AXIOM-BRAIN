@@ -12,6 +12,13 @@ from axiom.ingest.pipeline import IngestPipeline
 from axiom.sources.synthetic import SyntheticSource
 from axiom.storage.db import build_engine, run_boot_migration
 
+DEFAULT_API_BASE_URL = "http://127.0.0.1:8000"
+DEFAULT_DB_URL = "sqlite:///./axiom.db"
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_LIVE_RATE = 0.125
+DEFAULT_PORT = 8000
+LOOPBACK_HOSTS = {DEFAULT_HOST, "localhost"}
+
 
 def cmd_ingest(args: argparse.Namespace) -> None:
     # P0-5/P1-11: route through the central factory so the SQLite PRAGMAs
@@ -53,11 +60,12 @@ def cmd_serve(args: argparse.Namespace) -> None:
     # P0-3: if auth is required but no token is configured, never expose a
     # non-loopback interface fail-open. (In production create_app already
     # exits; this guards misconfigured non-production hosts.)
-    if auth_required() and auth_is_misconfigured() and host not in {"127.0.0.1", "localhost"}:
+    if auth_required() and auth_is_misconfigured() and host not in LOOPBACK_HOSTS:
         logging.getLogger("axiom.cli").warning(
-            "auth required but AXIOM_API_TOKEN unset; binding loopback (127.0.0.1) only"
+            "auth required but AXIOM_API_TOKEN unset; binding loopback (%s) only",
+            DEFAULT_HOST,
         )
-        host = "127.0.0.1"
+        host = DEFAULT_HOST
     uvicorn.run(app, host=host, port=args.port, log_level="info")
 
 
@@ -65,7 +73,7 @@ def cmd_vault_init(args: argparse.Namespace) -> None:
     """Generate a fresh Fernet master key and print copy/paste instructions.
 
     Refuses to overwrite if ``AXIOM_VAULT_KEY`` is already set in the current
-    environment — rotation is destructive (existing ciphertext becomes
+    environment; rotation is destructive (existing ciphertext becomes
     unreadable) and must be a deliberate manual step.
     """
     from axiom.vault import generate_master_key
@@ -130,21 +138,21 @@ def main() -> None:
 
     p_ingest = sub.add_parser("ingest", help="ingest from a source into local db")
     p_ingest.add_argument("--source", default="synthetic")
-    p_ingest.add_argument("--db-url", default="sqlite:///./axiom.db")
+    p_ingest.add_argument("--db-url", default=DEFAULT_DB_URL)
     p_ingest.set_defaults(func=cmd_ingest)
 
     p_serve = sub.add_parser("serve", help="run the studio API + WebSocket server")
-    p_serve.add_argument("--host", default="127.0.0.1")
-    p_serve.add_argument("--port", type=int, default=8000)
-    p_serve.add_argument("--db-url", default="sqlite:///./axiom.db")
+    p_serve.add_argument("--host", default=DEFAULT_HOST)
+    p_serve.add_argument("--port", type=int, default=DEFAULT_PORT)
+    p_serve.add_argument("--db-url", default=DEFAULT_DB_URL)
     p_serve.add_argument("--live", action="store_true")
-    p_serve.add_argument("--rate", type=float, default=0.125)
+    p_serve.add_argument("--rate", type=float, default=DEFAULT_LIVE_RATE)
     p_serve.add_argument("--pause-after", type=int, default=None)
     p_serve.set_defaults(func=cmd_serve)
 
     p_mcp = sub.add_parser("mcp-serve", help="run AXIOM MCP server over stdio")
-    p_mcp.add_argument("--db-url", default="sqlite:///./axiom.db")
-    p_mcp.add_argument("--api-base-url", default="http://127.0.0.1:8000")
+    p_mcp.add_argument("--db-url", default=DEFAULT_DB_URL)
+    p_mcp.add_argument("--api-base-url", default=DEFAULT_API_BASE_URL)
     p_mcp.set_defaults(func=cmd_mcp_serve)
 
     p_vault = sub.add_parser("vault", help="manage the encrypted secrets vault")
@@ -158,7 +166,7 @@ def main() -> None:
     p_vault_status = vault_sub.add_parser(
         "status", help="report vault lock state and per-provider secret counts"
     )
-    p_vault_status.add_argument("--db-url", default="sqlite:///./axiom.db")
+    p_vault_status.add_argument("--db-url", default=DEFAULT_DB_URL)
     p_vault_status.set_defaults(func=cmd_vault_status)
 
     args = parser.parse_args()
