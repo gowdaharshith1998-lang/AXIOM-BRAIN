@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import stat
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,7 +27,15 @@ from axiom.vault.crypto import ENV_VAR
 @pytest.fixture(autouse=True)
 def isolated_signing_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     ed25519_signer.clear_keypair_cache()
+
+
+def _assert_posix_mode(path: Path, expected: int) -> None:
+    if os.name == "nt":
+        assert path.exists()
+        return
+    assert stat.S_IMODE(path.stat().st_mode) == expected
 
 
 @pytest.fixture()
@@ -75,8 +84,8 @@ def test_keypair_creation_writes_correct_modes() -> None:
     assert keypair.public_key_bytes
     assert private_path.exists()
     assert public_path.exists()
-    assert stat.S_IMODE(private_path.stat().st_mode) == 0o600
-    assert stat.S_IMODE(public_path.stat().st_mode) == 0o644
+    _assert_posix_mode(private_path, 0o600)
+    _assert_posix_mode(public_path, 0o644)
 
 
 def test_load_existing_keypair_returns_same_keys() -> None:
@@ -100,7 +109,9 @@ def test_sign_verify_roundtrip() -> None:
 def test_sign_verify_wrong_pubkey_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     payload = b'{"action":"read"}'
     signature = ed25519_signer.sign(payload)
-    monkeypatch.setenv("HOME", str(tmp_path / "other-home"))
+    other_home = tmp_path / "other-home"
+    monkeypatch.setenv("HOME", str(other_home))
+    monkeypatch.setenv("USERPROFILE", str(other_home))
     ed25519_signer.clear_keypair_cache()
     wrong = ed25519_signer.generate_keypair()
 

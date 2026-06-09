@@ -2,7 +2,12 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
 .coverage
+coverage.xml
+htmlcov/
+pytest-results.xml
 .claude-flow/
 .swarm/
 src/*.egg-info/

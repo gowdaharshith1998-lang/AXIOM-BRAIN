@@ -38,6 +38,9 @@ dev = [
     "types-PyYAML",
 ]
 
+[project.scripts]
+axiom = "axiom.cli:main"
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

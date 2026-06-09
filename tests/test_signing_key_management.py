@@ -8,6 +8,7 @@ and the 0600 permissions on a generated on-disk PEM.
 from __future__ import annotations
 
 import base64
+import os
 import stat
 from pathlib import Path
 
@@ -23,10 +24,18 @@ from axiom.vault.store import store_secret_with_session
 @pytest.fixture(autouse=True)
 def _isolated_signing_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.delenv("AXIOM_ENV", raising=False)
     monkeypatch.delenv(ed25519_signer.SEED_ENV_VAR, raising=False)
     monkeypatch.delenv(ed25519_signer.VAULT_NAME_ENV_VAR, raising=False)
     ed25519_signer.clear_keypair_cache()
+
+
+def _assert_posix_mode(path: Path, expected: int) -> None:
+    if os.name == "nt":
+        assert path.exists()
+        return
+    assert stat.S_IMODE(path.stat().st_mode) == expected
 
 
 def _fresh_seed_b64() -> str:
@@ -161,7 +170,7 @@ def test_generated_pem_has_0600_perms() -> None:
     ed25519_signer.load_or_create_keypair()
     private_path = Path.home() / ".axiom" / "signing_key.pem"
     assert private_path.exists()
-    assert stat.S_IMODE(private_path.stat().st_mode) == 0o600
+    _assert_posix_mode(private_path, 0o600)
 
 
 def test_on_disk_load_after_generation_roundtrips() -> None:

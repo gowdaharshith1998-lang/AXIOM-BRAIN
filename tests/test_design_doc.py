@@ -25,20 +25,20 @@ def test_design_doc_exists():
 
 
 def test_design_doc_has_required_sections():
-    content = DESIGN_PATH.read_text()
+    content = DESIGN_PATH.read_text(encoding="utf-8")
     for section in REQUIRED_SECTIONS:
         assert section in content, f"Missing required section: {section}"
 
 
 def test_design_doc_no_omnix_terminology():
-    content = DESIGN_PATH.read_text().lower()
+    content = DESIGN_PATH.read_text(encoding="utf-8").lower()
     forbidden = ["omnix", "x-ray", "xray", "constellation", "code intelligence"]
     for term in forbidden:
         assert term not in content, f"Found forbidden term: {term}"
 
 
 def test_design_doc_uses_axiom_naming():
-    content = DESIGN_PATH.read_text()
+    content = DESIGN_PATH.read_text(encoding="utf-8")
     assert "AXIOM" in content
     assert "Calibra" in content
     assert "AXIOM-BRAIN" in content

@@ -4,6 +4,16 @@
 
 **Repo name:** AXIOM-BRAIN (repository identifier; product-facing name is AXIOM / AXIOM Control.)
 
+## Quick links
+
+- [Production runbook](docs/PRODUCTION.md)
+- [Project phases](docs/PHASES.md)
+- [Connector guide](docs/CONNECTORS.md)
+- [Policy guide](docs/POLICIES.md)
+- [Skills guide](docs/SKILLS.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+
 ---
 
 ## What's built today
@@ -50,23 +60,72 @@ Earlier phase checklists in older docs are superseded by **Phase 5.12** as the a
 
 AXIOM-BRAIN is a **FastAPI** application backed by **SQLite** (configurable via SQLAlchemy **`DATABASE_URL`**) with **Alembic** migrations. Ingestion pulls from **synthetic fixtures and a timed synthetic emitter**, runs a **keyword-first classifier** with an **optional Anthropic** LLM tier for ambiguity, and broadcasts changes through an in-memory **WebSocket hub** with **sequence-based replay**. The **React + Three.js** frontend loads entities and edges from the API, subscribes to the brain socket, and renders an interactive **entity graph** with **⌘K search** backed by server-side string ranking. Nav and some footer controls are **presentational** until later phases wire routing and governance surfaces.
 
+## Project structure
+
+```text
+.
+├── src/axiom/          # FastAPI app, storage, ingest, MCP, governance, connectors
+├── frontend/           # React + Vite + Three.js Studio frontend
+├── tests/              # Backend pytest suite
+├── alembic/            # Database migrations
+├── policies/           # Starter policy pack
+├── fixtures/           # Synthetic company data
+├── docs/               # Architecture, production, audit, and roadmap docs
+└── .github/            # CI/CD, dependency, security, and contribution automation
+```
+
+## Getting started
+
+Prerequisites:
+
+- Python 3.13
+- `uv`
+- Node.js 22 and npm
+
+Install backend dependencies:
+
+```bash
+uv sync --frozen --extra dev
+```
+
+Start the backend API and WebSocket server:
+
+```bash
+uv run axiom serve --host 127.0.0.1 --port 8000
+```
+
+For a live synthetic demo stream:
+
+```bash
+uv run axiom serve --host 127.0.0.1 --port 8000 --live
+```
+
+Install and start the frontend:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Open the Vite URL, typically `http://localhost:5173`. The frontend uses relative API paths in production and expects the local API on `http://127.0.0.1:8000` during development.
+
 ---
 
 ## Demo
 
 There is **no reliable hosted demo URL** in-repo today (a previously linked site has been observed unreachable from the public internet). **Run locally:**
 
-Backend (from repo root, after installing the package and dependencies — see project docs / `pyproject.toml`):
+Backend:
 
 ```bash
-# Example — align with your documented entrypoint
-uvicorn axiom.studio.server:app --factory --host 127.0.0.1 --port 8000
+uv run axiom serve --host 127.0.0.1 --port 8000 --live
 ```
 
 Frontend:
 
 ```bash
-cd frontend && npm install && npm run dev
+cd frontend && npm ci && npm run dev
 ```
 
 Open the Vite URL (typically `http://localhost:5173`). The UI expects the API at **`http://127.0.0.1:8000`** unless you configure otherwise.
@@ -96,9 +155,43 @@ Copy `.env.example` to `.env` and fill in any keys you need. Notable values:
 
 ---
 
+## Development checks
+
+Backend checks mirror CI:
+
+```bash
+uv lock --check
+uv sync --frozen --extra dev
+uv run ruff check src/ tests/ scripts/
+uv run ruff format --check src/ tests/ scripts/
+uv run mypy
+uv run pytest -q --maxfail=5 --cov=axiom --cov-report=xml --cov-fail-under=50
+uv run alembic upgrade head
+```
+
+Frontend checks mirror CI:
+
+```bash
+cd frontend
+npm ci
+npm test
+npm run lint
+npm run build
+```
+
+---
+
 ## Calibra
 
 **Calibra** (external Bayesian calibration package) is **not** imported in early phases. Integration is planned for **Phase 7**, per the product roadmap.
+
+---
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, branch workflow, and PR expectations.
+
+Please do not open public issues for suspected vulnerabilities. See [SECURITY.md](SECURITY.md) for private reporting guidance and supported-version expectations.
 
 ---
 
