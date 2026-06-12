@@ -41,6 +41,8 @@ The current system does not yet include:
 Status: active
 
 - Keep README, phases, and roadmap consistent with AXIOM Brain naming.
+- Keep `docs/README.md` as the first stop for repository documentation.
+- Keep `docs/HISTORICAL.md` as the explicit archive/conflict guide.
 - Keep historical audit and design documents labeled as historical when they are not current truth.
 - Keep setup, test, build, and deployment commands aligned with CI.
 - Keep community health files current.
@@ -126,6 +128,7 @@ Frontend:
 ```bash
 cd frontend
 npm ci
+npm audit --audit-level=moderate
 npm test
 npm run lint
 npm run build

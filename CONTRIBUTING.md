@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for improving AXIOM. This repository is a full-stack Python/TypeScript system, so good contributions keep backend, frontend, documentation, and operational behavior in sync.
+Thanks for improving AXIOM Brain. This repository is a full-stack Python/TypeScript system, so good contributions keep backend, frontend, documentation, and operational behavior in sync.
 
 ## Development Setup
 
@@ -60,6 +60,7 @@ Run frontend checks for UI or client changes:
 
 ```bash
 cd frontend
+npm audit --audit-level=moderate
 npm test
 npm run lint
 npm run build

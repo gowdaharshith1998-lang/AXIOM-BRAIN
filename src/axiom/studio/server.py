@@ -203,6 +203,7 @@ from axiom.studio.auth import (
     websocket_is_authenticated,
 )
 from axiom.studio.brain_ask_api import router as brain_ask_router
+from axiom.studio.health import readiness_failures, refresh_task_liveness
 from axiom.studio.llm_keys_api import router as llm_keys_router
 from axiom.studio.rate_limit import (
     RateLimitExceededError,
@@ -732,7 +733,7 @@ def _spa_explicitly_configured() -> bool:
     """Whether the operator explicitly asked for SPA serving.
 
     Readiness (P1-8 / D.3) only fails on a missing SPA when serving was
-    explicitly configured — AXIOM_FRONTEND_DIST points at a dist, or
+    explicitly configured - AXIOM_FRONTEND_DIST points at a dist, or
     AXIOM_SERVE_SPA=1. The Docker image sets AXIOM_FRONTEND_DIST, so a broken
     container image still fails /readyz. Backend-only environments (CI, API
     deployments, the test suite) configure neither and are healthy without a
@@ -747,7 +748,7 @@ def _resolve_frontend_dist() -> Path | None:
     """Locate the built SPA directory (P1-8 / DEP-06).
 
     Resolution order:
-      1. ``AXIOM_FRONTEND_DIST`` (absolute path) — the container path. This is the
+      1. ``AXIOM_FRONTEND_DIST`` (absolute path) - the container path. This is the
          robust answer because the source-relative lookup below is brittle once
          the package is pip-installed into site-packages (the ``parents[3]`` walk
          no longer lands on the repo root).
@@ -763,10 +764,8 @@ def _resolve_frontend_dist() -> Path | None:
         if candidate.is_dir():
             log.info("SPA dist resolved from AXIOM_FRONTEND_DIST: %s", candidate)
             return candidate
-        log.warning(
-            "AXIOM_FRONTEND_DIST=%s does not exist; falling back to source-relative lookup",
-            configured,
-        )
+        log.warning("AXIOM_FRONTEND_DIST=%s does not exist", configured)
+        return None
     fallback = Path(__file__).resolve().parents[3] / "frontend" / "dist"
     if fallback.is_dir():
         log.info("SPA dist resolved from source-relative path: %s", fallback)
@@ -1190,48 +1189,7 @@ def create_app(
     @app.get("/readyz")
     def readyz() -> Response:
         """Readiness probe (OBS-03): DB reachable, vault unlocked, tasks healthy."""
-        from sqlalchemy import text
-
-        failed: list[str] = []
-
-        # 1) Database reachable.
-        try:
-            with session_local() as session:
-                session.execute(text("SELECT 1"))
-        except Exception as exc:  # noqa: BLE001
-            failed.append(f"db: {exc}")
-
-        # 2) Vault unlocked.
-        if not getattr(app.state, "vault_unlocked", False):
-            failed.append("vault: locked")
-
-        # 3) Each background task must not have died with an exception.
-        for attr in _BG_TASK_ATTRS:
-            task = getattr(app.state, attr, None)
-            if task is None:
-                continue
-            done = getattr(task, "done", None)
-            if callable(done) and done():
-                if getattr(task, "cancelled", lambda: False)():
-                    continue
-                try:
-                    task_exc = task.exception()
-                except Exception:  # noqa: BLE001
-                    continue
-                if task_exc is not None:
-                    failed.append(f"task {attr}: {task_exc!r}")
-
-        # 4) SPA must be mounted when serving was EXPLICITLY configured
-        # (P1-8 / D.3) — AXIOM_FRONTEND_DIST set (the Docker image does this) or
-        # AXIOM_SERVE_SPA=1. A broken container image therefore still fails
-        # readiness, while backend-only environments (CI, API-only deploys, the
-        # test suite) are healthy without a frontend build.
-        if (
-            getattr(app.state, "spa_explicitly_configured", False)
-            and getattr(app.state, "spa_serve_enabled", False)
-            and not getattr(app.state, "spa_mounted", False)
-        ):
-            failed.append("spa: configured but not mounted (check AXIOM_FRONTEND_DIST)")
+        failed = readiness_failures(app, session_local, _BG_TASK_ATTRS)
 
         status = "ok" if not failed else "unavailable"
         body = {"status": status, "checks": {"failed": failed}}
@@ -1245,15 +1203,7 @@ def create_app(
                 "metrics unavailable: prometheus-client is not installed",
                 status_code=200,
             )
-        # Refresh the per-background-task liveness gauge.
-        if BG_TASK_ALIVE is not None:
-            for attr in _BG_TASK_ATTRS:
-                task = getattr(app.state, attr, None)
-                alive = 0.0
-                if task is not None:
-                    done = getattr(task, "done", None)
-                    alive = 0.0 if (callable(done) and done()) else 1.0
-                BG_TASK_ALIVE.labels(task=attr).set(alive)
+        refresh_task_liveness(app, _BG_TASK_ATTRS, BG_TASK_ALIVE)
         return Response(_prom_generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     @app.get("/api/health")

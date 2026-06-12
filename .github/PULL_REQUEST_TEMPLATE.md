@@ -18,6 +18,7 @@
 - [ ] `uv run ruff format --check src/ tests/ scripts/`
 - [ ] `uv run mypy`
 - [ ] `uv run pytest -q --maxfail=5 --cov=axiom --cov-report=xml --cov-fail-under=50`
+- [ ] `cd frontend && npm audit --audit-level=moderate`
 - [ ] Frontend tests/build, if applicable
 - [ ] Docs updated, if applicable
 

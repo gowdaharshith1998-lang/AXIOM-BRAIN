@@ -2,6 +2,8 @@
 
 This document is the current phase guide for AXIOM Brain. Older audit, rebuild, and pitch documents in `docs/` are preserved as historical context unless they are explicitly linked from this file as current.
 
+For the full documentation map, see the [`docs/` index](README.md). For archive precedence and conflict rules, see the [historical docs guide](HISTORICAL.md).
+
 ## Product Boundary
 
 | Name | Meaning |
@@ -50,6 +52,8 @@ Status: complete as of `0.2.0`
 Status: in progress
 
 - Keep README setup commands aligned with the installed `axiom` CLI and CI workflow.
+- Keep `docs/README.md` as the documentation landing page.
+- Keep `docs/HISTORICAL.md` as the archive map for dated audits and rebuild briefs.
 - Separate AXIOM Brain product naming from AXIOM Control company/product context.
 - Keep `AXIOM-BRAIN` as a repository identifier, not a user-facing product name.
 - Keep historical docs clearly separated from current public orientation docs.
@@ -108,3 +112,4 @@ When historical documents conflict with this file or the README, use this file a
 | 2026-06-09 | Keep `axiom` as the CLI/package/MCP namespace. | It is already wired through code, tests, docs, and environment variables. |
 | 2026-06-09 | Treat `0.2.0` as the production-hardening baseline. | Matches `CHANGELOG.md` and current CI/deploy/runbook state. |
 | 2026-06-09 | Use `uv run axiom serve` for local backend startup. | The repository exposes an installed CLI entry point. |
+| 2026-06-12 | Add a docs index and historical-doc guide. | Keeps current docs easy to navigate without deleting audit history. |

@@ -1,13 +1,13 @@
 # Changelog
 
-All notable changes to AXIOM are documented in this file.
+All notable changes to AXIOM Brain are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.2.0] - 2026-06-01
 
-Production-hardening release. AXIOM can now be deployed as a real service: the
+Production-hardening release. AXIOM Brain can now be deployed as a real service: the
 Docker image boots with migrations, refuses to run insecurely, and survives
 concurrent writers. Verified end-to-end on the production container with a
 live browser session.
@@ -17,7 +17,7 @@ live browser session.
 - **One-command production deploy**: multi-stage Dockerfile builds the SPA and
   backend into one image; the entrypoint applies Alembic migrations at boot.
   `docker compose up` gives a working, authenticated company brain.
-- **Sign-in for the web app**: the SPA now ships a TokenGate — paste an API
+- **Sign-in for the web app**: the SPA now ships a TokenGate - paste an API
   token once and every HTTP call and WebSocket carries your credentials
   (in-memory by default, per-tab remember option).
 - **CI/CD pipelines**: GitHub Actions CI (lock-drift gate, ruff/mypy/pytest with

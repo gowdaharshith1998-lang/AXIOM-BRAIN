@@ -1,4 +1,4 @@
-# Dependabot — automated dependency update PRs (audit DEP-003).
+# Dependabot - automated dependency update PRs (audit DEP-003).
 # Covers the three ecosystems CI builds from: Python (uv.lock via pip),
 # npm (frontend/package-lock.json), and the GitHub Actions in .github/workflows.
 version: 2

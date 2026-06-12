@@ -165,6 +165,7 @@ Frontend:
 ```bash
 cd frontend
 npm ci
+npm audit --audit-level=moderate
 npm test
 npm run lint
 npm run build
@@ -213,12 +214,14 @@ See [docs/PHASES.md](docs/PHASES.md) for expanded phase notes.
 
 ## Useful Documentation
 
+- [Documentation index](docs/README.md)
 - [Production runbook](docs/PRODUCTION.md)
 - [Project phases](docs/PHASES.md)
 - [Current roadmap](docs/ROADMAP.md)
 - [Connector guide](docs/CONNECTORS.md)
 - [Policy guide](docs/POLICIES.md)
 - [Skills guide](docs/SKILLS.md)
+- [Historical docs guide](docs/HISTORICAL.md)
 - [Contributing guide](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 

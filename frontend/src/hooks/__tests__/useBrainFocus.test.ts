@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useBrainFocus } from "@/hooks/useBrainFocus";
 import { useBrainStore } from "@/state/brain.store";
@@ -22,6 +22,12 @@ function resetStore() {
 }
 
 describe("useBrainFocus (focus state machine)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    resetStore();
+    window.history.replaceState(null, "", "/");
+  });
+
   it("initial state is AMBIENT with clusterId=null and entityId=null", () => {
     resetStore();
     const { result } = renderHook(() => useBrainFocus());
