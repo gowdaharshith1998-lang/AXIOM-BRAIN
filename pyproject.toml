@@ -22,7 +22,7 @@ dependencies = [
     # itself) — declare them explicitly so clean installs reproduce a working build.
     "numpy>=1.26",
     "scipy>=1.11",
-    "mcp==1.9.4",
+    "mcp==1.27.2",
     "prometheus-client>=0.20",
 ]
 
