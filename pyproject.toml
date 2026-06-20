@@ -17,7 +17,7 @@ dependencies = [
     "requests",
     "google-auth",
     "uuid-utils",
-    "networkx>=3.0",
+    "networkx>=3.6.1",
     # networkx.pagerank delegates to scipy/numpy at runtime (no hard dep in networkx
     # itself) — declare them explicitly so clean installs reproduce a working build.
     "numpy>=1.26",
