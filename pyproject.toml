@@ -21,7 +21,7 @@ dependencies = [
     # networkx.pagerank delegates to scipy/numpy at runtime (no hard dep in networkx
     # itself) — declare them explicitly so clean installs reproduce a working build.
     "numpy>=1.26",
-    "scipy>=1.11",
+    "scipy>=1.18.0",
     "mcp==1.9.4",
     "prometheus-client>=0.20",
 ]
